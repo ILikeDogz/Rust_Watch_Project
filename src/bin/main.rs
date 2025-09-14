@@ -1,35 +1,94 @@
+//! GPIO interrupt
+//!
+//! This prints "Interrupt" when the boot button is pressed.
+//! It also blinks an LED like the blinky example.
+//!
+//! The following wiring is assumed:
+//! - LED => GPIO2
+//! - BUTTON => GPIO15
+
+//% CHIPS: esp32 esp32c2 esp32c3 esp32c6 esp32h2 esp32s2 esp32s3
+//% FEATURES: esp-hal/unstable
+
 #![no_std]
 #![no_main]
-#![deny(
-    clippy::mem_forget,
-    reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
-    holding buffers for the duration of a data transfer."
-)]
 
-use esp_hal::clock::CpuClock;
-use esp_hal::main;
-use esp_hal::time::{Duration, Instant};
+use core::cell::RefCell;
 
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
+use critical_section::Mutex;
+use esp_backtrace as _;
+use esp_hal::{
+    delay::Delay,
+    gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig, Pull},
+    handler,
+    main,
+    ram,
+};
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
+
+static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
 
 #[main]
 fn main() -> ! {
-    // generator version: 0.5.0
+    let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let _peripherals = esp_hal::init(config);
+    // Set GPIO2 as an output, and set its state high initially.
+    let mut io = Io::new(peripherals.IO_MUX);
+    io.set_interrupt_handler(handler);
+
+    let mut led = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
+
+    let button = peripherals.GPIO15;
+
+    let config = InputConfig::default().with_pull(Pull::Up);
+    let mut button = Input::new(button, config);
+
+    critical_section::with(|cs| {
+        button.listen(Event::FallingEdge);
+        BUTTON.borrow_ref_mut(cs).replace(button)
+    });
+    led.set_high();
+
+    let delay = Delay::new();
 
     loop {
-        let delay_start = Instant::now();
-        while delay_start.elapsed() < Duration::from_millis(500) {}
+        led.toggle();
+        delay.delay_millis(500);
+    }
+}
+
+#[handler]
+#[ram]
+fn handler() {
+    cfg_if::cfg_if! {
+        if #[cfg(any(feature = "esp32", feature = "esp32s2", feature = "esp32s3"))] {
+            esp_println::println!(
+                "GPIO Interrupt with priority {}",
+                esp_hal::xtensa_lx::interrupt::get_level()
+            );
+        } else {
+            esp_println::println!("GPIO Interrupt");
+        }
     }
 
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0-rc.0/examples/src/bin
+    if critical_section::with(|cs| {
+        BUTTON
+            .borrow_ref_mut(cs)
+            .as_mut()
+            .unwrap()
+            .is_interrupt_set()
+    }) {
+        esp_println::println!("Button was the source of the interrupt");
+    } else {
+        esp_println::println!("Button was not the source of the interrupt");
+    }
+
+    critical_section::with(|cs| {
+        BUTTON
+            .borrow_ref_mut(cs)
+            .as_mut()
+            .unwrap()
+            .clear_interrupt()
+    });
 }

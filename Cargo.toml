@@ -9,11 +9,24 @@ name = "esp32s3_tests"
 path = "./src/bin/main.rs"
 
 [dependencies]
-esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"] }
-esp-hal                = { version = "=1.0.0-rc.0", features = ["esp32s3"] }
+esp-hal = { version = "1.0.0-rc.0", features = ["unstable"] }
+esp-println = { version = "0.15.0" }
+esp-backtrace = { version = "0.17.0", features = ["panic-handler", "println"] }
+esp-bootloader-esp-idf = { version = "0.2.0" }
+critical-section = "1.1"
+cfg-if = "1.0"
 
-critical-section = "1.2.0"
+[features]
+# Default to ESP32-S3
+default = ["esp32s3"]
 
+esp32     = ["esp-hal/esp32",     "esp-println/esp32",     "esp-backtrace/esp32",     "esp-bootloader-esp-idf/esp32"]
+esp32c2   = ["esp-hal/esp32c2",   "esp-println/esp32c2",   "esp-backtrace/esp32c2",   "esp-bootloader-esp-idf/esp32c2"]
+esp32c3   = ["esp-hal/esp32c3",   "esp-println/esp32c3",   "esp-backtrace/esp32c3",   "esp-bootloader-esp-idf/esp32c3"]
+esp32c6   = ["esp-hal/esp32c6",   "esp-println/esp32c6",   "esp-backtrace/esp32c6",   "esp-bootloader-esp-idf/esp32c6"]
+esp32h2   = ["esp-hal/esp32h2",   "esp-println/esp32h2",   "esp-backtrace/esp32h2",   "esp-bootloader-esp-idf/esp32h2"]
+esp32s2   = ["esp-hal/esp32s2",   "esp-println/esp32s2",   "esp-backtrace/esp32",     "esp-bootloader-esp-idf/esp32s2"]
+esp32s3   = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3"]
 
 [profile.dev]
 # Rust debug is too slow.
@@ -28,3 +41,5 @@ incremental      = false
 lto              = 'fat'
 opt-level        = 's'
 overflow-checks  = false
+
+
