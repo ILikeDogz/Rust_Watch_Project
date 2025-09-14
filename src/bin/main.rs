@@ -28,6 +28,17 @@ use esp_hal::{
 esp_bootloader_esp_idf::esp_app_desc!();
 
 static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
+static LED: Mutex<RefCell<Option<Output>>> = Mutex::new(RefCell::new(None));
+
+
+// Add this function somewhere in your file:
+fn toggle_led(led: &mut Output) {
+    if led.is_set_high() {
+        led.set_low();
+    } else {
+        led.set_high();
+    }
+}
 
 #[main]
 fn main() -> ! {
@@ -44,6 +55,7 @@ fn main() -> ! {
     let config = InputConfig::default().with_pull(Pull::Up);
     let mut button = Input::new(button, config);
 
+    // Configure the button to trigger an interrupt on the falling edge (button press).
     critical_section::with(|cs| {
         button.listen(Event::FallingEdge);
         BUTTON.borrow_ref_mut(cs).replace(button)
@@ -52,8 +64,12 @@ fn main() -> ! {
 
     let delay = Delay::new();
 
+    // Store the LED in a mutex so it can be accessed from the interrupt handler. LED can't be used in main after this.
+    critical_section::with(|cs| {
+        LED.borrow_ref_mut(cs).replace(led);
+    });
+
     loop {
-        led.toggle();
         delay.delay_millis(500);
     }
 }
@@ -61,13 +77,26 @@ fn main() -> ! {
 #[handler]
 #[ram]
 fn handler() {
+
     cfg_if::cfg_if! {
         if #[cfg(any(feature = "esp32", feature = "esp32s2", feature = "esp32s3"))] {
             esp_println::println!(
                 "GPIO Interrupt with priority {}",
                 esp_hal::xtensa_lx::interrupt::get_level()
             );
+
+            // Allows Toggle the LED state
+            critical_section::with(|cs| {
+                if let Some(led) = LED.borrow_ref_mut(cs).as_mut() {
+                    toggle_led(led);
+                }
+            });
         } else {
+            critical_section::with(|cs| {
+                if let Some(led) = LED.borrow_ref_mut(cs).as_mut() {
+                    toggle_led(led);
+                }
+            });
             esp_println::println!("GPIO Interrupt");
         }
     }
