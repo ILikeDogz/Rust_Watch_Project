@@ -1,10 +1,10 @@
 // This module handles board-specific pin mappings and initialization.
 // Different profiles can be selected via Cargo features.
-// Default profile uses GPIO2 for LED1, GPIO15 for Button1, etc.
+// Default profile uses GPIO1 for LED1, GPIO15 for Button1, etc.
 // Alternate profiles can be defined for different boards by enabling
 // features like "devkit" or "alt" in Cargo.toml.
 //! The following wiring is assumed:
-//! - LED => GPIO2
+//! - LED => GPIO1
 //! - BUTTON => GPIO15
 //! - LED2 => GPIO19
 //! - BUTTON2 => GPIO21
@@ -37,7 +37,7 @@ pub struct BoardPins<'a> {
 pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let io = Io::new(p.IO_MUX);
 
-    let mut led1 = Output::new(p.GPIO2,  Level::Low, OutputConfig::default());
+    let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
     let mut led2 = Output::new(p.GPIO19, Level::Low, OutputConfig::default());
     led1.set_high();
     led2.set_high();
