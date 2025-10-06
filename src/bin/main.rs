@@ -1,19 +1,8 @@
 //! GPIO interrupt
 //!
 //! This prints "Interrupt" when the boot button is pressed.
-//! It also blinks an LED like the blinky example.
-//!
-//! The following wiring is assumed:
-//! - LED => GPIO2
-//! - BUTTON => GPIO15
-//! - Rotary encoder CLK => GPIO18
-//! - Rotary encoder DT  => GPIO17
-//! - Rotary encoder SW  => GPIO16 (not used in this example)
-//! - GND => GND
-//! - 3.3V => 3.3V
-//! Make sure the button is connected to GND when pressed (it has a pull-up).
-//! The rotary encoder should have no internal pull-ups using external 10k resistors, 
-//! and be connected to GND on the other side
+//! It also toggles an LED when either button is pressed.
+//! It also reads a rotary encoder and prints direction and detent count.
 
 //% CHIPS: esp32s3
 //% FEATURES: esp-hal/unstable
@@ -26,11 +15,13 @@
 // The macro automatically fills in the fields. 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+use esp32s3_tests::wiring::init_board_pins;
+
 use esp_backtrace as _;
 use core::cell::{Cell, RefCell};
 use critical_section::Mutex;
 use esp_hal::{
-    gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig, Pull},
+    gpio::{Input, Output},
     handler,
     main,
     ram,
@@ -189,78 +180,25 @@ fn handler() {
 
 #[main]
 fn main() -> ! {
-
-    // Initialize peripherals
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    // IO mux for interrupts
-    let mut io = Io::new(peripherals.IO_MUX);
+    // one call gives you IO handler + all your role pins
+    let (mut io, pins) = init_board_pins(peripherals);
     io.set_interrupt_handler(handler);
 
-   // LED1
-    let mut led_output_pin = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
-    led_output_pin.set_high();
+    // stash the pins into your globals
     critical_section::with(|cs| {
-        BUTTON1.led.borrow_ref_mut(cs).replace(led_output_pin);
-    });
-
-    // Button1
-    let cfg = InputConfig::default().with_pull(Pull::Up);
-    let mut btn_input_pin = Input::new(peripherals.GPIO15, cfg);
-    btn_input_pin.listen(Event::AnyEdge);
-    critical_section::with(|cs| {
-        BUTTON1.input.borrow_ref_mut(cs).replace(btn_input_pin);
+        BUTTON1.led.borrow_ref_mut(cs).replace(pins.led1);
+        BUTTON1.input.borrow_ref_mut(cs).replace(pins.btn1);
         BUTTON1.last_level.borrow(cs).set(true);
-    });
 
-    // LED2
-    let mut led2_output_pin = Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default());
-    led2_output_pin.set_high();
-    critical_section::with(|cs| {
-        BUTTON2.led.borrow_ref_mut(cs).replace(led2_output_pin);
-    });
-
-    // Button2
-    let cfg2 = InputConfig::default().with_pull(Pull::Up);
-    let mut btn2_input_pin = Input::new(peripherals.GPIO21, cfg2);
-    btn2_input_pin.listen(Event::AnyEdge);
-    critical_section::with(|cs| {
-        BUTTON2.input.borrow_ref_mut(cs).replace(btn2_input_pin);
+        BUTTON2.led.borrow_ref_mut(cs).replace(pins.led2);
+        BUTTON2.input.borrow_ref_mut(cs).replace(pins.btn2);
         BUTTON2.last_level.borrow(cs).set(true);
+
+        ROTARY.clk.borrow_ref_mut(cs).replace(pins.enc_clk);
+        ROTARY.dt.borrow_ref_mut(cs).replace(pins.enc_dt);
     });
-
-    // Rotary encoder initialization (no pull-ups, assumes external)
-    let enc_cfg = InputConfig::default().with_pull(Pull::None);
-    let mut clk_pin = Input::new(peripherals.GPIO18, enc_cfg);
-    let mut dt_pin  = Input::new(peripherals.GPIO17, enc_cfg);
-    clk_pin.listen(Event::AnyEdge);
-    dt_pin.listen(Event::AnyEdge);
-    critical_section::with(|cs| {
-        ROTARY.clk.borrow_ref_mut(cs).replace(clk_pin);
-        ROTARY.dt.borrow_ref_mut(cs).replace(dt_pin);
-    });
-    // // Rotary encoder initialization (no pull-ups, assumes external)
-    // let enc_cfg = InputConfig::default().with_pull(Pull::None);
-    // let mut clk_pin = Input::new(peripherals.GPIO18, enc_cfg);
-    // let mut dt_pin  = Input::new(peripherals.GPIO17, enc_cfg);
-
-    // // Fire ISR on any edge of either signal
-    // clk_pin.listen(Event::AnyEdge);
-    // dt_pin.listen(Event::AnyEdge);
-
-    // // Store encoder pins in mutex
-    // critical_section::with(|cs| {
-    //     ENC_CLK.borrow_ref_mut(cs).replace(clk_pin);
-    //     ENC_DT.borrow_ref_mut(cs).replace(dt_pin);
-
-    //     // Read initial 2-bit state so first transition is well-defined
-    //     let clk_high = ENC_CLK.borrow_ref_mut(cs).as_ref().unwrap().is_high();
-    //     let dt_high  = ENC_DT.borrow_ref_mut(cs).as_ref().unwrap().is_high();
-    //     let init = ((clk_high as u8) << 1) | (dt_high as u8);
-    //     LAST_QSTATE.borrow(cs).set(init);
-    // });
-
-
 
 
     const DETENT_STEPS: i32 = 4; // set to 4 if your encoder is 4 steps per detent

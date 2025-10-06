@@ -27,6 +27,8 @@ esp32c6   = ["esp-hal/esp32c6",   "esp-println/esp32c6",   "esp-backtrace/esp32c
 esp32h2   = ["esp-hal/esp32h2",   "esp-println/esp32h2",   "esp-backtrace/esp32h2",   "esp-bootloader-esp-idf/esp32h2"]
 esp32s2   = ["esp-hal/esp32s2",   "esp-println/esp32s2",   "esp-backtrace/esp32",     "esp-bootloader-esp-idf/esp32s2"]
 esp32s3   = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3"]
+devkit = []
+alt = []
 
 [profile.dev]
 # Rust debug is too slow.
