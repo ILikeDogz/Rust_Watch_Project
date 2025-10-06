@@ -186,7 +186,12 @@ fn main() -> ! {
     let (mut io, pins) = init_board_pins(peripherals);
     io.set_interrupt_handler(handler);
 
-    // stash the pins into your globals
+    // Read encoder pin states BEFORE moving them
+    let clk_initial = pins.enc_clk.is_high() as u8;
+    let dt_initial  = pins.enc_dt.is_high() as u8;
+    let initial_qstate = (clk_initial << 1) | dt_initial;
+
+    // Stash pins in global state
     critical_section::with(|cs| {
         BUTTON1.led.borrow_ref_mut(cs).replace(pins.led1);
         BUTTON1.input.borrow_ref_mut(cs).replace(pins.btn1);
@@ -198,6 +203,9 @@ fn main() -> ! {
 
         ROTARY.clk.borrow_ref_mut(cs).replace(pins.enc_clk);
         ROTARY.dt.borrow_ref_mut(cs).replace(pins.enc_dt);
+        ROTARY.last_qstate.borrow(cs).set(initial_qstate); // <-- use the value you read above
+        ROTARY.position.borrow(cs).set(0);
+        ROTARY.last_step.borrow(cs).set(0);
     });
 
 
