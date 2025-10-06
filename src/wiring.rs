@@ -3,7 +3,7 @@
 // Default profile uses GPIO1 for LED1, GPIO15 for Button1, etc.
 // Alternate profiles can be defined for different boards by enabling
 // features like "devkit" or "alt" in Cargo.toml.
-//! The following wiring is assumed:
+//! The following default wiring is assumed:
 //! - LED => GPIO1
 //! - BUTTON => GPIO15
 //! - LED2 => GPIO19
@@ -13,6 +13,12 @@
 //! - Rotary encoder SW  => GPIO16 (not used in this example)
 //! - GND => GND
 //! - 3.3V => 3.3V
+//! - SPI2 SCK => GPIO10 (hardware SPI clock)
+//! - SPI2 MOSI => GPIO11 (hardware SPI MOSI)
+//! - LCD CS  => GPIO9
+//! - LCD DC  => GPIO8
+//! - LCD RST => GPIO14
+//! - LCD BL  => GPIO2
 //! Make sure the button is connected to GND when pressed (it has a pull-up).
 //! The rotary encoder should have no internal pull-ups using external 10k resistors, 
 //! and be connected to GND on the other side
