@@ -20,13 +20,62 @@ use esp32s3_tests::wiring::init_board_pins;
 use esp_backtrace as _;
 use core::cell::{Cell, RefCell};
 use critical_section::Mutex;
+
+// --- ESP-HAL imports ---
 use esp_hal::{
     gpio::{Input, Output},
     handler,
     main,
     ram,
+    spi::master::{Spi, Config as SpiConfig},
+    spi::Mode,
+    time::Rate,
     timer::systimer::{SystemTimer, Unit},
 };
+
+// --- Display interface and device ---
+use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
+use display_interface_spi::SPIInterface;
+
+// --- GC9A01 display driver ---
+use gc9a01::{
+    prelude::*,                // DisplayResolution240x240, etc.
+    rotation::DisplayRotation, // DisplayRotation enum
+    Gc9a01,
+};
+
+// --- Embedded-graphics ---
+use embedded_graphics::{
+    mono_font::{ascii::{FONT_10X20, FONT_6X10}, 
+    MonoTextStyle, MonoTextStyleBuilder}, 
+    pixelcolor::Rgb565, 
+    prelude::{Point, Primitive, RgbColor, Size}, 
+    primitives::{Circle, PrimitiveStyle, Rectangle}, text::{Alignment, Baseline, Text}, 
+    Drawable
+};
+
+
+
+struct SpinDelay;
+
+impl embedded_hal::delay::DelayNs for SpinDelay {
+    #[inline]
+    fn delay_ns(&mut self, ns: u32) {
+        // very rough busy-wait; good enough for init pulses
+        // (the driver mostly calls us with µs/ms delays)
+        let mut n = ns / 50 + 1;
+        while n != 0 { core::hint::spin_loop(); n -= 1; }
+    }
+    #[inline]
+    fn delay_us(&mut self, us: u32) {
+        for _ in 0..us { self.delay_ns(1_000); }
+    }
+    #[inline]
+    fn delay_ms(&mut self, ms: u32) {
+        for _ in 0..ms { self.delay_us(1_000); }
+    }
+}
+
 
 // Shared resources for button handling
 struct ButtonState<'a> {
@@ -72,8 +121,12 @@ static ROTARY: RotaryState<'static> = RotaryState {
 };
 
 
-// System timer for timestamps
-const DEBOUNCE_MS: u64 = 120;
+// Current debounce time (milliseconds)
+const DEBOUNCE_MS: u64 = 240;
+
+// Display configuration
+const RESOLUTION: u32 = 240; // 240x240 display
+const CENTER: i32 = RESOLUTION as i32 / 2;
 
 // Handle button press events
 fn handle_button_generic(btn: &ButtonState, now_ms: u64) {
@@ -167,13 +220,14 @@ fn handle_encoder_generic(encoder: &RotaryState) {
 #[handler]
 #[ram]
 fn handler() {
+    // Get current time in ms
     let now_ms = {
         let t = SystemTimer::unit_value(Unit::Unit0);
         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
     };
+    
     handle_button_generic(&BUTTON1, now_ms);
     handle_button_generic(&BUTTON2, now_ms);
-    // handle_encoder();
     handle_encoder_generic(&ROTARY);
 }
 
@@ -182,8 +236,8 @@ fn handler() {
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    // one call gives you IO handler + all your role pins
-    let (mut io, pins) = init_board_pins(peripherals);
+    // one call gives you IO handler + all your role pins from wiring.rs
+    let (mut io, mut pins, spi2, sck_pin, mosi_pin) = init_board_pins(peripherals);
     io.set_interrupt_handler(handler);
 
     // Read encoder pin states BEFORE moving them
@@ -208,9 +262,87 @@ fn main() -> ! {
         ROTARY.last_step.borrow(cs).set(0);
     });
 
-
+    // rotary encoder detent tracking
     const DETENT_STEPS: i32 = 4; // set to 4 if your encoder is 4 steps per detent
     let mut last_detent: Option<i32> = None;
+
+    // --- DISPLAY PINS (match your wiring) -----------------------------------
+    // Reset/backlight using pins from BoardPins
+    pins.lcd_rst.set_low();
+    for _ in 0..10000 { core::hint::spin_loop(); }
+    pins.lcd_rst.set_high();
+
+    // Backlight on
+    pins.lcd_bl.set_high();
+
+    // SPI configuration
+    let spi_cfg = SpiConfig::default()
+        .with_frequency(Rate::from_hz(40_000_000))
+        .with_mode(Mode::_0);
+
+    // Create the SPI and assign pins
+    let spi = Spi::new(spi2, spi_cfg).unwrap()
+        .with_sck(sck_pin)    
+        .with_mosi(mosi_pin); 
+    // (no MISO: write-only display)
+
+    // Create the display interface
+    let dev = ExclusiveDevice::new(spi, pins.lcd_cs, NoDelay).unwrap();
+    let di  = SPIInterface::new(dev, pins.lcd_dc);
+
+    // Create the display driver instance
+    let mut disp = Gc9a01::new(di, DisplayResolution240x240, DisplayRotation::Rotate0);
+
+    // Create a delay provider
+    let mut delay = SpinDelay;
+
+    // Init sequence
+    disp.init(&mut delay).expect("gc9a01 init");
+
+    // --- FIRST DRAW ----------------------------------------------------------
+    // Full black background:
+    disp.clear().ok();
+    Rectangle::new(Point::new(0, 0), Size::new(RESOLUTION, RESOLUTION))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(&mut disp).ok();
+
+    // Centered circle with diameter 160
+    let diameter: u32 = 160;
+    Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 3))
+        .draw(&mut disp)
+        .ok();
+
+    // background style
+    let style_bg = MonoTextStyleBuilder::new()
+        .font(&FONT_10X20)
+        .text_color(Rgb565::WHITE)
+        .background_color(Rgb565::GREEN)
+        .build();
+
+    // Centered text with background
+    Text::<'_, MonoTextStyle<'_, Rgb565>>::with_alignment(
+        "WOW, GC9A01",
+        Point::new(CENTER, CENTER),  // near center of 240x240
+        style_bg,
+        Alignment::Center,
+    )
+    .draw(&mut disp)
+    .ok();
+
+    // Rectangle::new(Point::new(0, 0), Size::new(240, 240))
+    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+    //     .draw(&mut disp).ok();
+
+
+    // Rectangle::new(Point::new(100, 110), Size::new(40, 20))
+    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
+    //     .draw(&mut disp).ok();
+
+
+    let style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+    Text::with_alignment("Hello", Point::new(120, 120), style, Alignment::Center)
+        .draw(&mut disp).ok();
 
     loop {
 
