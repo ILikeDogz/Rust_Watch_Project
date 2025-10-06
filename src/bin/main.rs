@@ -37,68 +37,94 @@ use esp_hal::{
     timer::systimer::{SystemTimer, Unit},
 };
 
+// Shared resources for button handling
+struct ButtonState<'a> {
+    input: Mutex<RefCell<Option<Input<'a>>>>,
+    led: Mutex<RefCell<Option<Output<'a>>>>,
+    last_level: Mutex<Cell<bool>>,
+    last_interrupt: Mutex<Cell<u64>>,
+    name: &'static str,
+}
 
-// Shared resources between main and the interrupt handler
-static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
-static LED:    Mutex<RefCell<Option<Output>>> = Mutex::new(RefCell::new(None));
-static LAST_LEVEL:   Mutex<Cell<bool>> = Mutex::new(Cell::new(true)); // true = High (idle with pull-up)
-static LAST_INTERRUPT: Mutex<Cell<u64>> = Mutex::new(Cell::new(0));
+struct RotaryState<'a> {
+    clk: Mutex<RefCell<Option<Input<'a>>>>,
+    dt:  Mutex<RefCell<Option<Input<'a>>>>,
+    position:    Mutex<Cell<i32>>,
+    last_qstate: Mutex<Cell<u8>>,  // bits: [CLK<<1 | DT]
+    last_step: Mutex<Cell<i8>>, // +1 or -1 from last transition
+}
+
+// Shared resources for Button
+static BUTTON1: ButtonState<'static> = ButtonState {
+    input: Mutex::new(RefCell::new(None)),
+    led: Mutex::new(RefCell::new(None)),
+    last_level: Mutex::new(Cell::new(true)),
+    last_interrupt: Mutex::new(Cell::new(0)),
+    name: "Button1",
+};
+
+static BUTTON2: ButtonState<'static> = ButtonState {
+    input: Mutex::new(RefCell::new(None)),
+    led: Mutex::new(RefCell::new(None)),
+    last_level: Mutex::new(Cell::new(true)),
+    last_interrupt: Mutex::new(Cell::new(0)),
+    name: "Button2",
+};
 
 // Shared resources for rotary encoder
-static ENC_CLK: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
-static ENC_DT:  Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
-static POSITION:    Mutex<Cell<i32>> = Mutex::new(Cell::new(0));
-static LAST_QSTATE: Mutex<Cell<u8>>  = Mutex::new(Cell::new(0)); // bits: [CLK<<1 | DT]
-static LAST_STEP: Mutex<Cell<i8>> = Mutex::new(Cell::new(0)); // +1 or -1 from last transition
+static ROTARY: RotaryState<'static> = RotaryState {
+    clk: Mutex::new(RefCell::new(None)),
+    dt:  Mutex::new(RefCell::new(None)),
+    position:    Mutex::new(Cell::new(0)),
+    last_qstate: Mutex::new(Cell::new(0)), // bits: [CLK<<1 | DT]
+    last_step: Mutex::new(Cell::new(0)), // +1 or -1 from last transition
+};
+
 
 // System timer for timestamps
 const DEBOUNCE_MS: u64 = 120;
 
 // Handle button press events
-#[inline(always)]
-fn handle_button(now_ms: u64) {
+fn handle_button_generic(btn: &ButtonState, now_ms: u64) {
+    // Access button state within critical section
     critical_section::with(|cs| {
-        // increment hit counter (use the module fn, not a method), bindings for safer access
-        let mut btn_binding = BUTTON.borrow_ref_mut(cs);
-        let btn = btn_binding.as_mut().unwrap();
+        let mut btn_binding = btn.input.borrow_ref_mut(cs);
+        let input = btn_binding.as_mut().unwrap();
 
         // Check if interrupt is actually pending
-        if !btn.is_interrupt_set() { 
+        if !input.is_interrupt_set() { 
             return; 
         }
-        // Clear interrupt flag
-        btn.clear_interrupt();
+        input.clear_interrupt();
 
-        // Read current level and compare to last
-        let level_is_low = btn.is_low();
-        let last_high = LAST_LEVEL.borrow(cs).get();
-        LAST_LEVEL.borrow(cs).set(!level_is_low);
+        // Debounce logic: check for falling edge and time since last event
+        let level_is_low = input.is_low();
+        let last_high = btn.last_level.borrow(cs).get();
+        btn.last_level.borrow(cs).set(!level_is_low);
 
-        // If we transitioned from High to Low, it's a button press
         if last_high && level_is_low {
-            // Debounce: only act if enough time has passed since last press
-            let last_debounce = LAST_INTERRUPT.borrow(cs).get();
+            // Falling edge detected
+            let last_debounce = btn.last_interrupt.borrow(cs).get();
+            // Check debounce time
             if now_ms.saturating_sub(last_debounce) > DEBOUNCE_MS {
-                // Update last interrupt time
-                LAST_INTERRUPT.borrow(cs).set(now_ms);
-                // Toggle LED if available
-                if let Some(led) = LED.borrow_ref_mut(cs).as_mut() { 
+                // Valid press event
+                btn.last_interrupt.borrow(cs).set(now_ms);
+                // Toggle associated LED if available
+                if let Some(led) = btn.led.borrow_ref_mut(cs).as_mut() { 
                     led.toggle(); 
-                    esp_println::println!("Button pressed, LED is now {}", if led.is_set_high() { "ON" } else { "OFF" });
+                    esp_println::println!("{} pressed, LED is now {}", btn.name, if led.is_set_high() { "ON" } else { "OFF" });
                 }
             }
         }
     });
 }
 
-// Handle rotary encoder state changes
 #[inline(always)]
-fn handle_encoder() {
-
+fn handle_encoder_generic(encoder: &RotaryState) {
+    // Access encoder state within critical section
     critical_section::with(|cs| {
-        // Get references to the encoder pins, bindings for safer access
-        let mut clk_binding = ENC_CLK.borrow_ref_mut(cs);
-        let mut dt_binding  = ENC_DT.borrow_ref_mut(cs);
+        let mut clk_binding = encoder.clk.borrow_ref_mut(cs);
+        let mut dt_binding  = encoder.dt.borrow_ref_mut(cs);
         let clk = clk_binding.as_mut().unwrap();
         let dt  = dt_binding.as_mut().unwrap();
 
@@ -115,7 +141,7 @@ fn handle_encoder() {
 
         // Read current state of both pins
         let curr = ((clk.is_high() as u8) << 1) | (dt.is_high() as u8);
-        let prev = LAST_QSTATE.borrow(cs).get();
+        let prev = ROTARY.last_qstate.borrow(cs).get();
 
         // Correct quadrature table for index = (prev<<2)|curr
         // curr order: 00, 01, 10, 11 ; prev blocks: 00, 01, 10, 11
@@ -130,32 +156,34 @@ fn handle_encoder() {
             0, 1, -1,  0,
         ];
 
+        // Determine step delta from transition table
         let delta = TRANS[((prev << 2) | curr) as usize];
-        // delta = -delta; // make your physical CW count positive
 
+        // Update position if there was a step
         if delta != 0 {
-            let p = POSITION.borrow(cs).get().saturating_add(delta as i32);
-            POSITION.borrow(cs).set(p);
-            LAST_STEP.borrow(cs).set(delta);
+            let p = ROTARY.position.borrow(cs).get().saturating_add(delta as i32);
+            ROTARY.position.borrow(cs).set(p);
+            ROTARY.last_step.borrow(cs).set(delta);
         }
-        LAST_QSTATE.borrow(cs).set(curr);
+        // Save current state for next transition
+        ROTARY.last_qstate.borrow(cs).set(curr);
     });
 }
+
 
 
 // Interrupt handler
 #[handler]
 #[ram]
 fn handler() {
-    // Get current time in ms
     let now_ms = {
         let t = SystemTimer::unit_value(Unit::Unit0);
         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
     };
-    // Handle button press
-    handle_button(now_ms);
-    // Handle rotary encoder
-    handle_encoder();
+    handle_button_generic(&BUTTON1, now_ms);
+    handle_button_generic(&BUTTON2, now_ms);
+    // handle_encoder();
+    handle_encoder_generic(&ROTARY);
 }
 
 
@@ -169,46 +197,70 @@ fn main() -> ! {
     let mut io = Io::new(peripherals.IO_MUX);
     io.set_interrupt_handler(handler);
 
-    // LED initialization (active High)
+   // LED1
     let mut led_output_pin = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
     led_output_pin.set_high();
     critical_section::with(|cs| {
-        LED.borrow_ref_mut(cs).replace(led_output_pin);
+        BUTTON1.led.borrow_ref_mut(cs).replace(led_output_pin);
     });
 
-    // Button initialization (pull-up, idle High)
+    // Button1
     let cfg = InputConfig::default().with_pull(Pull::Up);
     let mut btn_input_pin = Input::new(peripherals.GPIO15, cfg);
-
-    // Listen on both edges, but only act on High->Low in the ISR
     btn_input_pin.listen(Event::AnyEdge);
-
-    // Store button in mutex
     critical_section::with(|cs| {
-        BUTTON.borrow_ref_mut(cs).replace(btn_input_pin);
-        LAST_LEVEL.borrow(cs).set(true); // start idle High
+        BUTTON1.input.borrow_ref_mut(cs).replace(btn_input_pin);
+        BUTTON1.last_level.borrow(cs).set(true);
+    });
+
+    // LED2
+    let mut led2_output_pin = Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default());
+    led2_output_pin.set_high();
+    critical_section::with(|cs| {
+        BUTTON2.led.borrow_ref_mut(cs).replace(led2_output_pin);
+    });
+
+    // Button2
+    let cfg2 = InputConfig::default().with_pull(Pull::Up);
+    let mut btn2_input_pin = Input::new(peripherals.GPIO21, cfg2);
+    btn2_input_pin.listen(Event::AnyEdge);
+    critical_section::with(|cs| {
+        BUTTON2.input.borrow_ref_mut(cs).replace(btn2_input_pin);
+        BUTTON2.last_level.borrow(cs).set(true);
     });
 
     // Rotary encoder initialization (no pull-ups, assumes external)
     let enc_cfg = InputConfig::default().with_pull(Pull::None);
     let mut clk_pin = Input::new(peripherals.GPIO18, enc_cfg);
     let mut dt_pin  = Input::new(peripherals.GPIO17, enc_cfg);
-
-    // Fire ISR on any edge of either signal
     clk_pin.listen(Event::AnyEdge);
     dt_pin.listen(Event::AnyEdge);
-
-    // Store encoder pins in mutex
     critical_section::with(|cs| {
-        ENC_CLK.borrow_ref_mut(cs).replace(clk_pin);
-        ENC_DT.borrow_ref_mut(cs).replace(dt_pin);
-
-        // Read initial 2-bit state so first transition is well-defined
-        let clk_high = ENC_CLK.borrow_ref_mut(cs).as_ref().unwrap().is_high();
-        let dt_high  = ENC_DT.borrow_ref_mut(cs).as_ref().unwrap().is_high();
-        let init = ((clk_high as u8) << 1) | (dt_high as u8);
-        LAST_QSTATE.borrow(cs).set(init);
+        ROTARY.clk.borrow_ref_mut(cs).replace(clk_pin);
+        ROTARY.dt.borrow_ref_mut(cs).replace(dt_pin);
     });
+    // // Rotary encoder initialization (no pull-ups, assumes external)
+    // let enc_cfg = InputConfig::default().with_pull(Pull::None);
+    // let mut clk_pin = Input::new(peripherals.GPIO18, enc_cfg);
+    // let mut dt_pin  = Input::new(peripherals.GPIO17, enc_cfg);
+
+    // // Fire ISR on any edge of either signal
+    // clk_pin.listen(Event::AnyEdge);
+    // dt_pin.listen(Event::AnyEdge);
+
+    // // Store encoder pins in mutex
+    // critical_section::with(|cs| {
+    //     ENC_CLK.borrow_ref_mut(cs).replace(clk_pin);
+    //     ENC_DT.borrow_ref_mut(cs).replace(dt_pin);
+
+    //     // Read initial 2-bit state so first transition is well-defined
+    //     let clk_high = ENC_CLK.borrow_ref_mut(cs).as_ref().unwrap().is_high();
+    //     let dt_high  = ENC_DT.borrow_ref_mut(cs).as_ref().unwrap().is_high();
+    //     let init = ((clk_high as u8) << 1) | (dt_high as u8);
+    //     LAST_QSTATE.borrow(cs).set(init);
+    // });
+
+
 
 
     const DETENT_STEPS: i32 = 4; // set to 4 if your encoder is 4 steps per detent
@@ -217,7 +269,7 @@ fn main() -> ! {
     loop {
 
         // Detent-level direction print
-        let pos = critical_section::with(|cs| POSITION.borrow(cs).get());
+        let pos = critical_section::with(|cs| ROTARY.position.borrow(cs).get());
         let detent = pos / DETENT_STEPS; // use division (works well for negatives too)
         
         // Print only when it changes
