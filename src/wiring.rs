@@ -5,8 +5,8 @@
 // features like "devkit" or "alt" in Cargo.toml.
 //! The following default wiring is assumed:
 //! - LED => GPIO1
-//! - BUTTON => GPIO15
 //! - LED2 => GPIO19
+//! - BUTTON => GPIO15
 //! - BUTTON2 => GPIO21
 //! - Rotary encoder CLK => GPIO18
 //! - Rotary encoder DT  => GPIO17
@@ -22,6 +22,13 @@
 //! Make sure the button is connected to GND when pressed (it has a pull-up).
 //! The rotary encoder should have no internal pull-ups using external 10k resistors, 
 //! and be connected to GND on the other side
+//! (we use interrupt on both edges to detect rotation).
+//! The LCD pins can be connected directly to the ESP32-S3 GPIOs
+//! as they are 3.3V logic level compatible.
+//! Ground and 3.3V pins are available on the board.
+//! The SPI2 pins (SCK, MOSI) are fixed and cannot be changed.
+//! SCK is GPIO10 and MOSI is GPIO11 on the ESP32-S3.
+//! The MISO pin is not used in this example but could be mapped to GPIO12 if needed.
 
 use esp_backtrace as _;
 use esp_hal::{
@@ -30,13 +37,24 @@ use esp_hal::{
 use esp_hal::peripherals::{Peripherals, SPI2, GPIO10, GPIO11};
 
 pub struct BoardPins<'a> {
-    pub led1: Output<'a>,
+    // Leds
+    // pub led1: Output<'a>,
+    // pub led2: Output<'a>,
+
+    // Buttons
     pub btn1: Input<'a>,
-    pub led2: Output<'a>,
     pub btn2: Input<'a>,
+
+    // Rotary encoder pins
     pub enc_clk: Input<'a>,
     pub enc_dt:  Input<'a>,
-    // NEW:
+    // pub enc_sw:  Input<'a>,  // not used in this example
+
+    // SPI2 pins (SCK, MOSI) are fixed to GPIO10 and GPIO11
+    pub spi2: SPI2<'a>, // SPI2 peripheral
+    pub spi_sck: GPIO10<'a>, // GPIO10 is SPI2 SCK
+    pub spi_mosi: GPIO11<'a>,// GPIO11 is SPI
+    // LCD control pins
     pub lcd_cs:  Output<'a>,  // GPIO9
     pub lcd_dc:  Output<'a>,  // GPIO8
     pub lcd_rst: Output<'a>,  // GPIO14
@@ -45,7 +63,57 @@ pub struct BoardPins<'a> {
 
 // Default profile
 #[cfg(feature = "esp32s3")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, SPI2<'a>, GPIO10<'a>, GPIO11<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
+    let io = Io::new(p.IO_MUX);
+
+    // LEDs
+    // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
+    // let mut led2 = Output::new(p.GPIO19, Level::Low, OutputConfig::default());
+    // led1.set_high();
+    // led2.set_high();
+
+    // buttons
+    let mut btn1 = Input::new(p.GPIO15, InputConfig::default().with_pull(Pull::Up));
+    let mut btn2 = Input::new(p.GPIO21, InputConfig::default().with_pull(Pull::Up));
+    btn1.listen(Event::AnyEdge);
+    btn2.listen(Event::AnyEdge);
+
+    // rotary encoder pins
+    let mut enc_clk = Input::new(p.GPIO18, InputConfig::default().with_pull(Pull::None));
+    let mut enc_dt  = Input::new(p.GPIO17, InputConfig::default().with_pull(Pull::None));
+    enc_clk.listen(Event::AnyEdge);
+    enc_dt.listen(Event::AnyEdge);
+
+    // LCD control pins — do NOT touch GPIO10/11 here (SPI SCK/MOSI)
+    let lcd_cs  = Output::new(p.GPIO9,  Level::High, OutputConfig::default());
+    let lcd_dc  = Output::new(p.GPIO8,  Level::Low,  OutputConfig::default());
+    let lcd_rst = Output::new(p.GPIO14, Level::High, OutputConfig::default());
+    let lcd_bl  = Output::new(p.GPIO2,  Level::High, OutputConfig::default());
+
+    // SPI2 peripheral and pins
+    let spi2 = p.SPI2; 
+    let spi_sck = p.GPIO10; // GPIO10 is SPI2 SCK
+    let spi_mosi = p.GPIO11;// GPIO11 is SPI2 MOSI
+
+    // Return IO handler and all pins
+    (
+        io,
+        BoardPins {
+            // led1, led2, 
+            btn1,btn2, 
+            enc_clk, enc_dt,
+            spi2,
+            spi_sck,
+            spi_mosi,
+            lcd_cs, lcd_dc, lcd_rst, lcd_bl,
+        },
+    )
+}
+
+
+// Example alternate profile (enable with --features devkit)
+#[cfg(feature = "devkit")]
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let io = Io::new(p.IO_MUX);
 
     // LEDs
@@ -72,56 +140,21 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, SPI2<'a>, 
     let lcd_rst = Output::new(p.GPIO14, Level::High, OutputConfig::default());
     let lcd_bl  = Output::new(p.GPIO2,  Level::High, OutputConfig::default());
 
-    // hand SPI2 back before we lose ownership of Peripherals
-    let spi2 = p.SPI2;
+    // SPI2 peripheral and pins
+    let spi2 = p.SPI2; 
+    let spi_sck = p.GPIO10; // GPIO10 is SPI2 SCK
+    let spi_mosi = p.GPIO11;// GPIO11 is SPI2 MOSI
 
+    // Return IO handler and all pins
     (
         io,
         BoardPins {
-            led1, btn1, led2, btn2, enc_clk, enc_dt,
+            led1, led2, btn1,btn2, enc_clk, enc_dt,
+            spi2,
+            spi_sck,
+            spi_mosi,
             lcd_cs, lcd_dc, lcd_rst, lcd_bl,
         },
-        spi2,
-        p.GPIO10,
-        p.GPIO11,
-    )
-}
-
-// Example alternate profile (enable with --features devkit)
-#[cfg(feature = "devkit")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, SPI2) {
-    let io = Io::new(p.IO_MUX);
-
-    let mut led1 = Output::new(p.GPIO4,  Level::Low, OutputConfig::default());
-    let mut led2 = Output::new(p.GPIO5,  Level::Low, OutputConfig::default());
-    led1.set_high();
-    led2.set_high();
-
-    let mut btn1 = Input::new(p.GPIO0,  InputConfig::default().with_pull(Pull::Up));
-    let mut btn2 = Input::new(p.GPIO1,  InputConfig::default().with_pull(Pull::Up));
-    btn1.listen(Event::AnyEdge);
-    btn2.listen(Event::AnyEdge);
-
-    let mut enc_clk = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::None));
-    let mut enc_dt  = Input::new(p.GPIO7, InputConfig::default().with_pull(Pull::None));
-    enc_clk.listen(Event::AnyEdge);
-    enc_dt.listen(Event::AnyEdge);
-
-    // LCD control pins — same mapping as esp32s3 profile to keep firmware identical
-    let lcd_cs  = Output::new(p.GPIO9,  Level::High, OutputConfig::default());
-    let lcd_dc  = Output::new(p.GPIO8,  Level::Low,  OutputConfig::default());
-    let lcd_rst = Output::new(p.GPIO14, Level::High, OutputConfig::default());
-    let lcd_bl  = Output::new(p.GPIO2,  Level::High, OutputConfig::default());
-
-    let spi2 = p.SPI2;
-
-    (
-        io,
-        BoardPins {
-            led1, btn1, led2, btn2, enc_clk, enc_dt,
-            lcd_cs, lcd_dc, lcd_rst, lcd_bl,
-        },
-        spi2,
     )
 }
 
