@@ -263,6 +263,30 @@ fn update_ui(
             .draw(disp)
             .ok();
         }
+        // Rectangle::new(Point::new(0, 0), Size::new(240, 240))
+        //     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        //     .draw(&mut my_display)
+        //     .ok();
+
+        // my_display.fill_solid(
+        //     &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
+        //     Rgb565::BLACK
+        // ).ok();
+
+        // Rectangle::new(Point::new(0, 0), Size::new(120, 120))
+        //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+        //     .draw(&mut my_display).ok();
+
+        // Rectangle::new(Point::new(120, 120), Size::new(120, 120))
+        //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+        //     .draw(&mut my_display).ok();
+
+        // // Centered circle with diameter 160
+        // let diameter: u32 = 160;
+        // Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
+        //     .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 3))
+        //     .draw(&mut my_display)
+        //     .ok();
     }
 }
 
@@ -438,7 +462,7 @@ fn main() -> ! {
     let mut last_detent: Option<i32> = None;
 
     // initial UI state
-    let mut last_ui_state = UiState::State3;
+    let mut last_ui_state = UiState::State1;
 
     // Initialize peripherals
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -485,31 +509,7 @@ fn main() -> ! {
     // Clear display by drawing a filled rectangle    
     // Full black background:
     my_display.clear(Rgb565::BLACK).ok();
-
-    // Rectangle::new(Point::new(0, 0), Size::new(240, 240))
-    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-    //     .draw(&mut my_display)
-    //     .ok();
-
-    // my_display.fill_solid(
-    //     &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
-    //     Rgb565::BLACK
-    // ).ok();
-
-    // Rectangle::new(Point::new(0, 0), Size::new(120, 120))
-    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-    //     .draw(&mut my_display).ok();
-
-    // Rectangle::new(Point::new(120, 120), Size::new(120, 120))
-    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-    //     .draw(&mut my_display).ok();
-
-    // // Centered circle with diameter 160
-    // let diameter: u32 = 160;
-    // Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
-    //     .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 3))
-    //     .draw(&mut my_display)
-    //     .ok();
+    update_ui(&mut my_display);
 
     loop {
 
@@ -520,7 +520,6 @@ fn main() -> ! {
             last_ui_state = ui_state;
         }
         
-
         // Rotary encoder handling
         let pos = critical_section::with(|cs| ROTARY.position.borrow(cs).get());
         let detent = pos / DETENT_STEPS; // use division (works well for negatives too)
