@@ -27,7 +27,7 @@ embedded-hal = "1.0.0"
 
 [features]
 # Default to ESP32-S3
-default = ["esp32s3"]
+default = ["devkit-esp32s3"]
 
 esp32     = ["esp-hal/esp32",     "esp-println/esp32",     "esp-backtrace/esp32",     "esp-bootloader-esp-idf/esp32"]
 esp32c2   = ["esp-hal/esp32c2",   "esp-println/esp32c2",   "esp-backtrace/esp32c2",   "esp-bootloader-esp-idf/esp32c2"]
@@ -36,7 +36,8 @@ esp32c6   = ["esp-hal/esp32c6",   "esp-println/esp32c6",   "esp-backtrace/esp32c
 esp32h2   = ["esp-hal/esp32h2",   "esp-println/esp32h2",   "esp-backtrace/esp32h2",   "esp-bootloader-esp-idf/esp32h2"]
 esp32s2   = ["esp-hal/esp32s2",   "esp-println/esp32s2",   "esp-backtrace/esp32",     "esp-bootloader-esp-idf/esp32s2"]
 esp32s3   = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3"]
-devkit = []
+devkit-esp32s3 = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3"]
+allinone = []
 alt = []
 
 [profile.dev]

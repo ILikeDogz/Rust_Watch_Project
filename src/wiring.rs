@@ -62,7 +62,7 @@ pub struct BoardPins<'a> {
 }
 
 // Default profile
-#[cfg(feature = "esp32s3")]
+#[cfg(feature = "devkit-esp32s3")]
 pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let io = Io::new(p.IO_MUX);
 
@@ -111,16 +111,16 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 }
 
 
-// Example alternate profile (enable with --features devkit)
-#[cfg(feature = "devkit")]
+// Example alternate profile (enable with --features allinone)
+#[cfg(feature = "allinone")]
 pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let io = Io::new(p.IO_MUX);
 
     // LEDs
-    let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
-    let mut led2 = Output::new(p.GPIO19, Level::Low, OutputConfig::default());
-    led1.set_high();
-    led2.set_high();
+    // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
+    // let mut led2 = Output::new(p.GPIO19, Level::Low, OutputConfig::default());
+    // led1.set_high();
+    // led2.set_high();
 
     // buttons
     let mut btn1 = Input::new(p.GPIO15, InputConfig::default().with_pull(Pull::Up));
@@ -149,7 +149,9 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     (
         io,
         BoardPins {
-            led1, led2, btn1,btn2, enc_clk, enc_dt,
+            // led1, led2, 
+            btn1,btn2, 
+            enc_clk, enc_dt,
             spi2,
             spi_sck,
             spi_mosi,

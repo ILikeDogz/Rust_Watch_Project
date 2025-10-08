@@ -45,6 +45,7 @@ use gc9a01::{
     prelude::*,                // DisplayResolution240x240, etc.
     rotation::DisplayRotation, // DisplayRotation enum
     Gc9a01,
+    
 };
 
 // Embedded-graphics
@@ -55,6 +56,7 @@ use embedded_graphics::{
     prelude::{Point, Primitive, RgbColor, Size}, 
     primitives::{PrimitiveStyle, Rectangle, Circle, Triangle}, text::{Alignment, Baseline, Text}, 
     Drawable,
+    draw_target::DrawTarget, 
 };
 
 
@@ -133,7 +135,7 @@ static UI_STATE: Mutex<Cell<u8>> = Mutex::new(Cell::new(0));
 // Current debounce time (milliseconds)
 const DEBOUNCE_MS: u64 = 240;
 
-// Display configuration
+// Display configuration, (0,0) is top-left corner
 const RESOLUTION: u32 = 240; // 240x240 display
 const CENTER: i32 = RESOLUTION as i32 / 2;
 
@@ -147,10 +149,10 @@ fn update_ui(
     >
 ) {
     // Clear display by drawing a filled rectangle
-    Rectangle::new(Point::new(0, 0), Size::new(RESOLUTION, RESOLUTION))
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-        .draw(disp)
-        .ok();
+    disp.fill_solid(
+        &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
+        Rgb565::BLACK
+    ).ok();
 
     // Example: clear and draw something based on UI_STATE
     let state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
@@ -213,19 +215,18 @@ fn setup_display<'a>(
         .with_mosi(spi_mosi);
 
     // Create the display interface
-    let dev = ExclusiveDevice::new(spi, lcd_cs, NoDelay).unwrap();
-    let di  = SPIInterface::new(dev, lcd_dc);
-
-    // Create the display driver instance
-    let mut disp = Gc9a01::new(di, DisplayResolution240x240, DisplayRotation::Rotate0);
+    let spi_device: ExclusiveDevice<Spi<'_, Blocking>, Output<'a>, NoDelay> = ExclusiveDevice::new(spi, lcd_cs, NoDelay).unwrap();
+    let display_interface: SPIInterface<ExclusiveDevice<Spi<'_, Blocking>, Output<'a>, NoDelay>, Output<'a>>  = SPIInterface::new(spi_device, lcd_dc);
+    // Create the display driver instance, (0, 0) is the top-left corner
+    let mut output_display = Gc9a01::new(display_interface, DisplayResolution240x240, DisplayRotation::Rotate180);
 
     // Create a delay provider
     let mut delay = SpinDelay;
 
     // Init sequence
-    disp.init(&mut delay).expect("gc9a01 init");
+    output_display.init(&mut delay).expect("gc9a01 init");
 
-    disp
+    output_display
 }
 
 
@@ -291,8 +292,8 @@ fn handle_encoder_generic(encoder: &RotaryState) {
         if dt_pending  { dt.clear_interrupt(); }
 
         // Read current state of both pins
-        let curr = ((clk.is_high() as u8) << 1) | (dt.is_high() as u8);
-        let prev = ROTARY.last_qstate.borrow(cs).get();
+        let current = ((clk.is_high() as u8) << 1) | (dt.is_high() as u8);
+        let previous = ROTARY.last_qstate.borrow(cs).get();
 
         // Correct quadrature table for index = (prev<<2)|curr
         // curr order: 00, 01, 10, 11 ; prev blocks: 00, 01, 10, 11
@@ -308,16 +309,16 @@ fn handle_encoder_generic(encoder: &RotaryState) {
         ];
 
         // Determine step delta from transition table
-        let delta = TRANS[((prev << 2) | curr) as usize];
+        let step_delta = TRANS[((previous << 2) | current) as usize];
 
         // Update position if there was a step
-        if delta != 0 {
-            let p = ROTARY.position.borrow(cs).get().saturating_add(delta as i32);
+        if step_delta != 0 {
+            let p = ROTARY.position.borrow(cs).get().saturating_add(step_delta as i32);
             ROTARY.position.borrow(cs).set(p);
-            ROTARY.last_step.borrow(cs).set(delta);
+            ROTARY.last_step.borrow(cs).set(step_delta);
         }
         // Save current state for next transition
-        ROTARY.last_qstate.borrow(cs).set(curr);
+        ROTARY.last_qstate.borrow(cs).set(current);
     });
 }
 
@@ -367,7 +368,7 @@ fn main() -> ! {
     // Read encoder pin states BEFORE moving them
     let clk_initial = enc_clk.is_high() as u8;
     let dt_initial = enc_dt.is_high() as u8;
-    let initial_qstate = (clk_initial << 1) | dt_initial;
+    let qstate_initial = (clk_initial << 1) | dt_initial;
 
 
     // Stash pins in global state
@@ -380,61 +381,77 @@ fn main() -> ! {
 
         ROTARY.clk.borrow_ref_mut(cs).replace(enc_clk);
         ROTARY.dt.borrow_ref_mut(cs).replace(enc_dt);
-        ROTARY.last_qstate.borrow(cs).set(initial_qstate);
+        ROTARY.last_qstate.borrow(cs).set(qstate_initial);
         ROTARY.position.borrow(cs).set(0);
         ROTARY.last_step.borrow(cs).set(0);
     });
 
     // set up display
-    let mut disp = setup_display(
+    let mut my_display = setup_display(
         spi2, spi_sck, spi_mosi, lcd_cs, lcd_dc, lcd_rst, lcd_bl
     );
 
     // --- FIRST DRAW ----------------------------------------------------------
+    // Clear display by drawing a filled rectangle    
     // Full black background:
-    Rectangle::new(Point::new(0, 0), Size::new(RESOLUTION, RESOLUTION))
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-        .draw(&mut disp).ok();
 
-    // Centered circle with diameter 160
-    let diameter: u32 = 160;
-    Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
-        .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 3))
-        .draw(&mut disp)
-        .ok();
+    my_display.fill_solid(
+        &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
+        Rgb565::BLACK
+    ).ok();
 
-    // background style
-    let style_bg = MonoTextStyleBuilder::new()
-        .font(&FONT_10X20)
-        .text_color(Rgb565::WHITE)
-        .background_color(Rgb565::GREEN)
-        .build();
+    Rectangle::new(Point::new(0, 0), Size::new(120, 120))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+        .draw(&mut my_display).ok();
 
-    // Centered text with background
-    Text::<'_, MonoTextStyle<'_, Rgb565>>::with_alignment(
-        "WOW, GC9A01",
-        Point::new(CENTER, CENTER),  // near center of 240x240
-        style_bg,
-        Alignment::Center,
-    )
-    .draw(&mut disp)
-    .ok();
+    Rectangle::new(Point::new(120, 120), Size::new(120, 120))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+        .draw(&mut my_display).ok();
+    // let diameter: u32 = 242;
+    // Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
+    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+    //     .draw(&mut my_display)
+    //     .ok();
+
+    // // Centered circle with diameter 160
+    // let diameter: u32 = 160;
+    // Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
+    //     .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 3))
+    //     .draw(&mut my_display)
+    //     .ok();
+
+    // // background style
+    // let style_bg = MonoTextStyleBuilder::new()
+    //     .font(&FONT_10X20)
+    //     .text_color(Rgb565::WHITE)
+    //     .background_color(Rgb565::GREEN)
+    //     .build();
+
+    // // Centered text with background
+    // Text::<'_, MonoTextStyle<'_, Rgb565>>::with_alignment(
+    //     "WOW, GC9A01",
+    //     Point::new(CENTER, CENTER),  // near center of 240x240
+    //     style_bg,
+    //     Alignment::Center,
+    // )
+    // .draw(&mut my_display)
+    // .ok();
 
     // Rectangle::new(Point::new(0, 0), Size::new(240, 240))
     //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-    //     .draw(&mut disp).ok();
+    //     .draw(&mut my_display).ok();
 
 
     // Rectangle::new(Point::new(100, 110), Size::new(40, 20))
     //     .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
-    //     .draw(&mut disp).ok();
+    //     .draw(&mut my_display).ok();
 
     loop {
 
         // Check for UI state changes
         let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
         if ui_state != last_ui_state {
-            update_ui(&mut disp);
+            update_ui(&mut my_display);
             last_ui_state = ui_state;
         }
 
@@ -447,13 +464,13 @@ fn main() -> ! {
         if Some(detent) != last_detent {
             if let Some(prev) = last_detent {
                 // Calculate delta
-                let delta = detent - prev;
+                let step_delta = detent - prev;
                 // Print direction and delta
                 esp_println::println!(
                     "Encoder: {} | detent {} (Δ={})",
-                    if delta > 0 { "ClockWise" } else { "CounterClockWise" },
+                    if step_delta > 0 { "ClockWise" } else { "CounterClockWise" },
                     detent,
-                    delta
+                    step_delta
                 );
             }
             // record last detent
