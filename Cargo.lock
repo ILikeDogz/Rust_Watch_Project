@@ -726,7 +726,7 @@ dependencies = [
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-println",
- "gc9a01-rs",
+ "mipidsi",
 ]
 
 [[package]]
@@ -787,18 +787,6 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "pin-utils",
-]
-
-[[package]]
-name = "gc9a01-rs"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeb2ce3431e0797e8f9d96b8d414129a748d79a2745f1ced6fbff31cbdd4a86b"
-dependencies = [
- "display-interface",
- "display-interface-spi",
- "embedded-graphics-core",
- "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -940,6 +928,19 @@ name = "micromath"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
+
+[[package]]
+name = "mipidsi"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44e2bbd372d8ae9ccd0fc6eb4d91742b971ed8149968bbc623f025506989bd30"
+dependencies = [
+ "display-interface",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+ "heapless",
+ "nb 1.1.0",
+]
 
 [[package]]
 name = "nb"

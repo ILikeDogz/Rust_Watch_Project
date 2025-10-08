@@ -41,12 +41,12 @@ use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use display_interface_spi::SPIInterface;
 
 // GC9A01 display driver
-use gc9a01::{
-    prelude::*,                // DisplayResolution240x240, etc.
-    rotation::DisplayRotation, // DisplayRotation enum
-    Gc9a01,
-    
+use mipidsi::{
+    Builder as DisplayBuilder,
+    models::GC9A01,
+    options::{ColorOrder, Orientation, Rotation, ColorInversion},
 };
+
 
 // Embedded-graphics
 use embedded_graphics::{
@@ -142,45 +142,49 @@ const CENTER: i32 = RESOLUTION as i32 / 2;
 
 // helper function to update the display based on UI_STATE
 fn update_ui(
-    disp: &mut Gc9a01<
-        SPIInterface<ExclusiveDevice<Spi<'_, Blocking>, Output<'_>, NoDelay>, Output<'_>>,
-        DisplayResolution240x240,
-        gc9a01::mode::BasicMode,
-    >
+    disp: &mut mipidsi::Display<
+        SPIInterface<
+            ExclusiveDevice<Spi<'_, Blocking>, Output<'_>, NoDelay>,
+            Output<'_>,
+        >,
+        GC9A01,
+        Output<'_>,
+    >,
 ) {
-    // Clear display by drawing a filled rectangle
-    disp.fill_solid(
-        &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
-        Rgb565::BLACK
-    ).ok();
+    // Clear display background
+    Rectangle::new(Point::new(0, 0), Size::new(240, 240))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(disp)
+        .ok();
 
-    // Example: clear and draw something based on UI_STATE
+    // Get current state
     let state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
-    // Centered text with background
+
+    // Determine what text to show
     let msg = match state {
         0 => "State 0",
         1 => "State 1",
         _ => "Other",
     };
 
-    // background and text style
+    // Text style
     let style_bg = MonoTextStyleBuilder::new()
         .font(&FONT_10X20)
         .text_color(Rgb565::WHITE)
         .background_color(Rgb565::GREEN)
         .build();
 
-    // Draw centered text
-    Text::<'_, MonoTextStyle<'_, Rgb565>>::with_alignment(
+    // Draw centered text using Alignment::Center
+    Text::with_alignment(
         msg,
-        Point::new(CENTER, CENTER),  // near center of 240x240
+        Point::new(CENTER, CENTER),
         style_bg,
         Alignment::Center,
     )
     .draw(disp)
     .ok();
-
 }
+
 
 fn setup_display<'a>(
     spi2: SPI2<'a>,
@@ -190,44 +194,49 @@ fn setup_display<'a>(
     lcd_dc: Output<'a>,
     mut lcd_rst: Output<'a>,
     mut lcd_bl: Output<'a>,
-) -> Gc9a01<
-        SPIInterface<ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>, Output<'a>>,
-        DisplayResolution240x240,
-        gc9a01::mode::BasicMode,
-    >
-{
+) -> mipidsi::Display<
+    SPIInterface<
+        ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>,
+        Output<'a>,
+    >,
+    GC9A01,
+    Output<'a>,>
+ {
     // Hardware reset
     lcd_rst.set_low();
     for _ in 0..10000 { core::hint::spin_loop(); }
     lcd_rst.set_high();
-
-    // Backlight on
     lcd_bl.set_high();
 
-    // SPI configuration
+    // SPI setup
     let spi_cfg = SpiConfig::default()
         .with_frequency(Rate::from_hz(40_000_000))
         .with_mode(Mode::_0);
 
-    // Create the SPI and assign pins
     let spi = Spi::new(spi2, spi_cfg).unwrap()
         .with_sck(spi_sck)
         .with_mosi(spi_mosi);
 
-    // Create the display interface
-    let spi_device: ExclusiveDevice<Spi<'_, Blocking>, Output<'a>, NoDelay> = ExclusiveDevice::new(spi, lcd_cs, NoDelay).unwrap();
-    let display_interface: SPIInterface<ExclusiveDevice<Spi<'_, Blocking>, Output<'a>, NoDelay>, Output<'a>>  = SPIInterface::new(spi_device, lcd_dc);
-    // Create the display driver instance, (0, 0) is the top-left corner
-    let mut output_display = Gc9a01::new(display_interface, DisplayResolution240x240, DisplayRotation::Rotate180);
-
-    // Create a delay provider
+    let spi_device = ExclusiveDevice::new(spi, lcd_cs, NoDelay).unwrap();
+    let di = SPIInterface::new(spi_device, lcd_dc);
     let mut delay = SpinDelay;
 
-    // Init sequence
-    output_display.init(&mut delay).expect("gc9a01 init");
-
-    output_display
+    // display set up
+    let disp = DisplayBuilder::new(GC9A01, di)
+        .display_size(240, 240)
+        .display_offset(0, 0)
+        .orientation(Orientation::new().rotate(Rotation::Deg180))
+        .invert_colors(ColorInversion::Inverted)
+        .color_order(ColorOrder::Bgr)
+        .reset_pin(lcd_rst) 
+        .init(&mut delay) 
+        .unwrap();
+    
+    disp
 }
+
+
+
 
 
 // Handle button press events
@@ -395,18 +404,24 @@ fn main() -> ! {
     // Clear display by drawing a filled rectangle    
     // Full black background:
 
-    my_display.fill_solid(
-        &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
-        Rgb565::BLACK
-    ).ok();
 
-    Rectangle::new(Point::new(0, 0), Size::new(120, 120))
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-        .draw(&mut my_display).ok();
+    Rectangle::new(Point::new(0, 0), Size::new(240, 240))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(&mut my_display)
+        .ok();
 
-    Rectangle::new(Point::new(120, 120), Size::new(120, 120))
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-        .draw(&mut my_display).ok();
+    // my_display.fill_solid(
+    //     &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
+    //     Rgb565::BLACK
+    // ).ok();
+
+    // Rectangle::new(Point::new(0, 0), Size::new(120, 120))
+    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+    //     .draw(&mut my_display).ok();
+
+    // Rectangle::new(Point::new(120, 120), Size::new(120, 120))
+    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+    //     .draw(&mut my_display).ok();
     // let diameter: u32 = 242;
     // Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
     //     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
