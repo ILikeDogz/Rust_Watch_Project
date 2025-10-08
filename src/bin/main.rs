@@ -135,33 +135,51 @@ enum UiState {
     State1,
     State2,
     State3,
+    State4,
 }
 
 impl UiState {
-    const ALL: [UiState; 3] = [UiState::State1, UiState::State2, UiState::State3];
+    // All possible states
+    const ALL: [UiState; 4] = [UiState::State1, UiState::State2, UiState::State3, UiState::State4];
 
+    // Cycle to next state
     fn next(self) -> Self {
         use UiState::*;
         match self {
             State1 => State2,
             State2 => State3,
-            State3 => State1,
+            State3 => State4,
+            State4 => State1,
         }
     }
 
+    fn prev(self) -> Self {
+        use UiState::*;
+        match self {
+            State1 => State4,
+            State2 => State1,
+            State3 => State2,
+            State4 => State3,
+        }
+    }
+
+    // For potential future use: convert to/from u8 for storage
     fn as_u8(self) -> u8 {
         match self {
             UiState::State1 => 1,
             UiState::State2 => 2,
             UiState::State3 => 3,
+            UiState::State4 => 4,
         }
     }
 
+    // For potential future use: convert to/from u8 for storage
     fn from_u8(n: u8) -> Self {
         match n {
             1 => UiState::State1,
             2 => UiState::State2,
             3 => UiState::State3,
+            4 => UiState::State4,
             _ => UiState::State1,
         }
     }
@@ -224,13 +242,24 @@ fn update_ui(
             .ok();
         }
         UiState::State3 => {
-            // Draw a centered rectangle
+            // Draw a filled centered rectangle
             let size = Size::new(120, 80);
             Rectangle::new(
                 Point::new(CENTER - (size.width as i32 / 2), CENTER - (size.height as i32 / 2)),
                 size,
             )
             .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+            .draw(disp)
+            .ok();
+        }
+        UiState::State4 => {
+            // Draw a filled centered circle
+            let diameter: u32 = 120;
+            Circle::new(
+                Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2),
+                diameter,
+            )
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
             .draw(disp)
             .ok();
         }
@@ -490,27 +519,36 @@ fn main() -> ! {
             update_ui(&mut my_display);
             last_ui_state = ui_state;
         }
+        
 
         // Rotary encoder handling
-        // Detent-level direction print
         let pos = critical_section::with(|cs| ROTARY.position.borrow(cs).get());
         let detent = pos / DETENT_STEPS; // use division (works well for negatives too)
         
-        // Print only when it changes
+        // If detent changed, update UI state
         if Some(detent) != last_detent {
             if let Some(prev) = last_detent {
-                // Calculate delta
                 let step_delta = detent - prev;
-                // Print direction and delta
-                esp_println::println!(
-                    "Encoder: {} | detent {} (Δ={})",
-                    if step_delta > 0 { "ClockWise" } else { "CounterClockWise" },
-                    detent,
-                    step_delta
-                );
+                if step_delta > 0 {
+                    // turned clockwise: go to next state
+                    critical_section::with(|cs| {
+                        let state = UI_STATE.borrow(cs).get();
+                        let new_state = state.next();
+                        UI_STATE.borrow(cs).set(new_state);
+                    });
+                } else if step_delta < 0 {
+                    // turned counter-clockwise: go to previous state (optional)
+                    critical_section::with(|cs| {
+                        let state = UI_STATE.borrow(cs).get();
+                        let new_state = state.prev();
+                        UI_STATE.borrow(cs).set(new_state);
+                    });
+                }
             }
-            // record last detent
             last_detent = Some(detent);
         }
+
+        // Small delay to reduce CPU usage
+        for _ in 0..10000 { core::hint::spin_loop(); }
     }
 }
