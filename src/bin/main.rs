@@ -130,7 +130,44 @@ static ROTARY: RotaryState<'static> = RotaryState {
 };
 
 // UI state variable (example usage)
-static UI_STATE: Mutex<Cell<u8>> = Mutex::new(Cell::new(0));
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum UiState {
+    State1,
+    State2,
+    State3,
+}
+
+impl UiState {
+    const ALL: [UiState; 3] = [UiState::State1, UiState::State2, UiState::State3];
+
+    fn next(self) -> Self {
+        use UiState::*;
+        match self {
+            State1 => State2,
+            State2 => State3,
+            State3 => State1,
+        }
+    }
+
+    fn as_u8(self) -> u8 {
+        match self {
+            UiState::State1 => 1,
+            UiState::State2 => 2,
+            UiState::State3 => 3,
+        }
+    }
+
+    fn from_u8(n: u8) -> Self {
+        match n {
+            1 => UiState::State1,
+            2 => UiState::State2,
+            3 => UiState::State3,
+            _ => UiState::State1,
+        }
+    }
+}
+
+static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState::State1));
 
 // Current debounce time (milliseconds)
 const DEBOUNCE_MS: u64 = 240;
@@ -152,37 +189,52 @@ fn update_ui(
     >,
 ) {
     // Clear display background
-    Rectangle::new(Point::new(0, 0), Size::new(240, 240))
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-        .draw(disp)
-        .ok();
+    disp.clear(Rgb565::BLACK).ok();
 
     // Get current state
     let state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
 
-    // Determine what text to show
-    let msg = match state {
-        0 => "State 0",
-        1 => "State 1",
-        _ => "Other",
-    };
+    match state {
+        UiState::State1 => {
+            // Draw centered text
+            let style_bg = MonoTextStyleBuilder::new()
+                .font(&FONT_10X20)
+                .text_color(Rgb565::WHITE)
+                .background_color(Rgb565::GREEN)
+                .build();
 
-    // Text style
-    let style_bg = MonoTextStyleBuilder::new()
-        .font(&FONT_10X20)
-        .text_color(Rgb565::WHITE)
-        .background_color(Rgb565::GREEN)
-        .build();
-
-    // Draw centered text using Alignment::Center
-    Text::with_alignment(
-        msg,
-        Point::new(CENTER, CENTER),
-        style_bg,
-        Alignment::Center,
-    )
-    .draw(disp)
-    .ok();
+            Text::with_alignment(
+                "State 1",
+                Point::new(CENTER, CENTER),
+                style_bg,
+                Alignment::Center,
+            )
+            .draw(disp)
+            .ok();
+        }
+        UiState::State2 => {
+            // Draw a centered circle
+            let diameter: u32 = 120;
+            Circle::new(
+                Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2),
+                diameter,
+            )
+            .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 5))
+            .draw(disp)
+            .ok();
+        }
+        UiState::State3 => {
+            // Draw a centered rectangle
+            let size = Size::new(120, 80);
+            Rectangle::new(
+                Point::new(CENTER - (size.width as i32 / 2), CENTER - (size.height as i32 / 2)),
+                size,
+            )
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+            .draw(disp)
+            .ok();
+        }
+    }
 }
 
 
@@ -273,7 +325,7 @@ fn handle_button_generic(btn: &ButtonState, now_ms: u64) {
 
                 // Example: update UI state variable
                 let state = UI_STATE.borrow(cs).get();
-                let new_state = (state + 1) % 2;
+                let new_state = state.next();
                 UI_STATE.borrow(cs).set(new_state);
             }
         }
@@ -357,7 +409,7 @@ fn main() -> ! {
     let mut last_detent: Option<i32> = None;
 
     // initial UI state
-    let mut last_ui_state = 0;
+    let mut last_ui_state = UiState::State3;
 
     // Initialize peripherals
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -403,12 +455,12 @@ fn main() -> ! {
     // --- FIRST DRAW ----------------------------------------------------------
     // Clear display by drawing a filled rectangle    
     // Full black background:
+    my_display.clear(Rgb565::BLACK).ok();
 
-
-    Rectangle::new(Point::new(0, 0), Size::new(240, 240))
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-        .draw(&mut my_display)
-        .ok();
+    // Rectangle::new(Point::new(0, 0), Size::new(240, 240))
+    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+    //     .draw(&mut my_display)
+    //     .ok();
 
     // my_display.fill_solid(
     //     &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
@@ -422,11 +474,6 @@ fn main() -> ! {
     // Rectangle::new(Point::new(120, 120), Size::new(120, 120))
     //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
     //     .draw(&mut my_display).ok();
-    // let diameter: u32 = 242;
-    // Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
-    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-    //     .draw(&mut my_display)
-    //     .ok();
 
     // // Centered circle with diameter 160
     // let diameter: u32 = 160;
@@ -434,32 +481,6 @@ fn main() -> ! {
     //     .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 3))
     //     .draw(&mut my_display)
     //     .ok();
-
-    // // background style
-    // let style_bg = MonoTextStyleBuilder::new()
-    //     .font(&FONT_10X20)
-    //     .text_color(Rgb565::WHITE)
-    //     .background_color(Rgb565::GREEN)
-    //     .build();
-
-    // // Centered text with background
-    // Text::<'_, MonoTextStyle<'_, Rgb565>>::with_alignment(
-    //     "WOW, GC9A01",
-    //     Point::new(CENTER, CENTER),  // near center of 240x240
-    //     style_bg,
-    //     Alignment::Center,
-    // )
-    // .draw(&mut my_display)
-    // .ok();
-
-    // Rectangle::new(Point::new(0, 0), Size::new(240, 240))
-    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-    //     .draw(&mut my_display).ok();
-
-
-    // Rectangle::new(Point::new(100, 110), Size::new(40, 20))
-    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
-    //     .draw(&mut my_display).ok();
 
     loop {
 
