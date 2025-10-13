@@ -45,56 +45,128 @@ pub const RESOLUTION: u32 = 240; // 240x240 display
 pub const CENTER: i32 = RESOLUTION as i32 / 2;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum UiState {
-    State1,
-    State2,
-    State3,
-    State4,
+pub struct UiState {
+    pub page: Page,
+    pub dialog: Option<Dialog>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Page {
+    Main(MainMenuState),
+    Settings(SettingsMenuState),
+    Info,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Dialog {
+    VolumeAdjust,
+    BrightnessAdjust,
+    ResetSelector,
+    HomePage,
+    StartPage,
+    AboutPage,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum MainMenuState {
+    Home,
+    Start,
+    About,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SettingsMenuState {
+    Volume,
+    Brightness,
+    Reset,
 }
 
 impl UiState {
-    // All possible states
-    pub const ALL: [UiState; 4] = [UiState::State1, UiState::State2, UiState::State3, UiState::State4];
-
-    pub fn next(self) -> Self {
-        use UiState::*;
-        match self {
-            State1 => State2,
-            State2 => State3,
-            State3 => State4,
-            State4 => State1,
+    /// Switch to the next menu (Button 1)
+    pub fn next_menu(self) -> Self {
+        // If a dialog is open, ignore menu switching
+        if self.dialog.is_some() {
+            return self;
         }
+        let next_page = match self.page {
+            Page::Main(_) => Page::Settings(SettingsMenuState::Volume),
+            Page::Settings(_) => Page::Info,
+            Page::Info => Page::Main(MainMenuState::Home),
+        };
+        Self { page: next_page, dialog: None }
     }
 
-    pub fn prev(self) -> Self {
-        use UiState::*;
-        match self {
-            State1 => State4,
-            State2 => State1,
-            State3 => State2,
-            State4 => State3,
+    /// Move to the next item/state in the current menu (Button 3 or encoder)
+    pub fn next_item(self) -> Self {
+        if self.dialog.is_some() {
+            return self; // Or handle dialog-specific navigation here
         }
-    }
-    
-    // For potential future use: convert to/from u8 for storage
-    pub fn as_u8(self) -> u8 {
-        match self {
-            UiState::State1 => 1,
-            UiState::State2 => 2,
-            UiState::State3 => 3,
-            UiState::State4 => 4,
-        }
+        let next_page = match self.page {
+            Page::Main(state) => {
+                let next = match state {
+                    MainMenuState::Home => MainMenuState::Start,
+                    MainMenuState::Start => MainMenuState::About,
+                    MainMenuState::About => MainMenuState::Home,
+                };
+                Page::Main(next)
+            }
+            Page::Settings(state) => {
+                let next = match state {
+                    SettingsMenuState::Volume => SettingsMenuState::Brightness,
+                    SettingsMenuState::Brightness => SettingsMenuState::Reset,
+                    SettingsMenuState::Reset => SettingsMenuState::Volume,
+                };
+                Page::Settings(next)
+            }
+            Page::Info => Page::Info,
+        };
+        Self { page: next_page, dialog: None }
     }
 
-    // For potential future use: convert to/from u8 for storage
-    pub fn from_u8(n: u8) -> Self {
-        match n {
-            1 => UiState::State1,
-            2 => UiState::State2,
-            3 => UiState::State3,
-            4 => UiState::State4,
-            _ => UiState::State1,
+    /// Move to the previous item/state in the current menu
+    pub fn prev_item(self) -> Self {
+        if self.dialog.is_some() {
+            return self; // Or handle dialog-specific navigation here
         }
+        let prev_page = match self.page {
+            Page::Main(state) => {
+                let prev = match state {
+                    MainMenuState::Home => MainMenuState::About,
+                    MainMenuState::Start => MainMenuState::Home,
+                    MainMenuState::About => MainMenuState::Start,
+                };
+                Page::Main(prev)
+            }
+            Page::Settings(state) => {
+                let prev = match state {
+                    SettingsMenuState::Volume => SettingsMenuState::Reset,
+                    SettingsMenuState::Brightness => SettingsMenuState::Volume,
+                    SettingsMenuState::Reset => SettingsMenuState::Brightness,
+                };
+                Page::Settings(prev)
+            }
+            Page::Info => Page::Info,
+        };
+        Self { page: prev_page, dialog: None }
+    }
+
+    /// Select current item (Button 2)
+    pub fn select(self) -> Self {
+        // If a dialog is open, close it and return to the underlying page
+        if let Some(_) = self.dialog {
+            return Self { page: self.page, dialog: None };
+        }
+        // Otherwise, open a dialog based on the current page/item
+        let dialog = match self.page {
+            Page::Main(MainMenuState::Home) => Some(Dialog::HomePage),
+            Page::Main(MainMenuState::Start) => Some(Dialog::StartPage),
+            Page::Main(MainMenuState::About) => Some(Dialog::AboutPage),
+            Page::Settings(SettingsMenuState::Volume) => Some(Dialog::VolumeAdjust),
+            Page::Settings(SettingsMenuState::Brightness) => Some(Dialog::BrightnessAdjust),
+            Page::Settings(SettingsMenuState::Reset) => Some(Dialog::ResetSelector),
+            Page::Info => None, // Or maybe Some(Dialog::AboutPage)
+        };
+        Self { page: self.page, dialog }
     }
 }
 
@@ -114,82 +186,164 @@ pub fn update_ui(
     // Clear display background
     disp.clear(Rgb565::BLACK).ok();
 
-    // Get current state
-    match state {
-        UiState::State1 => {
-            // Draw centered text
-            let style_bg = MonoTextStyleBuilder::new()
+    // If a dialog is open, render it and return
+    if let Some(dialog) = state.dialog {
+        match dialog {
+            Dialog::VolumeAdjust => {
+                let style = MonoTextStyleBuilder::new()
+                    .font(&FONT_10X20)
+                    .text_color(Rgb565::WHITE)
+                    .background_color(Rgb565::RED)
+                    .build();
+                Text::with_alignment(
+                    "Adjust Volume (TEMP)",
+                    Point::new(CENTER, CENTER),
+                    style,
+                    Alignment::Center,
+                )
+                .draw(disp)
+                .ok();
+            }
+            Dialog::BrightnessAdjust => {
+                let style = MonoTextStyleBuilder::new()
+                    .font(&FONT_10X20)
+                    .text_color(Rgb565::WHITE)
+                    .background_color(Rgb565::MAGENTA)
+                    .build();
+                Text::with_alignment(
+                    "Adjust Brightness (TEMP)",
+                    Point::new(CENTER, CENTER),
+                    style,
+                    Alignment::Center,
+                )
+                .draw(disp)
+                .ok();
+            }
+            Dialog::ResetSelector => {
+                let style = MonoTextStyleBuilder::new()
+                    .font(&FONT_10X20)
+                    .text_color(Rgb565::WHITE)
+                    .background_color(Rgb565::YELLOW)
+                    .build();
+                Text::with_alignment(
+                    "Reset? (TEMP)",
+                    Point::new(CENTER, CENTER),
+                    style,
+                    Alignment::Center,
+                )
+                .draw(disp)
+                .ok();
+            }
+            Dialog::HomePage => {
+                let style = MonoTextStyleBuilder::new()
+                    .font(&FONT_10X20)
+                    .text_color(Rgb565::GREEN)
+                    .background_color(Rgb565::BLACK)
+                    .build();
+                Text::with_alignment(
+                    "Home Page (TEMP)",
+                    Point::new(CENTER, CENTER),
+                    style,
+                    Alignment::Center,
+                )
+                .draw(disp)
+                .ok();
+            }
+            Dialog::StartPage => {
+                let style = MonoTextStyleBuilder::new()
+                    .font(&FONT_10X20)
+                    .text_color(Rgb565::BLUE)
+                    .background_color(Rgb565::BLACK)
+                    .build();
+                Text::with_alignment(
+                    "Start Page (TEMP)",
+                    Point::new(CENTER, CENTER),
+                    style,
+                    Alignment::Center,
+                )
+                .draw(disp)
+                .ok();
+            }
+            Dialog::AboutPage => {
+                let style = MonoTextStyleBuilder::new()
+                    .font(&FONT_10X20)
+                    .text_color(Rgb565::CYAN)
+                    .background_color(Rgb565::BLACK)
+                    .build();
+                Text::with_alignment(
+                    "About Page (TEMP)",
+                    Point::new(CENTER, CENTER),
+                    style,
+                    Alignment::Center,
+                )
+                .draw(disp)
+                .ok();
+            }
+        }
+        return;
+    }
+
+    // Otherwise, render the current page
+    match state.page {
+        Page::Main(menu_state) => {
+            let msg = match menu_state {
+                MainMenuState::Home => "Main: Home",
+                MainMenuState::Start => "Main: Start",
+                MainMenuState::About => "Main: About",
+            };
+
+            let style = MonoTextStyleBuilder::new()
                 .font(&FONT_10X20)
                 .text_color(Rgb565::WHITE)
                 .background_color(Rgb565::GREEN)
                 .build();
 
             Text::with_alignment(
-                "State 1",
+                msg,
                 Point::new(CENTER, CENTER),
-                style_bg,
+                style,
                 Alignment::Center,
             )
             .draw(disp)
             .ok();
         }
-        UiState::State2 => {
-            // Draw a centered circle
-            let diameter: u32 = 120;
-            Circle::new(
-                Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2),
-                diameter,
+        Page::Settings(settings_state) => {
+            let msg = match settings_state {
+                SettingsMenuState::Volume => "Settings: Volume",
+                SettingsMenuState::Brightness => "Settings: Brightness",
+                SettingsMenuState::Reset => "Settings: Reset",
+            };
+
+            let style = MonoTextStyleBuilder::new()
+                .font(&FONT_10X20)
+                .text_color(Rgb565::YELLOW)
+                .background_color(Rgb565::BLUE)
+                .build();
+
+            Text::with_alignment(
+                msg,
+                Point::new(CENTER, CENTER),
+                style,
+                Alignment::Center,
             )
-            .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 5))
             .draw(disp)
             .ok();
         }
-        UiState::State3 => {
-            // Draw a filled centered rectangle
-            let size = Size::new(120, 80);
-            Rectangle::new(
-                Point::new(CENTER - (size.width as i32 / 2), CENTER - (size.height as i32 / 2)),
-                size,
+        Page::Info => {
+            let style = MonoTextStyleBuilder::new()
+                .font(&FONT_10X20)
+                .text_color(Rgb565::CYAN)
+                .background_color(Rgb565::BLACK)
+                .build();
+
+            Text::with_alignment(
+                "Info Screen",
+                Point::new(CENTER, CENTER),
+                style,
+                Alignment::Center,
             )
-            .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
             .draw(disp)
             .ok();
         }
-        UiState::State4 => {
-            // Draw a filled centered circle
-            let diameter: u32 = 120;
-            Circle::new(
-                Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2),
-                diameter,
-            )
-            .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
-            .draw(disp)
-            .ok();
-        }
-
-        // Rectangle::new(Point::new(0, 0), Size::new(240, 240))
-        //     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-        //     .draw(&mut my_display)
-        //     .ok();
-
-        // my_display.fill_solid(
-        //     &Rectangle::new(Point::new(0, 0), Size::new(240, 240)),
-        //     Rgb565::BLACK
-        // ).ok();
-
-        // Rectangle::new(Point::new(0, 0), Size::new(120, 120))
-        //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-        //     .draw(&mut my_display).ok();
-
-        // Rectangle::new(Point::new(120, 120), Size::new(120, 120))
-        //     .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-        //     .draw(&mut my_display).ok();
-
-        // // Centered circle with diameter 160
-        // let diameter: u32 = 160;
-        // Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
-        //     .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 3))
-        //     .draw(&mut my_display)
-        //     .ok();
     }
 }

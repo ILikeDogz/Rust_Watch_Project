@@ -14,6 +14,8 @@
 // The macro automatically fills in the fields. 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+use esp32s3_tests::ui::MainMenuState;
+use esp32s3_tests::ui::Page;
 use esp32s3_tests::wiring::init_board_pins;
 use esp32s3_tests::wiring::BoardPins;
 
@@ -72,7 +74,8 @@ static ROTARY: RotaryState<'static> = RotaryState {
 };
 
 
-static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState::State1));
+static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState { page: Page::Main(MainMenuState::Home), dialog: None }));
+
 
 // Current debounce time (milliseconds)
 const DEBOUNCE_MS: u64 = 240;
@@ -86,23 +89,25 @@ fn handler() {
         let t = SystemTimer::unit_value(Unit::Unit0);
         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
     };
-
     handle_button_generic(&BUTTON1, now_ms, DEBOUNCE_MS, || {
+        // Button 1: Switch menu
         esp_println::println!("{} pressed", BUTTON1.name);
         critical_section::with(|cs| {
             let state = UI_STATE.borrow(cs).get();
-            let new_state = state.next();
+            let new_state = state.next_menu();
             UI_STATE.borrow(cs).set(new_state);
         });
     });
     handle_button_generic(&BUTTON2, now_ms, DEBOUNCE_MS, || {
+        // Button 2: Select
         esp_println::println!("{} pressed", BUTTON2.name);
         critical_section::with(|cs| {
             let state = UI_STATE.borrow(cs).get();
-            let new_state = state.next();
+            let new_state = state.select();
             UI_STATE.borrow(cs).set(new_state);
         });
     });
+
     handle_encoder_generic(&ROTARY);
 }
 
@@ -115,7 +120,7 @@ fn main() -> ! {
     let mut last_detent: Option<i32> = None;
 
     // initial UI state
-    let mut last_ui_state = UiState::State1;
+    let mut last_ui_state = UiState { page: Page::Main(MainMenuState::Home), dialog: None };
 
     // Initialize peripherals
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -185,14 +190,14 @@ fn main() -> ! {
                     // turned clockwise: go to next state
                     critical_section::with(|cs| {
                         let state = UI_STATE.borrow(cs).get();
-                        let new_state = state.next();
+                        let new_state = state.next_item();
                         UI_STATE.borrow(cs).set(new_state);
                     });
                 } else if step_delta < 0 {
                     // turned counter-clockwise: go to previous state (optional)
                     critical_section::with(|cs| {
                         let state = UI_STATE.borrow(cs).get();
-                        let new_state = state.prev();
+                        let new_state = state.prev_item();
                         UI_STATE.borrow(cs).set(new_state);
                     });
                 }
