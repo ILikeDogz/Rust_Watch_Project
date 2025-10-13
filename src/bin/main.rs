@@ -1,4 +1,8 @@
 //! Watch Prototype
+//! ========================================
+//! needs to be run in WSL2 terminal
+//! source ~/export-esp.sh
+//! ========================================
 //!
 //! Toggles LCD when either button pressed.
 //! It also reads a rotary encoder and toggles LCD.
@@ -43,8 +47,6 @@ use embedded_graphics::{
     prelude::RgbColor,
     draw_target::DrawTarget, 
 };
-
-
 
 
 // Shared resources for Button

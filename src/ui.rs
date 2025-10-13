@@ -28,7 +28,6 @@ use mipidsi::{
     models::GC9A01,
 };
 
-
 // Embedded-graphics
 use embedded_graphics::{
     mono_font::{ascii::{FONT_10X20, FONT_6X10}, 
@@ -38,18 +37,22 @@ use embedded_graphics::{
     primitives::{PrimitiveStyle, Rectangle, Circle, Triangle}, text::{Alignment, Baseline, Text}, 
     Drawable,
     draw_target::DrawTarget, 
+    image::{Image, ImageRaw},
 };
 
 // Display configuration, (0,0) is top-left corner
 pub const RESOLUTION: u32 = 240; // 240x240 display
 pub const CENTER: i32 = RESOLUTION as i32 / 2;
+static MY_IMAGE: &[u8] = include_bytes!("assets/omnitrix_logo_240x240_rgb565_be.raw");
 
+// UI State representation
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct UiState {
     pub page: Page,
     pub dialog: Option<Dialog>,
 }
 
+// Different pages in the UI
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Page {
     Main(MainMenuState),
@@ -57,6 +60,7 @@ pub enum Page {
     Info,
 }
 
+// Dialogs that can overlay on top of pages
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Dialog {
     VolumeAdjust,
@@ -67,6 +71,7 @@ pub enum Dialog {
     AboutPage,
 }
 
+// States for Main Menu
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MainMenuState {
     Home,
@@ -74,6 +79,7 @@ pub enum MainMenuState {
     About,
 }
 
+// States for Settings Menu
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SettingsMenuState {
     Volume,
@@ -170,6 +176,65 @@ impl UiState {
     }
 }
 
+// helper function to draw centered text
+fn draw_text(
+    disp: &mut Display<
+        SpiInterface<
+            ExclusiveDevice<Spi<'_, Blocking>, Output<'_>, embedded_hal_bus::spi::NoDelay>,
+            Output<'_>,
+        >,
+        GC9A01,
+        Output<'_>,
+    >,
+    text: &str,
+    fg: Rgb565,
+    bg: Rgb565,
+    x_point: i32,
+    y_point: i32,
+) {
+    let style = MonoTextStyleBuilder::new()
+        .font(&FONT_10X20)
+        .text_color(fg)
+        .background_color(bg)
+        .build();
+
+    Text::with_alignment(
+        text,
+        Point::new(x_point, y_point),
+        style,
+        Alignment::Center,
+    )
+    .draw(disp)
+    .ok();
+}
+
+// helper function to draw a centered image
+fn draw_image(
+    disp: &mut Display<
+        SpiInterface<
+            ExclusiveDevice<Spi<'_, Blocking>, Output<'_>, embedded_hal_bus::spi::NoDelay>,
+            Output<'_>,
+        >,
+        GC9A01,
+        Output<'_>,
+    >,
+    image_data: &'static [u8],
+    width: u32,
+    height: u32,
+) {
+    // Create an ImageRaw object (assuming RGB565 format)
+    let raw = ImageRaw::<Rgb565>::new(image_data, width);
+
+    // Center the image
+    let x = (RESOLUTION - width) as i32 / 2;
+    let y = (RESOLUTION - height) as i32 / 2;
+
+    // Draw the image
+    Image::new(&raw, Point::new(x, y))
+        .draw(disp)
+        .ok();
+}
+
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
     disp: &mut Display<
@@ -183,167 +248,46 @@ pub fn update_ui(
     state: UiState,
 ) 
 {
-    // Clear display background
     disp.clear(Rgb565::BLACK).ok();
 
-    // If a dialog is open, render it and return
     if let Some(dialog) = state.dialog {
         match dialog {
-            Dialog::VolumeAdjust => {
-                let style = MonoTextStyleBuilder::new()
-                    .font(&FONT_10X20)
-                    .text_color(Rgb565::WHITE)
-                    .background_color(Rgb565::RED)
-                    .build();
-                Text::with_alignment(
-                    "Adjust Volume (TEMP)",
-                    Point::new(CENTER, CENTER),
-                    style,
-                    Alignment::Center,
-                )
-                .draw(disp)
-                .ok();
-            }
-            Dialog::BrightnessAdjust => {
-                let style = MonoTextStyleBuilder::new()
-                    .font(&FONT_10X20)
-                    .text_color(Rgb565::WHITE)
-                    .background_color(Rgb565::MAGENTA)
-                    .build();
-                Text::with_alignment(
-                    "Adjust Brightness (TEMP)",
-                    Point::new(CENTER, CENTER),
-                    style,
-                    Alignment::Center,
-                )
-                .draw(disp)
-                .ok();
-            }
-            Dialog::ResetSelector => {
-                let style = MonoTextStyleBuilder::new()
-                    .font(&FONT_10X20)
-                    .text_color(Rgb565::WHITE)
-                    .background_color(Rgb565::YELLOW)
-                    .build();
-                Text::with_alignment(
-                    "Reset? (TEMP)",
-                    Point::new(CENTER, CENTER),
-                    style,
-                    Alignment::Center,
-                )
-                .draw(disp)
-                .ok();
-            }
-            Dialog::HomePage => {
-                let style = MonoTextStyleBuilder::new()
-                    .font(&FONT_10X20)
-                    .text_color(Rgb565::GREEN)
-                    .background_color(Rgb565::BLACK)
-                    .build();
-                Text::with_alignment(
-                    "Home Page (TEMP)",
-                    Point::new(CENTER, CENTER),
-                    style,
-                    Alignment::Center,
-                )
-                .draw(disp)
-                .ok();
-            }
-            Dialog::StartPage => {
-                let style = MonoTextStyleBuilder::new()
-                    .font(&FONT_10X20)
-                    .text_color(Rgb565::BLUE)
-                    .background_color(Rgb565::BLACK)
-                    .build();
-                Text::with_alignment(
-                    "Start Page (TEMP)",
-                    Point::new(CENTER, CENTER),
-                    style,
-                    Alignment::Center,
-                )
-                .draw(disp)
-                .ok();
-            }
-            Dialog::AboutPage => {
-                let style = MonoTextStyleBuilder::new()
-                    .font(&FONT_10X20)
-                    .text_color(Rgb565::CYAN)
-                    .background_color(Rgb565::BLACK)
-                    .build();
-                Text::with_alignment(
-                    "About Page (TEMP)",
-                    Point::new(CENTER, CENTER),
-                    style,
-                    Alignment::Center,
-                )
-                .draw(disp)
-                .ok();
-            }
+            Dialog::VolumeAdjust =>
+                draw_text(disp, "Adjust Volume (TEMP)", Rgb565::WHITE, Rgb565::RED, CENTER, CENTER),
+            Dialog::BrightnessAdjust =>
+                draw_text(disp, "Adjust Brightness (TEMP)", Rgb565::WHITE, Rgb565::MAGENTA, CENTER, CENTER),
+            Dialog::ResetSelector =>
+                draw_text(disp, "Reset? (TEMP)", Rgb565::WHITE, Rgb565::YELLOW, CENTER, CENTER),
+            Dialog::HomePage =>
+                draw_text(disp, "Home Page (TEMP)", Rgb565::GREEN, Rgb565::BLACK, CENTER, CENTER),
+            Dialog::StartPage =>
+                draw_text(disp, "Start Page (TEMP)", Rgb565::BLUE, Rgb565::BLACK, CENTER, CENTER),
+            Dialog::AboutPage =>
+                draw_text(disp, "About Page (TEMP)", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER),
         }
         return;
     }
 
-    // Otherwise, render the current page
     match state.page {
         Page::Main(menu_state) => {
-            let msg = match menu_state {
-                MainMenuState::Home => "Main: Home",
-                MainMenuState::Start => "Main: Start",
-                MainMenuState::About => "Main: About",
+            let (msg, fg, bg) = match menu_state {
+                MainMenuState::Home  => ("Main: Home", Rgb565::WHITE, Rgb565::GREEN),
+                MainMenuState::Start => ("Main: Start", Rgb565::WHITE, Rgb565::GREEN),
+                MainMenuState::About => ("Main: About", Rgb565::WHITE, Rgb565::GREEN),
             };
-
-            let style = MonoTextStyleBuilder::new()
-                .font(&FONT_10X20)
-                .text_color(Rgb565::WHITE)
-                .background_color(Rgb565::GREEN)
-                .build();
-
-            Text::with_alignment(
-                msg,
-                Point::new(CENTER, CENTER),
-                style,
-                Alignment::Center,
-            )
-            .draw(disp)
-            .ok();
+            draw_text(disp, msg, fg, bg, CENTER, CENTER);
         }
         Page::Settings(settings_state) => {
-            let msg = match settings_state {
-                SettingsMenuState::Volume => "Settings: Volume",
-                SettingsMenuState::Brightness => "Settings: Brightness",
-                SettingsMenuState::Reset => "Settings: Reset",
+            let (msg, fg, bg) = match settings_state {
+                SettingsMenuState::Volume     => ("Settings: Volume", Rgb565::YELLOW, Rgb565::BLUE),
+                SettingsMenuState::Brightness => ("Settings: Brightness", Rgb565::YELLOW, Rgb565::BLUE),
+                SettingsMenuState::Reset      => ("Settings: Reset", Rgb565::YELLOW, Rgb565::BLUE),
             };
-
-            let style = MonoTextStyleBuilder::new()
-                .font(&FONT_10X20)
-                .text_color(Rgb565::YELLOW)
-                .background_color(Rgb565::BLUE)
-                .build();
-
-            Text::with_alignment(
-                msg,
-                Point::new(CENTER, CENTER),
-                style,
-                Alignment::Center,
-            )
-            .draw(disp)
-            .ok();
+            draw_text(disp, msg, fg, bg, CENTER, CENTER);
         }
         Page::Info => {
-            let style = MonoTextStyleBuilder::new()
-                .font(&FONT_10X20)
-                .text_color(Rgb565::CYAN)
-                .background_color(Rgb565::BLACK)
-                .build();
-
-            Text::with_alignment(
-                "Info Screen",
-                Point::new(CENTER, CENTER),
-                style,
-                Alignment::Center,
-            )
-            .draw(disp)
-            .ok();
+            // draw_text(disp, "Info Screen", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER);
+            draw_image(disp, MY_IMAGE, 240, 240);
         }
     }
 }

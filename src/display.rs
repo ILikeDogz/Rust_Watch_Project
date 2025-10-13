@@ -82,16 +82,14 @@ pub fn setup_display<'a>(
         .with_frequency(Rate::from_hz(40_000_000))
         .with_mode(Mode::_0);
 
+    // create SPI instance
     let spi = Spi::new(spi2, spi_cfg).unwrap()
         .with_sck(spi_sck)
         .with_mosi(spi_mosi);
 
+    // create display interface
     let spi_device = ExclusiveDevice::new(spi, lcd_cs, NoDelay).unwrap();
-    let di = SpiInterface::new(
-        spi_device,
-        lcd_dc,
-display_buf,
-    );
+    let di = SpiInterface::new(spi_device, lcd_dc, display_buf);
     let mut delay = SpinDelay;
 
     // display set up
