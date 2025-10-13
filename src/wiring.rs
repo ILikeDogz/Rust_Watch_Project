@@ -30,11 +30,15 @@
 //! SCK is GPIO10 and MOSI is GPIO11 on the ESP32-S3.
 //! The MISO pin is not used in this example but could be mapped to GPIO12 if needed.
 
+
 use esp_backtrace as _;
+
+// ESP-HAL imports
 use esp_hal::{
     gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig, Pull},
+    peripherals::{Peripherals, SPI2, GPIO10, GPIO11},
 };
-use esp_hal::peripherals::{Peripherals, SPI2, GPIO10, GPIO11};
+
 
 pub struct BoardPins<'a> {
     // Leds
