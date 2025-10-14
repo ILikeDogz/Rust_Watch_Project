@@ -66,7 +66,57 @@ pub struct BoardPins<'a> {
 }
 
 // Default profile
-#[cfg(feature = "devkit-esp32s3")]
+#[cfg(feature = "devkit-esp32s3-disp128")]
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
+    let io = Io::new(p.IO_MUX);
+
+    // LEDs
+    // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
+    // let mut led2 = Output::new(p.GPIO19, Level::Low, OutputConfig::default());
+    // led1.set_high();
+    // led2.set_high();
+
+    // buttons
+    let mut btn1 = Input::new(p.GPIO15, InputConfig::default().with_pull(Pull::Up));
+    let mut btn2 = Input::new(p.GPIO21, InputConfig::default().with_pull(Pull::Up));
+    btn1.listen(Event::AnyEdge);
+    btn2.listen(Event::AnyEdge);
+
+    // rotary encoder pins
+    let mut enc_clk = Input::new(p.GPIO18, InputConfig::default().with_pull(Pull::None));
+    let mut enc_dt  = Input::new(p.GPIO17, InputConfig::default().with_pull(Pull::None));
+    enc_clk.listen(Event::AnyEdge);
+    enc_dt.listen(Event::AnyEdge);
+
+    // LCD control pins — do NOT touch GPIO10/11 here (SPI SCK/MOSI)
+    let lcd_cs  = Output::new(p.GPIO9,  Level::High, OutputConfig::default());
+    let lcd_dc  = Output::new(p.GPIO8,  Level::Low,  OutputConfig::default());
+    let lcd_rst = Output::new(p.GPIO14, Level::High, OutputConfig::default());
+    let lcd_bl  = Output::new(p.GPIO2,  Level::High, OutputConfig::default());
+
+    // SPI2 peripheral and pins
+    let spi2 = p.SPI2; 
+    let spi_sck = p.GPIO10; // GPIO10 is SPI2 SCK
+    let spi_mosi = p.GPIO11;// GPIO11 is SPI2 MOSI
+
+    // Return IO handler and all pins
+    (
+        io,
+        BoardPins {
+            // led1, led2, 
+            btn1,btn2, 
+            enc_clk, enc_dt,
+            spi2,
+            spi_sck,
+            spi_mosi,
+            lcd_cs, lcd_dc, lcd_rst, lcd_bl,
+        },
+    )
+}
+
+
+// Default profile
+#[cfg(feature = "disp145Oled-esp32s3")]
 pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let io = Io::new(p.IO_MUX);
 

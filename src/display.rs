@@ -54,6 +54,7 @@ impl embedded_hal::delay::DelayNs for SpinDelay {
     }
 }
 
+#[cfg(feature = "devkit-esp32s3-disp128")]
 pub fn setup_display<'a>(
     spi2: SPI2<'a>,
     spi_sck: GPIO10<'a>,
