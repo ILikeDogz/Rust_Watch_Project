@@ -20,6 +20,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 use embedded_graphics::prelude::IntoStorage;
 use esp32s3_tests::co5300;
+use esp32s3_tests::display::setup_display;
 use esp32s3_tests::ui::MainMenuState;
 use esp32s3_tests::ui::Page;
 use esp32s3_tests::wiring::init_board_pins;
@@ -63,27 +64,6 @@ use embedded_hal::{
     spi::SpiDevice,
 };
 // use esp_hal::spi::FullDuplexMode;
-
-fn blink_gpio_test(
-    cs: &mut impl OutputPin,
-    rst: &mut impl OutputPin,
-    en: &mut impl OutputPin,
-    delay: &mut impl DelayNs,
-) {
-    // 3 quick pulses on each line
-    for _ in 0..3 {
-        cs.set_low().ok();  delay.delay_ms(50);
-        cs.set_high().ok(); delay.delay_ms(50);
-    }
-    for _ in 0..3 {
-        rst.set_low().ok();  delay.delay_ms(50);
-        rst.set_high().ok(); delay.delay_ms(50);
-    }
-    for _ in 0..3 {
-        en.set_low().ok();  delay.delay_ms(50);
-        en.set_high().ok(); delay.delay_ms(50);
-    }
-}
 
 
 // Shared resources for Button
@@ -223,53 +203,16 @@ fn main() -> ! {
         ROTARY.last_step.borrow(cs).set(0);
     });
 
-
-    // Pull out the OLED pins (with spi2 back in DisplayPins for symmetry)
-    let DisplayPins {
-        spi2,
-        mut cs,
-        clk,
-        do0,    // MOSI
-        do1,    // MISO
-        do2: _,
-        do3: _,
-        mut rst,
-        mut en,
-        tp_sda: _,
-        tp_scl: _,
-    } = display_pins;
-
-    // quick pin blink so you can find them on a scope/LA
-    let mut delay = esp_hal::delay::Delay::new();
-    // (assuming cs, rst, en are Output<'_>)
-    blink_gpio_test(&mut cs, &mut rst, &mut en, &mut delay);
-
-
-    let spi_cfg = SpiConfig::default()
-        .with_frequency(Rate::from_hz(40_000_000))  // CO5300 works up to 40 MHz
-        .with_mode(Mode::_0);                        // keep Mode0
-
-    let spi = Spi::new(spi2, spi_cfg).unwrap()
-            .with_sck(clk)    // GPIO 10
-            .with_mosi(do0)   // GPIO 11
-            .with_miso(do1);  // GPIO 12 (for reading)
-
-    let spi_dev = ExclusiveDevice::new(spi, cs, NoDelay).unwrap();
-
-    let mut delay = esp_hal::delay::Delay::new();
-
-    let mut display = co5300::new_with_defaults(spi_dev, Some(rst), &mut delay)
-        .expect("CO5300 init failed");
-
-    match display.read_id() {
-        Ok(id) => println!("Panel ID (expected bogus on MISO): 0x{:02X}", id),
-        Err(e) => println!("read_id error: {:?}", e),
-    }
+    // set up display
+    let mut display_buf = [0u8; 1024];
+    let mut my_display = setup_display(
+        display_pins, &mut display_buf,
+    );
 
     // Fill a 40x40 square in center with black using ramwr_stream
     let cx = 233u16; let cy = 233u16;
     let w = 40u16; let h = 40u16;
-    display.set_window(cx - w/2, cy - h/2, cx + w/2 - 1, cy + h/2 - 1).unwrap();
+    my_display.set_window(cx - w/2, cy - h/2, cx + w/2 - 1, cy + h/2 - 1).unwrap();
     let wb = embedded_graphics::pixelcolor::Rgb565::BLACK.into_storage().to_be_bytes();
     let mut row = [0u8; 40*2];
     for i in (0..row.len()).step_by(2) { row[i]=wb[0]; row[i+1]=wb[1]; }
@@ -277,7 +220,7 @@ fn main() -> ! {
     // build chunk list: all rows back-to-back
     let mut chunks: heapless::Vec<&[u8], 64> = heapless::Vec::new();
     for _ in 0..h { chunks.push(&row).ok(); }
-    ramwr_stream(&mut display.spi, &chunks);
+    ramwr_stream(&mut my_display.spi, &chunks);
 
 
 
@@ -286,10 +229,6 @@ fn main() -> ! {
     loop {}
     // set up display
     // buffer for ram allocation
-    // let mut display_buf = [0u8; 1024];
-    // let mut my_display = setup_display(
-    //     display_pins, &mut display_buf,
-    // );
 
     // // --- FIRST DRAW ----------------------------------------------------------
     // my_display.clear(Rgb565::GREEN).ok();
