@@ -36,7 +36,19 @@ use esp_backtrace as _;
 // ESP-HAL imports
 use esp_hal::{
     gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig, Pull},
-    peripherals::{Peripherals, SPI2, GPIO10, GPIO11},
+    peripherals::{Peripherals, SPI2},
+};
+
+#[cfg(feature = "devkit-esp32s3-disp128")]
+use esp_hal::{
+    peripherals::{GPIO10, GPIO1},
+};
+
+
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+use esp_hal::{
+    peripherals::{GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO47, GPIO48},
 };
 
 
@@ -57,6 +69,8 @@ pub struct BoardPins<'a> {
      // display-related pins are feature gated
     #[cfg(any(feature = "devkit-esp32s3-disp128"))]
     pub display_pins: DisplayPins<'a>,
+    #[cfg(any(feature = "esp32s3-disp143Oled"))]
+    pub display_pins: DisplayPins<'a>,
 }
 
 // nested, feature-only struct for LCD/SPI pins
@@ -71,6 +85,21 @@ pub struct DisplayPins<'a> {
     pub lcd_dc:  Output<'a>,  // GPIO8
     pub lcd_rst: Output<'a>,  // GPIO14
     pub lcd_bl:  Output<'a>,  // GPIO2
+}
+#[cfg(any(feature = "esp32s3-disp143Oled"))]
+pub struct DisplayPins<'a> {
+    // CS=GPIO9, CLK=GPIO10, dO0=GPIO11, dO1=GPIO12, dO2=GPIO13, dO3=GPIO14, RST=GPIO21, EN=GPIO42, TP_SDA=GPIO47, TP_SCL=GPIO48
+    pub spi2: SPI2<'a>,     // <-- new: the SPI2 peripheral handle
+    pub cs:  Output<'a>,    // GPIO9
+    pub clk: GPIO10<'a>, // Change from Output<'a> to GPIO10<'a>
+    pub do0: GPIO11<'a>, // Change from Output<'a> to GPIO11<'a>
+    pub do1: Input<'a>,     // GPIO12 if you plan reads later
+    pub do2: GPIO13<'a>,    // (unused here)
+    pub do3: GPIO14<'a>,    // (unused here)
+    pub rst: Output<'a>,    // GPIO21
+    pub en:  Output<'a>,    // GPIO42
+    pub tp_sda: GPIO47<'a>, // (unused here)
+    pub tp_scl: GPIO48<'a>, // (unused here)
 }
 
 // Default profile
@@ -125,7 +154,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 }
 
 
-// Default profile
+// OLED profile
 #[cfg(feature = "esp32s3-disp143Oled")]
 pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let io = Io::new(p.IO_MUX);
@@ -148,16 +177,24 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     enc_clk.listen(Event::AnyEdge);
     enc_dt.listen(Event::AnyEdge);
 
-    // LCD control pins — do NOT touch GPIO10/11 here (SPI SCK/MOSI)
-    let lcd_cs  = Output::new(p.GPIO9,  Level::High, OutputConfig::default());
-    let lcd_dc  = Output::new(p.GPIO8,  Level::Low,  OutputConfig::default());
-    let lcd_rst = Output::new(p.GPIO14, Level::High, OutputConfig::default());
-    let lcd_bl  = Output::new(p.GPIO2,  Level::High, OutputConfig::default());
+    // OLED control pins — do NOT touch GPIO10/11 here (SPI SCK/MOSI)
+    let cs  = Output::new(p.GPIO9,  Level::High, OutputConfig::default());
+    let rst = Output::new(p.GPIO21, Level::High, OutputConfig::default());
+    let en  = Output::new(p.GPIO42,  Level::Low, OutputConfig::default());
 
     // SPI2 peripheral and pins
-    let spi2 = p.SPI2; 
-    let spi_sck = p.GPIO10; // GPIO10 is SPI2 SCK
-    let spi_mosi = p.GPIO11;// GPIO11 is SPI2 MOSI
+    let spi2 = p.SPI2;
+    let clk = p.GPIO10; // GPIO10 as Output (not SPI)
+    let do0 = p.GPIO11; // GPIO11 as Output (MOSI as GPIO)
+    // do1 if needed:
+    let do1 = Input::new(p.GPIO12, InputConfig::default().with_pull(Pull::Up));
+
+    let do2 = p.GPIO13; // GPIO13 
+    let do3 = p.GPIO14; // GPIO14 
+
+    // Touch controller pins
+    let tp_sda = p.GPIO47;
+    let tp_scl = p.GPIO48;
 
     // Return IO handler and all pins
     (
@@ -166,10 +203,19 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
             // led1, led2, 
             btn1,btn2, 
             enc_clk, enc_dt,
-            spi2,
-            spi_sck,
-            spi_mosi,
-            lcd_cs, lcd_dc, lcd_rst, lcd_bl,
+            display_pins: DisplayPins {
+                spi2,
+                cs,
+                clk,
+                do0,
+                do1,
+                do2,
+                do3,
+                rst,
+                en,
+                tp_sda,
+                tp_scl,
+            },
         },
     )
 }

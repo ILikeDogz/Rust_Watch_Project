@@ -9,6 +9,7 @@
 //! All drawing is centered on a 240x240 display, but can be adapted for other sizes.
 
 
+use embedded_graphics::prelude::OriginDimensions;
 use esp_backtrace as _;
 
 // ESP-HAL imports
@@ -19,10 +20,14 @@ use esp_hal::{
 };
 
 // Display interface and device
+#[cfg(feature = "devkit-esp32s3-disp128")]
 use embedded_hal_bus::spi::ExclusiveDevice;
+
+#[cfg(feature = "devkit-esp32s3-disp128")]
 use mipidsi::interface::SpiInterface;                    // Provides the builder for DisplayInterface
 
 // GC9A01 display driver
+#[cfg(feature = "devkit-esp32s3-disp128")]
 use mipidsi::{
     Display,
     models::GC9A01,
@@ -43,6 +48,11 @@ use embedded_graphics::{
 // Add at the top of your file:
 use core::sync::atomic::{AtomicU8, Ordering};
 
+// Make a lightweight trait bound we’ll use for the factory’s return type.
+pub trait PanelRgb565: DrawTarget<Color = Rgb565> + OriginDimensions {}
+impl<T> PanelRgb565 for T where T: DrawTarget<Color = Rgb565> + OriginDimensions {}
+
+
 static TRANSFORM_FLASH: AtomicU8 = AtomicU8::new(0);
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
@@ -55,8 +65,14 @@ type DisplayType<'a> = Display<
     Output<'a>,
 >;
 
+#[cfg(feature = "esp32s3-disp143Oled")]
+type DisplayType<'a> = crate::co5300::DisplayType<'a>;
+
 // Display configuration, (0,0) is top-left corner
+#[cfg(feature = "devkit-esp32s3-disp128")]
 pub const RESOLUTION: u32 = 240; // 240x240 display
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub const RESOLUTION: u32 = 466; // 466x466 display
 pub const CENTER: i32 = RESOLUTION as i32 / 2;
 static MY_IMAGE: &[u8] = include_bytes!("assets/omnitrix_logo_240x240_rgb565_be.raw");
 static ALIEN1_IMAGE: &[u8] = include_bytes!("assets/alien1_240x240_rgb565_be.raw");
