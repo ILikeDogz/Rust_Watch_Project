@@ -31,6 +31,9 @@ use mipidsi::{
     options::{ColorOrder, Orientation, Rotation, ColorInversion},
 };
 
+#[cfg(feature = "devkit-esp32s3-disp128")]
+use crate::wiring::DisplayPins;
+
 struct SpinDelay;
 
 // Implement embedded_hal delay traits for SpinDelay
@@ -56,13 +59,7 @@ impl embedded_hal::delay::DelayNs for SpinDelay {
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
 pub fn setup_display<'a>(
-    spi2: SPI2<'a>,
-    spi_sck: GPIO10<'a>,
-    spi_mosi: GPIO11<'a>,
-    lcd_cs: Output<'a>,
-    lcd_dc: Output<'a>,
-    mut lcd_rst: Output<'a>,
-    mut lcd_bl: Output<'a>,
+    display_pins: DisplayPins<'a>,
     display_buf: &'a mut [u8],
 ) -> mipidsi::Display<
     SpiInterface<'a, 
@@ -72,6 +69,16 @@ pub fn setup_display<'a>(
     GC9A01,
     Output<'a>,>
  {
+    // destructure the passed DisplayPins
+    let DisplayPins {
+        spi2,
+        spi_sck,
+        spi_mosi,
+        lcd_cs,
+        lcd_dc,
+        mut lcd_rst,
+        mut lcd_bl,
+    } = display_pins;
     // Hardware reset
     lcd_rst.set_low();
     for _ in 0..10000 { core::hint::spin_loop(); }
@@ -110,13 +117,7 @@ pub fn setup_display<'a>(
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 pub fn setup_display<'a>(
-    spi2: SPI2<'a>,
-    spi_sck: GPIO10<'a>,
-    spi_mosi: GPIO11<'a>,
-    lcd_cs: Output<'a>,
-    lcd_dc: Output<'a>,
-    mut lcd_rst: Output<'a>,
-    mut lcd_bl: Output<'a>,
+    display_pins: DisplayPins<'a>,
     display_buf: &'a mut [u8],
 ) -> mipidsi::Display<
     SpiInterface<'a, 
@@ -126,6 +127,16 @@ pub fn setup_display<'a>(
     GC9A01,
     Output<'a>,>
  {
+    // destructure the passed DisplayPins
+    let DisplayPins {
+        spi2,
+        spi_sck,
+        spi_mosi,
+        lcd_cs,
+        lcd_dc,
+        mut lcd_rst,
+        mut lcd_bl,
+    } = display_pins;
     // Hardware reset
     lcd_rst.set_low();
     for _ in 0..10000 { core::hint::spin_loop(); }

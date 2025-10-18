@@ -45,6 +45,15 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 static TRANSFORM_FLASH: AtomicU8 = AtomicU8::new(0);
 
+#[cfg(feature = "devkit-esp32s3-disp128")]
+type DisplayType<'a> = Display<
+    SpiInterface<'a,
+        ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, embedded_hal_bus::spi::NoDelay>,
+        Output<'a>,
+    >,
+    GC9A01,
+    Output<'a>,
+>;
 
 // Display configuration, (0,0) is top-left corner
 pub const RESOLUTION: u32 = 240; // 240x240 display
@@ -244,14 +253,7 @@ impl UiState {
 
 // helper function to draw centered text
 fn draw_text(
-    disp: &mut Display<
-        SpiInterface<
-            ExclusiveDevice<Spi<'_, Blocking>, Output<'_>, embedded_hal_bus::spi::NoDelay>,
-            Output<'_>,
-        >,
-        GC9A01,
-        Output<'_>,
-    >,
+    disp: &mut DisplayType,
     text: &str,
     fg: Rgb565,
     bg: Rgb565,
@@ -281,14 +283,7 @@ fn draw_text(
 
 // helper function to draw a centered image
 fn draw_image(
-    disp: &mut Display<
-        SpiInterface<
-            ExclusiveDevice<Spi<'_, Blocking>, Output<'_>, embedded_hal_bus::spi::NoDelay>,
-            Output<'_>,
-        >,
-        GC9A01,
-        Output<'_>,
-    >,
+    disp: &mut DisplayType,
     image_data: &'static [u8],
     width: u32,
     height: u32,
@@ -313,14 +308,7 @@ fn draw_image(
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
-    disp: &mut Display<
-        SpiInterface<
-            ExclusiveDevice<Spi<'_, Blocking>, Output<'_,>, embedded_hal_bus::spi::NoDelay>,
-            Output<'_>,
-        >,
-        GC9A01,
-        Output<'_>,
-    >,
+    disp: &mut DisplayType,
     state: UiState,
 )
 {

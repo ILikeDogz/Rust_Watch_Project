@@ -54,6 +54,14 @@ pub struct BoardPins<'a> {
     pub enc_dt:  Input<'a>,
     // pub enc_sw:  Input<'a>,  // not used in this example
 
+     // display-related pins are feature gated
+    #[cfg(any(feature = "devkit-esp32s3-disp128"))]
+    pub display_pins: DisplayPins<'a>,
+}
+
+// nested, feature-only struct for LCD/SPI pins
+#[cfg(any(feature = "devkit-esp32s3-disp128"))]
+pub struct DisplayPins<'a> {
     // SPI2 pins (SCK, MOSI) are fixed to GPIO10 and GPIO11
     pub spi2: SPI2<'a>, // SPI2 peripheral
     pub spi_sck: GPIO10<'a>, // GPIO10 is SPI2 SCK
@@ -106,10 +114,12 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
             // led1, led2, 
             btn1,btn2, 
             enc_clk, enc_dt,
-            spi2,
-            spi_sck,
-            spi_mosi,
-            lcd_cs, lcd_dc, lcd_rst, lcd_bl,
+            display_pins: DisplayPins {
+                spi2,
+                spi_sck,
+                spi_mosi,
+                lcd_cs, lcd_dc, lcd_rst, lcd_bl,
+            },
         },
     )
 }
@@ -127,8 +137,8 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     // led2.set_high();
 
     // buttons
-    let mut btn1 = Input::new(p.GPIO15, InputConfig::default().with_pull(Pull::Up));
-    let mut btn2 = Input::new(p.GPIO21, InputConfig::default().with_pull(Pull::Up));
+    let mut btn1 = Input::new(p.GPIO1, InputConfig::default().with_pull(Pull::Up));
+    let mut btn2 = Input::new(p.GPIO2, InputConfig::default().with_pull(Pull::Up));
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
 

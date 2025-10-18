@@ -135,8 +135,8 @@ fn main() -> ! {
     let BoardPins {
         btn1, btn2,
         enc_clk, enc_dt,
-        spi2, spi_sck, spi_mosi,
-        lcd_cs, lcd_dc, lcd_rst, lcd_bl,
+        #[cfg(any(feature = "devkit-esp32s3-disp128"))]
+        display_pins,
     } = pins;
 
     // Read encoder pin states BEFORE moving them
@@ -164,7 +164,7 @@ fn main() -> ! {
     // buffer for ram allocation
     let mut display_buf = [0u8; 1024];
     let mut my_display = setup_display(
-        spi2, spi_sck, spi_mosi, lcd_cs, lcd_dc, lcd_rst, lcd_bl, &mut display_buf,
+        display_pins, &mut display_buf,
     );
 
     // --- FIRST DRAW ----------------------------------------------------------
