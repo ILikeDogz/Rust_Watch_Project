@@ -231,8 +231,8 @@ fn main() -> ! {
         clk,
         do0,    // MOSI
         do1,    // MISO
-        do2,
-        do3,
+        do2: _,
+        do3: _,
         mut rst,
         mut en,
         tp_sda: _,
@@ -253,31 +253,20 @@ fn main() -> ! {
             .with_sck(clk)    // GPIO 10
             .with_mosi(do0)   // GPIO 11
             .with_miso(do1);  // GPIO 12 (for reading)
-        // Do NOT configure sio2 (GPIO 13) and sio3 (GPIO 14)
 
-    println!("SPI created, wrapping ExclusiveDevice...");
     let spi_dev = ExclusiveDevice::new(spi, cs, NoDelay).unwrap();
-    println!("ExclusiveDevice OK");
 
     let mut delay = esp_hal::delay::Delay::new();
-    println!("Creating display...");
+
     let mut display = co5300::new_with_defaults(spi_dev, Some(rst), &mut delay)
         .expect("CO5300 init failed");
-    println!("Display created.");
 
     match display.read_id() {
         Ok(id) => println!("Panel ID (expected bogus on MISO): 0x{:02X}", id),
         Err(e) => println!("read_id error: {:?}", e),
     }
 
-    // // after init+delays:
-    // let pwr = read_reg(&mut display.spi, 0x0A); // Get Power Mode
-    // let pix = read_reg(&mut display.spi, 0x0C); // Get Pixel Format
-    // let mad = read_reg(&mut display.spi, 0x36); // MADCTL (read)
-    // println!("DCS: PWR=0x{:02X} PIX=0x{:02X} MAD=0x{:02X}", pwr, pix, mad);
-
-    // 1×1 at (10,10)
-    // after init()
+    // Fill a 40x40 square in center with black using ramwr_stream
     let cx = 233u16; let cy = 233u16;
     let w = 40u16; let h = 40u16;
     display.set_window(cx - w/2, cy - h/2, cx + w/2 - 1, cy + h/2 - 1).unwrap();
