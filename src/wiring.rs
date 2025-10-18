@@ -116,7 +116,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 
 
 // Default profile
-#[cfg(feature = "disp145Oled-esp32s3")]
+#[cfg(feature = "esp32s3-disp143Oled")]
 pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let io = Io::new(p.IO_MUX);
 

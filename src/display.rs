@@ -108,3 +108,55 @@ pub fn setup_display<'a>(
 }
 
 
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub fn setup_display<'a>(
+    spi2: SPI2<'a>,
+    spi_sck: GPIO10<'a>,
+    spi_mosi: GPIO11<'a>,
+    lcd_cs: Output<'a>,
+    lcd_dc: Output<'a>,
+    mut lcd_rst: Output<'a>,
+    mut lcd_bl: Output<'a>,
+    display_buf: &'a mut [u8],
+) -> mipidsi::Display<
+    SpiInterface<'a, 
+        ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>,
+        Output<'a>,
+    >,
+    GC9A01,
+    Output<'a>,>
+ {
+    // Hardware reset
+    lcd_rst.set_low();
+    for _ in 0..10000 { core::hint::spin_loop(); }
+    lcd_rst.set_high();
+    lcd_bl.set_high();
+
+    // SPI setup
+    let spi_cfg = SpiConfig::default()
+        .with_frequency(Rate::from_hz(40_000_000))
+        .with_mode(Mode::_0);
+
+    // create SPI instance
+    let spi = Spi::new(spi2, spi_cfg).unwrap()
+        .with_sck(spi_sck)
+        .with_mosi(spi_mosi);
+
+    // create display interface
+    let spi_device = ExclusiveDevice::new(spi, lcd_cs, NoDelay).unwrap();
+    let di = SpiInterface::new(spi_device, lcd_dc, display_buf);
+    let mut delay = SpinDelay;
+
+    // display set up
+    let disp = DisplayBuilder::new(GC9A01, di)
+        .display_size(240, 240)
+        .display_offset(0, 0)
+        .orientation(Orientation::new().rotate(Rotation::Deg180))
+        .invert_colors(ColorInversion::Inverted)
+        .color_order(ColorOrder::Bgr)
+        .reset_pin(lcd_rst) 
+        .init(&mut delay) 
+        .unwrap();
+    
+    disp
+}
