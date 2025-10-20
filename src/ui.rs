@@ -9,15 +9,14 @@
 //! All drawing is centered on a 240x240 display, but can be adapted for other sizes.
 
 
-use embedded_graphics::prelude::OriginDimensions;
 use esp_backtrace as _;
 
 // ESP-HAL imports
-use esp_hal::{
-    gpio::Output,
-    spi::master::Spi,
-    Blocking,
-};
+// use esp_hal::{
+//     gpio::Output,
+//     spi::master::Spi,
+//     Blocking,
+// };
 
 // Display interface and device
 #[cfg(feature = "devkit-esp32s3-disp128")]
@@ -38,7 +37,7 @@ use embedded_graphics::{
     mono_font::{ascii::{FONT_10X20, FONT_6X10}, 
     MonoTextStyle, MonoTextStyleBuilder}, 
     pixelcolor::Rgb565, 
-    prelude::{Point, Primitive, RgbColor, Size}, 
+    prelude::{Point, Primitive, RgbColor, Size, OriginDimensions}, 
     primitives::{PrimitiveStyle, Rectangle, Circle, Triangle}, text::{Alignment, Baseline, Text}, 
     Drawable,
     draw_target::DrawTarget, 
@@ -46,27 +45,27 @@ use embedded_graphics::{
 };
 
 // Add at the top of your file:
-use core::sync::atomic::{AtomicU8, Ordering};
+// use core::sync::atomic::{AtomicU8, Ordering};
 
 // Make a lightweight trait bound we’ll use for the factory’s return type.
+
 pub trait PanelRgb565: DrawTarget<Color = Rgb565> + OriginDimensions {}
 impl<T> PanelRgb565 for T where T: DrawTarget<Color = Rgb565> + OriginDimensions {}
 
+// static TRANSFORM_FLASH: AtomicU8 = AtomicU8::new(0);
 
-static TRANSFORM_FLASH: AtomicU8 = AtomicU8::new(0);
+// #[cfg(feature = "devkit-esp32s3-disp128")]
+// type DisplayType<'a> = Display<
+//     SpiInterface<'a,
+//         ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, embedded_hal_bus::spi::NoDelay>,
+//         Output<'a>,
+//     >,
+//     GC9A01,
+//     Output<'a>,
+// >;
 
-#[cfg(feature = "devkit-esp32s3-disp128")]
-type DisplayType<'a> = Display<
-    SpiInterface<'a,
-        ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, embedded_hal_bus::spi::NoDelay>,
-        Output<'a>,
-    >,
-    GC9A01,
-    Output<'a>,
->;
-
-#[cfg(feature = "esp32s3-disp143Oled")]
-type DisplayType<'a> = crate::co5300::DisplayType<'a>;
+// #[cfg(feature = "esp32s3-disp143Oled")]
+// type DisplayType<'a> = crate::co5300::DisplayType<'a>;
 
 // Display configuration, (0,0) is top-left corner
 #[cfg(feature = "devkit-esp32s3-disp128")]
@@ -269,7 +268,7 @@ impl UiState {
 
 // helper function to draw centered text
 fn draw_text(
-    disp: &mut DisplayType,
+    disp: &mut impl PanelRgb565,
     text: &str,
     fg: Rgb565,
     bg: Rgb565,
@@ -299,7 +298,7 @@ fn draw_text(
 
 // helper function to draw a centered image
 fn draw_image(
-    disp: &mut DisplayType,
+    disp: &mut impl PanelRgb565,
     image_data: &'static [u8],
     width: u32,
     height: u32,
@@ -324,7 +323,7 @@ fn draw_image(
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
-    disp: &mut DisplayType,
+    disp: &mut impl PanelRgb565,
     state: UiState,
 )
 {

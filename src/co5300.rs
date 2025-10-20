@@ -27,7 +27,6 @@ use embedded_graphics::{
     prelude::*,
 };
 use embedded_hal::{
-    delay::DelayNs,
     digital::OutputPin,
     spi::SpiDevice,
 };
@@ -38,20 +37,26 @@ use esp_hal::spi::master::Spi;
 use esp_hal::Blocking;
 
 use embedded_hal::spi::Operation;
+use heapless::Vec;
 
 // Public constants so the rest of your code can adopt 466×466 easily.
 pub const CO5300_WIDTH: u16 = 466;
 pub const CO5300_HEIGHT: u16 = 466;
 
-const SHORT_HEADER: bool = false; // flip to true if needed
-const DEBUG_SPI: bool = true;
-
-use esp_println::println;
-
-macro_rules! dprintln {
-    ($($arg:tt)*) => {
-        if DEBUG_SPI { println!($($arg)*); }
+pub fn ramwr_stream<SD: SpiDevice<u8>>(
+    spi: &mut SD,
+    chunks: &[&[u8]],   // a list of pixel slices to send back-to-back
+) {
+    
+    let hdr = [0x02, 0x00, 0x2C, 0x00];
+    // Build one transaction: header + N data chunks (CS stays asserted)
+    // If you don't have heapless, just do two writes: header then a big concat buffer.
+    let mut ops: Vec<Operation<'_, u8>, 512> = Vec::new();
+    ops.push(Operation::Write(&hdr)).ok();
+    for &c in chunks {
+        ops.push(Operation::Write(c)).ok();
     }
+    spi.transaction(&mut ops).ok();
 }
 
 /// Error type that wraps SPI and GPIO errors.
@@ -87,6 +92,9 @@ where
     SPI: SpiDevice<u8>,
     RST: OutputPin,
 {
+    // Allow toggling even alignment from callers (optional)
+    pub fn set_align_even(&mut self, on: bool) { self.align_even = on; }
+
     /// Create + init the panel. Call once at startup.
     ///
     /// * `spi` - an SPI device with CS control (e.g., `embedded_hal_bus::spi::ExclusiveDevice`)
@@ -94,8 +102,8 @@ where
     /// * `delay` - any `DelayNs` impl (spin delay is fine)
     /// * `width`, `height` - normally 466x466 for this AMOLED
     pub fn new(
-        mut spi: SPI,
-        mut rst: Option<RST>,
+        spi: SPI,
+        rst: Option<RST>,
         delay: &mut impl embedded_hal::delay::DelayNs,
         width: u16,
         height: u16,
@@ -114,7 +122,6 @@ where
         };
 
         // Hard reset sequence (keep it)
-        dprintln!("RST sequence start");
         if let Some(r) = this.rst.as_mut() {
             r.set_high().map_err(Co5300Error::Gpio)?;
             delay.delay_ms(1);
@@ -126,6 +133,8 @@ where
 
 
         // this.cmd(0xFF, &[])?;   // Reset to single-SPI
+        this.cmd(0x01, &[])?; // SWRESET
+
         delay.delay_ms(10);
         // ==== Init table equivalent ====
         // 0x11 (SLPOUT), no data, 80 ms delay
@@ -159,17 +168,12 @@ where
         // 0x51 0xFF (brightness max)
         this.cmd(0x51, &[0xFF])?;
 
-        // Optional TE and orientation, if desired:
-        // this.cmd(0x35, &[0x00])?; // TE ON
-        // this.cmd(0x44, &[0x01, 0xD1])?; // TE scanline
-        // this.cmd(0x36, &[0x60])?; // MADCTL rotation/mirror
-        this.cmd(0x36, &[0x00])?; // no mirror/rotation during bring-up
+        // Set memory access control (orientation)
+        this.cmd(0x36, &[0x00])?; 
 
         // Set full window
         this.cmd(0x2A, &[0x00, 0x00, ((width-1)>>8) as u8, ((width-1)&0xFF) as u8])?;
         this.cmd(0x2B, &[0x00, 0x00, ((height-1)>>8) as u8, ((height-1)&0xFF) as u8])?;
-
-        dprintln!("INIT DONE");
         
         Ok(this)
     }
@@ -193,15 +197,13 @@ where
             return Err(Co5300Error::OutOfBounds);
         }
 
-        // Optional: enforce even alignment like the C rounder_cb does
         if self.align_even {
-            x0 &= !1; y0 &= !1;
-            // x1/y1 are inclusive — round "up" to next odd so (x2+1) is even width
-            if (x1 & 1) == 0 { x1 = x1.saturating_add(1); }
-            if (y1 & 1) == 0 { y1 = y1.saturating_add(1); }
-            // Also clamp in case we overflowed the panel size
-            x1 = x1.min(self.w - 1);
-            y1 = y1.min(self.h - 1);
+            x0 &= !1;
+            if (x1 & 1) == 0 { x1 = x1.saturating_add(1).min(self.w - 1); }
+            if y0 != y1 {
+                y0 &= !1;
+                if (y1 & 1) == 0 { y1 = y1.saturating_add(1).min(self.h - 1); }
+            }
         }
 
         // Apply panel offsets
@@ -210,35 +212,35 @@ where
         let y0p = y0 + self.y_off;
         let y1p = y1 + self.y_off;
 
-        let ca = [ (x0p >> 8) as u8, (x0p & 0xFF) as u8, (x1p >> 8) as u8, (x1p & 0xFF) as u8 ];
-        let ra = [ (y0p >> 8) as u8, (y0p & 0xFF) as u8, (y1p >> 8) as u8, (y1p & 0xFF) as u8 ];
+        let ca = [(x0p >> 8) as u8, (x0p & 0xFF) as u8, (x1p >> 8) as u8, (x1p & 0xFF) as u8];
+        let ra = [(y0p >> 8) as u8, (y0p & 0xFF) as u8, (y1p >> 8) as u8, (y1p & 0xFF) as u8];
         self.cmd(0x2A, &ca)?;
         self.cmd(0x2B, &ra)?;
         Ok(())
     }
 
 
-    /// Start a memory write (RAMWR 0x2C) then stream big-endian RGB565 pixel bytes.
-    /// Call `set_window()` first to define the rectangle.
+    /// Write a contiguous buffer of RGB565 big-endian pixels to the current window.
     pub fn write_pixels(&mut self, rgb565_be: &[u8])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
-        // Long header + 0x2C (WRITE_COLOR)
-        let hdr = [0x02, 0x00, 0x2C, 0x00];
-        // let hdr = [0x02, 0x2C];
-        dprintln!("PIX lg: hdr={:02X?} bytes={}", hdr, rgb565_be.len());
-        self.spi.transaction(&mut [
-            embedded_hal::spi::Operation::Write(&hdr),
-            embedded_hal::spi::Operation::Write(rgb565_be),
-        ]).map_err(|e| {
-            println!("spi.tx(PIX lg) err: {:?}", e);
-            Co5300Error::Spi(e)
-        })
+        // Use ramwr_stream with a single chunk
+        let chunks = [&rgb565_be[..]];
+        ramwr_stream(&mut self.spi, &chunks);
+        Ok(())
+    }
+
+    /// Write a list of pixel rows (each row is &[u8]) in one RAMWR transaction.
+    pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
+        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    {
+        ramwr_stream(&mut self.spi, rows);
+        Ok(())
     }
 
 
     /// Convenience: fill a rectangle with a solid color (fast path).
-    pub fn fill_rect_solid(&mut self, x:u16,y:u16,w:u16,h:u16, color:Rgb565)
+    pub fn fill_rect_solid(&mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565)
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
         if w == 0 || h == 0 { return Ok(()); }
@@ -246,53 +248,26 @@ where
         let y1 = y + h - 1;
         self.set_window(x, y, x1, y1)?;
 
+        // Prepare one row of the solid color
         let c = color.into_storage().to_be_bytes();
-        let mut line = [0u8; 466*2];
+
+        // Number of bytes per row
         let nbytes = (w as usize) * 2;
+
+        // Build one row buffer filled with the color
+        let mut line = [0u8; 466*2];
+
+        // Fill the line buffer with the color
         for i in (0..nbytes).step_by(2) { line[i]=c[0]; line[i+1]=c[1]; }
 
+        // Build a chunk list: one reference to the row per line
+        let mut chunks: heapless::Vec<&[u8], 466> = heapless::Vec::new();
         for _ in 0..h {
-            self.write_pixels(&line[..nbytes])?; // header+data in one transaction
+            chunks.push(&line[..nbytes]).map_err(|_| Co5300Error::OutOfBounds)?;
         }
+        self.write_pixels_rows(&chunks)?;
         Ok(())
     }
-
-
-    pub fn read_id(&mut self) -> Result<u8, Co5300Error<SPI::Error, RST::Error>> {
-        let mut id = [0u8; 1];
-        let hdr = [0x03, 0x00, 0xDA, 0x00];
-        // let hdr = [0x03, 0xDA]; // READ ID command
-        dprintln!("READ ID hdr={:02X?}", hdr);
-        self.spi.transaction(&mut [
-            Operation::Write(&hdr),
-            Operation::Read(&mut id),
-        ]).map_err(|e| {
-            println!("spi.tx(read_id) err: {:?}", e);
-            Co5300Error::Spi(e)
-        })?;
-        dprintln!("READ ID -> {:02X}", id[0]);
-        Ok(id[0])
-    }
-
-    // Optional: read DA/DB/DC
-    pub fn read_mipi_ids(&mut self) -> Result<(u8,u8,u8), Co5300Error<SPI::Error, RST::Error>> {
-        let mut a=[0]; let mut b=[0]; let mut c=[0];
-        for reg in [0xDA, 0xDB, 0xDC] {
-            let hdr = [0x03, 0x00, reg, 0x00];
-            dprintln!("READ {:02X} hdr={:02X?}", reg, hdr);
-            let out = match reg { 0xDA => &mut a[..], 0xDB => &mut b[..], _ => &mut c[..] };
-            self.spi.transaction(&mut [
-                Operation::Write(&hdr),
-                Operation::Read(out),
-            ]).map_err(|e| {
-                println!("spi.tx(read {:02X}) err: {:?}", reg, e);
-                Co5300Error::Spi(e)
-            })?;
-        }
-        dprintln!("MIPI IDs: DA={:02X} DB={:02X} DC={:02X}", a[0], b[0], c[0]);
-        Ok((a[0], b[0], c[0]))
-    }
-
 
 
     // ---- Low-level helpers ----
@@ -304,10 +279,9 @@ where
     {
         // let hdr = [0x02, cmd];
         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-        dprintln!("CMD sh: {:02X?} data_len={}", hdr, data.len());
         if data.is_empty() {
             self.spi.write(&hdr).map_err(|e| {
-                println!("spi.write(CMD sh) err: {:?}", e);
+                // println!("spi.write(CMD sh) err: {:?}", e);
                 Co5300Error::Spi(e)
             })
         } else {
@@ -315,7 +289,7 @@ where
                 Operation::Write(&hdr),
                 Operation::Write(data),
             ]).map_err(|e| {
-                println!("spi.tx(CMD sh+data) err: {:?}", e);
+                // println!("spi.tx(CMD sh+data) err: {:?}", e);
                 Co5300Error::Spi(e)
             })
         }
@@ -339,34 +313,120 @@ where
     }
 }
 
-impl<SPI, RST> DrawTarget for Co5300Display<SPI, RST>
+// ...existing code...
+
+impl<SPI, RST> Co5300Display<SPI, RST>
 where
-    SPI: SpiDevice<u8>,
-    RST: OutputPin,
+    SPI: embedded_hal::spi::SpiDevice<u8>,
+    RST: embedded_hal::digital::OutputPin,
 {
-    type Color = Rgb565;
-    type Error = Co5300Error<SPI::Error, RST::Error>;
+    /// Flush one horizontal run. Pads to even length only if align_even is enabled.
+    fn flush_run_row_even(
+        &mut self,
+        y: u16,
+        x0: u16,
+        len: u16,
+        buf: &mut [u8], // must have +2 spare bytes if padding
+    ) {
+        if len == 0 { return; }
+
+        // Optional even padding
+        let mut out_len = len;
+        if self.align_even && (out_len & 1) != 0 {
+            let byte_len = (out_len as usize) * 2;
+            if byte_len + 1 < buf.len() {
+                buf[byte_len]     = buf[byte_len - 2];
+                buf[byte_len + 1] = buf[byte_len - 1];
+                out_len += 1;
+            }
+        }
+
+        // Clamp to right edge just in case
+        let max_len = self.w.saturating_sub(x0);
+        if out_len > max_len {
+            out_len = max_len;
+        }
+
+        let x1 = x0 + out_len - 1;
+        let _ = self.set_window(x0, y, x1, y);
+        let byte_len = (out_len as usize) * 2;
+        let _ = self.write_pixels(&buf[..byte_len]);
+    }
+}
+
+// -------------------- embedded-graphics integration --------------------
+// ...existing code...
+
+impl<SPI, RST> embedded_graphics::draw_target::DrawTarget for Co5300Display<SPI, RST>
+where
+    SPI: embedded_hal::spi::SpiDevice<u8>,
+    RST: embedded_hal::digital::OutputPin,
+{
+    type Color = embedded_graphics::pixelcolor::Rgb565;
+    type Error = core::convert::Infallible;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
+        I: IntoIterator<Item = embedded_graphics::Pixel<embedded_graphics::pixelcolor::Rgb565>>,
     {
-        // Extremely simple: for each pixel, window=1×1 then 2C + 2 bytes.
-        // Slow, but works with any embedded-graphics primitives.
+        use embedded_graphics::{pixelcolor::Rgb565, Pixel};
+
+        // One scanline buffer (+2 bytes headroom for optional padding)
+        let mut buf: [u8; (466 * 2) + 2] = [0; (466 * 2) + 2];
+
+        // Current run state
+        let mut run_len: u16 = 0;
+        let mut run_x0: u16 = 0;
+        let mut run_y: u16 = 0;
+
         for Pixel(coord, color) in pixels {
-            let x = coord.x;
-            let y = coord.y;
-            if x < 0 || y < 0 { continue; }
-            let (x, y) = (x as u16, y as u16);
+            // Clip
+            if coord.x < 0 || coord.y < 0 { continue; }
+            let (x, y) = (coord.x as u16, coord.y as u16);
             if x >= self.w || y >= self.h { continue; }
 
-            self.set_window(x, y, x, y)?;
-            let be = color.into_storage().to_be_bytes();
-            self.write_pixels(&be)?;
+            // Flush if row changes or not contiguous
+            if run_len != 0 && (y != run_y || x != run_x0 + run_len) {
+                self.flush_run_row_even(run_y, run_x0, run_len, &mut buf);
+                run_len = 0;
+            }
+
+            // Start new run if needed
+            if run_len == 0 {
+                run_x0 = x;
+                run_y = y;
+            }
+
+            // Append pixel (RGB565 big-endian)
+            let be = Rgb565::into_storage(color).to_be_bytes();
+            let idx = (run_len as usize) * 2;
+            if idx + 1 < buf.len() {
+                buf[idx] = be[0];
+                buf[idx + 1] = be[1];
+                run_len = run_len.saturating_add(1);
+            } else {
+                // Buffer full (shouldn’t happen if width <= 466): flush then add
+                self.flush_run_row_even(run_y, run_x0, run_len, &mut buf);
+                run_x0 = x;
+                run_y = y;
+                buf[0] = be[0];
+                buf[1] = be[1];
+                run_len = 1;
+            }
         }
+
+        // Flush remaining run
+        self.flush_run_row_even(run_y, run_x0, run_len, &mut buf);
+
+        Ok(())
+    }
+
+    fn clear(&mut self, color: embedded_graphics::pixelcolor::Rgb565) -> Result<(), Self::Error> {
+        let _ = self.fill_rect_solid(0, 0, self.w, self.h, color);
         Ok(())
     }
 }
+// ...existing code...
 
 /// Backend's public "Display" name, used by display.rs
 // pub type Display<SPI, RST> = Co5300Display<SPI, RST>;
@@ -382,7 +442,9 @@ where
     SPI: embedded_hal::spi::SpiDevice<u8>,
     RST: embedded_hal::digital::OutputPin,
 {
-    Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT)
+    let mut display = Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT)?;
+    display.set_window(0, 0, CO5300_WIDTH - 1, CO5300_HEIGHT - 1)?;
+    Ok(display)
 }
 
 // This matches your wiring: Spi<'a, Blocking> + CS pin + NoDelay
@@ -390,33 +452,3 @@ pub type SpiDev<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>;
 
 // Expose a single ready-to-use display type that ui.rs can alias:
 pub type DisplayType<'a> = Co5300Display<SpiDev<'a>, Output<'a>>;
-
-
-// -------------------- Integration helpers for esp-hal --------------------
-//
-// Typical construction with esp-hal:
-//
-//   use esp_hal::gpio::Output;
-//   use esp_hal::spi::{Spi, Blocking};
-//   use embedded_hal_bus::spi::ExclusiveDevice;
-//   use embedded_hal_bus::spi::NoDelay;
-//
-//   let spi = Spi::new(peripherals.SPI2, cfg).unwrap()
-//       .with_sck(spi_sck)
-//       .with_mosi(spi_mosi);
-//   let spi_dev = ExclusiveDevice::new(spi, lcd_cs, NoDelay).unwrap();
-//
-//   // SpinDelay that implements DelayNs (you already have one in display.rs)
-//   let mut delay = SpinDelay;
-//
-//   let mut disp = Co5300Display::new(spi_dev, Some(lcd_rst), &mut delay, CO5300_WIDTH, CO5300_HEIGHT).unwrap();
-//
-// Fast rectangle blit:
-//
-//   disp.set_window(x0, y0, x1, y1).unwrap();
-//   disp.write_pixels(&rgb565_be_slice).unwrap();
-//
-// Solid fill:
-//
-//   disp.fill_rect_solid(0, 0, CO5300_WIDTH, CO5300_HEIGHT, Rgb565::BLACK).unwrap();
-//

@@ -22,7 +22,9 @@ use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use crate::wiring::DisplayPins;
 
 // A tiny busy-wait delay that satisfies embedded-hal 1.0 DelayNs.
+#[cfg(feature = "devkit-esp32s3-disp128")]
 struct SpinDelay;
+#[cfg(feature = "devkit-esp32s3-disp128")]
 impl embedded_hal::delay::DelayNs for SpinDelay {
     #[inline]
     fn delay_ns(&mut self, ns: u32) {
@@ -116,7 +118,7 @@ mod co5300_backend {
     use super::*;
 
     // Your no_std CO5300 driver
-    use crate::co5300::{self, Co5300Display, CO5300_HEIGHT, CO5300_WIDTH};
+    use crate::co5300::{self, Co5300Display};
 
     // Concrete type we return for this backend:
     pub type DisplayType<'a> =

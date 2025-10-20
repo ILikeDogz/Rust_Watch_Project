@@ -19,6 +19,7 @@ use esp_hal::gpio::Input;
 
 // Button state struct
 pub struct ButtonState<'a> {
+    pub pressed: Mutex<Cell<bool>>,
     pub input: Mutex<RefCell<Option<Input<'a>>>>,
     pub last_level: Mutex<Cell<bool>>,
     pub last_interrupt: Mutex<Cell<u64>>,
@@ -27,6 +28,7 @@ pub struct ButtonState<'a> {
 
 // Rotary encoder state struct
 pub struct RotaryState<'a> {
+    // pub pressed: Mutex<Cell<bool>>,
     pub clk: Mutex<RefCell<Option<Input<'a>>>>,
     pub dt:  Mutex<RefCell<Option<Input<'a>>>>,
     pub position:    Mutex<Cell<i32>>,
@@ -39,8 +41,11 @@ pub fn handle_button_generic(btn: &ButtonState, now_ms: u64, debounce_ms: u64, o
     // Access button state within critical section
     critical_section::with(|cs| {
         let mut btn_binding = btn.input.borrow_ref_mut(cs);
-        let input = btn_binding.as_mut().unwrap();
-
+        let input_opt = btn_binding.as_mut();
+        let input = match input_opt {
+            Some(i) => i,
+            None => return, // pin not yet installed
+        };
         // Check if interrupt is actually pending
         if !input.is_interrupt_set() { 
             return; 

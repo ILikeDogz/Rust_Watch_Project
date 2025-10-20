@@ -60,6 +60,7 @@ pub struct BoardPins<'a> {
     // Buttons
     pub btn1: Input<'a>,
     pub btn2: Input<'a>,
+    pub btn3: Input<'a>,
 
     // Rotary encoder pins
     pub enc_clk: Input<'a>,
@@ -93,7 +94,7 @@ pub struct DisplayPins<'a> {
     pub cs:  Output<'a>,    // GPIO9
     pub clk: GPIO10<'a>, // Change from Output<'a> to GPIO10<'a>
     pub do0: GPIO11<'a>, // Change from Output<'a> to GPIO11<'a>
-    pub do1: Input<'a>,     // GPIO12 if you plan reads later
+    pub do1: GPIO12<'a>,     // GPIO12 if you plan reads later
     pub do2: GPIO13<'a>,    // (unused here)
     pub do3: GPIO14<'a>,    // (unused here)
     pub rst: Output<'a>,    // GPIO21
@@ -116,8 +117,10 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     // buttons
     let mut btn1 = Input::new(p.GPIO15, InputConfig::default().with_pull(Pull::Up));
     let mut btn2 = Input::new(p.GPIO21, InputConfig::default().with_pull(Pull::Up));
+    let mut btn3 = Input::new(p.GPIO45, InputConfig::default().with_pull(Pull::Up));
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
+    btn3.listen(Event::AnyEdge);
 
     // rotary encoder pins
     let mut enc_clk = Input::new(p.GPIO18, InputConfig::default().with_pull(Pull::None));
@@ -141,7 +144,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
         io,
         BoardPins {
             // led1, led2, 
-            btn1,btn2, 
+            btn1, btn2, btn3,
             enc_clk, enc_dt,
             display_pins: DisplayPins {
                 spi2,
@@ -167,12 +170,14 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 
     // buttons
     let mut btn1 = Input::new(p.GPIO1, InputConfig::default().with_pull(Pull::Up));
-    let mut btn2 = Input::new(p.GPIO2, InputConfig::default().with_pull(Pull::Up));
+    let mut btn2 = Input::new(p.GPIO45, InputConfig::default().with_pull(Pull::Up));
+    let mut btn3 = Input::new(p.GPIO46, InputConfig::default().with_pull(Pull::Up));
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
+    btn3.listen(Event::AnyEdge);
 
     // rotary encoder pins
-    let mut enc_clk = Input::new(p.GPIO18, InputConfig::default().with_pull(Pull::None));
+    let mut enc_clk = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::None));
     let mut enc_dt  = Input::new(p.GPIO17, InputConfig::default().with_pull(Pull::None));
     enc_clk.listen(Event::AnyEdge);
     enc_dt.listen(Event::AnyEdge);
@@ -187,7 +192,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let clk = p.GPIO10; // GPIO10 as Output (not SPI)
     let do0 = p.GPIO11; // GPIO11 as Output (MOSI as GPIO)
     // do1 if needed:
-    let do1 = Input::new(p.GPIO12, InputConfig::default().with_pull(Pull::Up));
+    let do1 = p.GPIO12; // GPIO12 as Input (MISO as GPIO)
 
     let do2 = p.GPIO13; // GPIO13 
     let do3 = p.GPIO14; // GPIO14 
@@ -201,7 +206,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
         io,
         BoardPins {
             // led1, led2, 
-            btn1,btn2, 
+            btn1, btn2, btn3,
             enc_clk, enc_dt,
             display_pins: DisplayPins {
                 spi2,
