@@ -60,7 +60,6 @@ pub struct BoardPins<'a> {
     // Buttons
     pub btn1: Input<'a>,
     pub btn2: Input<'a>,
-    pub btn3: Input<'a>,
 
     // Rotary encoder pins
     pub enc_clk: Input<'a>,
@@ -117,10 +116,8 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     // buttons
     let mut btn1 = Input::new(p.GPIO15, InputConfig::default().with_pull(Pull::Up));
     let mut btn2 = Input::new(p.GPIO21, InputConfig::default().with_pull(Pull::Up));
-    let mut btn3 = Input::new(p.GPIO45, InputConfig::default().with_pull(Pull::Up));
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
-    btn3.listen(Event::AnyEdge);
 
     // rotary encoder pins
     let mut enc_clk = Input::new(p.GPIO18, InputConfig::default().with_pull(Pull::None));
@@ -144,7 +141,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
         io,
         BoardPins {
             // led1, led2, 
-            btn1, btn2, btn3,
+            btn1, btn2,
             enc_clk, enc_dt,
             display_pins: DisplayPins {
                 spi2,
@@ -169,12 +166,10 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     // led2.set_high();
 
     // buttons
-    let mut btn1 = Input::new(p.GPIO1, InputConfig::default().with_pull(Pull::Up));
-    let mut btn2 = Input::new(p.GPIO45, InputConfig::default().with_pull(Pull::Up));
-    let mut btn3 = Input::new(p.GPIO46, InputConfig::default().with_pull(Pull::Up));
+    let mut btn1 = Input::new(p.GPIO45, InputConfig::default().with_pull(Pull::Up));
+    let mut btn2 = Input::new(p.GPIO41, InputConfig::default().with_pull(Pull::Up));
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
-    btn3.listen(Event::AnyEdge);
 
     // rotary encoder pins
     let mut enc_clk = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::None));
@@ -206,7 +201,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
         io,
         BoardPins {
             // led1, led2, 
-            btn1, btn2, btn3,
+            btn1, btn2,
             enc_clk, enc_dt,
             display_pins: DisplayPins {
                 spi2,

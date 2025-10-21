@@ -64,10 +64,13 @@ use embedded_hal::{
 };
 // use esp_hal::spi::FullDuplexMode;
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
+static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
+static BUTTON2_PRESSED: AtomicBool = AtomicBool::new(false);
 
 // Shared resources for Button
 static BUTTON1: ButtonState<'static> = ButtonState {
-    pressed: Mutex::new(Cell::new(false)),
     input: Mutex::new(RefCell::new(None)),
     // led: Mutex::new(RefCell::new(None)),
     last_level: Mutex::new(Cell::new(true)),
@@ -76,21 +79,11 @@ static BUTTON1: ButtonState<'static> = ButtonState {
 };
 
 static BUTTON2: ButtonState<'static> = ButtonState {
-    pressed: Mutex::new(Cell::new(false)),
     input: Mutex::new(RefCell::new(None)),
     // led: Mutex::new(RefCell::new(None)),
     last_level: Mutex::new(Cell::new(true)),
     last_interrupt: Mutex::new(Cell::new(0)),
     name: "Button2",
-};
-
-static BUTTON3: ButtonState<'static> = ButtonState {
-    pressed: Mutex::new(Cell::new(false)),
-    input: Mutex::new(RefCell::new(None)),
-    // led: Mutex::new(RefCell::new(None)),
-    last_level: Mutex::new(Cell::new(true)),
-    last_interrupt: Mutex::new(Cell::new(0)),
-    name: "Button3",
 };
 
 // Shared resources for rotary encoder
@@ -118,16 +111,20 @@ fn handler() {
         let t = SystemTimer::unit_value(Unit::Unit0);
         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
     };
+    
+    // Button 1: JUST SET THE FLAG
     handle_button_generic(&BUTTON1, now_ms, DEBOUNCE_MS, || {
-        critical_section::with(|cs| BUTTON1.pressed.borrow(cs).set(true));
-    });
-    handle_button_generic(&BUTTON2, now_ms, DEBOUNCE_MS, || {
-        critical_section::with(|cs| BUTTON2.pressed.borrow(cs).set(true));
+        BUTTON1_PRESSED.store(true, Ordering::Relaxed);
     });
 
+    // Button 2: JUST SET THEFlag
+    handle_button_generic(&BUTTON2, now_ms, DEBOUNCE_MS, || {
+        BUTTON2_PRESSED.store(true, Ordering::Relaxed);
+    });
+
+    // Encoder logic is fine, it's just math
     handle_encoder_generic(&ROTARY);
 }
-
 
 
 #[main]
@@ -149,15 +146,10 @@ fn main() -> ! {
 
     // Destructure pins for easier access
     let BoardPins {
-        btn1, btn2, btn3,
+        btn1, btn2,
         enc_clk, enc_dt,
         display_pins,
     } = pins;
-
-    // read button pin states to set initial levels
-    let btn1_level_high = btn1.is_high();
-    let btn2_level_high = btn2.is_high();
-    let btn3_level_high = btn3.is_high();
 
     // Read encoder pin states BEFORE moving them
     let clk_initial = enc_clk.is_high() as u8;
@@ -169,13 +161,10 @@ fn main() -> ! {
     critical_section::with(|cs| {
         
         BUTTON1.input.borrow_ref_mut(cs).replace(btn1);
-        BUTTON1.last_level.borrow(cs).set(btn1_level_high);
+        BUTTON1.last_level.borrow(cs).set(true);
 
         BUTTON2.input.borrow_ref_mut(cs).replace(btn2);
-        BUTTON2.last_level.borrow(cs).set(btn2_level_high);
-
-        BUTTON3.input.borrow_ref_mut(cs).replace(btn3);
-        BUTTON3.last_level.borrow(cs).set(btn3_level_high);
+        BUTTON2.last_level.borrow(cs).set(true);
 
         ROTARY.clk.borrow_ref_mut(cs).replace(enc_clk);
         ROTARY.dt.borrow_ref_mut(cs).replace(enc_dt);
@@ -292,40 +281,32 @@ fn main() -> ! {
     loop {
 
         // Check for UI state changes
-        // let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
-        // if ui_state != last_ui_state {
-        //     update_ui(&mut my_display, ui_state);
-        //     last_ui_state = ui_state;
-        // }
+        let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
+        if ui_state != last_ui_state {
+            // update_ui(&mut my_display, ui_state);
+            esp_println::println!("UI state changed: {:?}", ui_state);
+            last_ui_state = ui_state;
+        }
         
-        let btn1 = critical_section::with(|cs| {
-            let f = BUTTON1.pressed.borrow(cs).get();
-            if f { BUTTON1.pressed.borrow(cs).set(false); }
-            f
-        });
-        if btn1 {
-            esp_println::println!("{} pressed", BUTTON1.name);
-            // update UI state here…
+        if BUTTON1_PRESSED.swap(false, Ordering::Acquire) {
+            // All work is now SAFE here in the main loop
+            esp_println::println!("Button 1 pressed!"); // Debug prints are safe here
+            critical_section::with(|cs| {
+                let state = UI_STATE.borrow(cs).get();
+                let new_state = state.next_menu();
+                UI_STATE.borrow(cs).set(new_state);
+            });
         }
 
-        let btn2 = critical_section::with(|cs| {
-            let f = BUTTON2.pressed.borrow(cs).get();
-            if f { BUTTON2.pressed.borrow(cs).set(false); }
-            f
-        });
-        if btn2 {
-            esp_println::println!("{} pressed", BUTTON2.name);
-            // update UI state here…
-        }
-
-        let btn3 = critical_section::with(|cs| {
-            let f = BUTTON3.pressed.borrow(cs).get();
-            if f { BUTTON3.pressed.borrow(cs).set(false); }
-            f
-        });
-        if btn3 {
-            esp_println::println!("{} pressed", BUTTON3.name);
-            // update UI state here…
+        // --- Handle Button 2 Press ---
+        if BUTTON2_PRESSED.swap(false, Ordering::Acquire) {
+            // All work is now SAFE here in the main loop
+             esp_println::println!("Button 2 pressed!"); // Debug prints are safe here
+            critical_section::with(|cs| {
+                let state = UI_STATE.borrow(cs).get();
+                let new_state = state.select();
+                UI_STATE.borrow(cs).set(new_state);
+            });
         }
 
         // Rotary encoder handling
