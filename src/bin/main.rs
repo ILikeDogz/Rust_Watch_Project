@@ -314,50 +314,31 @@ fn main() -> ! {
         let pos = critical_section::with(|cs| ROTARY.position.borrow(cs).get());
         let detent = pos / DETENT_STEPS; // use division (works well for negatives too)
         
-        // // If detent changed, update UI state
-        // if Some(detent) != last_detent {
-        //     if let Some(prev) = last_detent {
-        //         let step_delta = detent - prev;
-        //         if step_delta > 0 {
-        //             // turned clockwise: go to next state
-        //             critical_section::with(|cs| {
-        //                 esp_println::println!("Rotary turned clockwise to detent {} pos {}", detent, pos);
-        //                 let state = UI_STATE.borrow(cs).get();
-        //                 let new_state = state.next_item();
-        //                 UI_STATE.borrow(cs).set(new_state);
-        //             });
-        //         } else if step_delta < 0 {
-        //             // turned counter-clockwise: go to previous state (optional)
-        //             critical_section::with(|cs| {
-        //                 esp_println::println!("Rotary turned counter-clockwise to detent {} pos {}", detent, pos);
-        //                 let state = UI_STATE.borrow(cs).get();
-        //                 let new_state = state.prev_item();
-        //                 UI_STATE.borrow(cs).set(new_state);
-        //             });
-        //         }
-        //     }
-        //     last_detent = Some(detent);
-        // }
-
-        // Quick poll to verify encoder pins change (run for a few seconds)
-        let mut last_clk = critical_section::with(|cs| ROTARY.last_qstate.borrow(cs).get() >> 1);
-        let mut last_dt  = critical_section::with(|cs| ROTARY.last_qstate.borrow(cs).get() & 1);
-        for _ in 0..5_000 {
-            critical_section::with(|cs| {
-                if let (Some(clk), Some(dt)) = (
-                    ROTARY.clk.borrow_ref_mut(cs).as_ref(),
-                    ROTARY.dt.borrow_ref_mut(cs).as_ref(),
-                ) {
-                    let c = clk.is_high() as u8;
-                    let d = dt.is_high() as u8;
-                    if c != last_clk || d != last_dt {
-                        esp_println::println!("ENC poll: CLK={}, DT={}, pos={}", c, d, pos);
-                        last_clk = c; last_dt = d;
-                    }
+        // If detent changed, update UI state
+        if Some(detent) != last_detent {
+            if let Some(prev) = last_detent {
+                let step_delta = detent - prev;
+                if step_delta > 0 {
+                    // turned clockwise: go to next state
+                    critical_section::with(|cs| {
+                        esp_println::println!("Rotary turned clockwise to detent {} pos {}", detent, pos);
+                        let state = UI_STATE.borrow(cs).get();
+                        let new_state = state.next_item();
+                        UI_STATE.borrow(cs).set(new_state);
+                    });
+                } else if step_delta < 0 {
+                    // turned counter-clockwise: go to previous state (optional)
+                    critical_section::with(|cs| {
+                        esp_println::println!("Rotary turned counter-clockwise to detent {} pos {}", detent, pos);
+                        let state = UI_STATE.borrow(cs).get();
+                        let new_state = state.prev_item();
+                        UI_STATE.borrow(cs).set(new_state);
+                    });
                 }
-            });
-            for _ in 0..20_000 { core::hint::spin_loop(); }
+            }
+            last_detent = Some(detent);
         }
+
         // Small delay to reduce CPU usage
         for _ in 0..10000 { core::hint::spin_loop(); }
     }
