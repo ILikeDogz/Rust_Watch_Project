@@ -171,11 +171,15 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
 
-    // rotary encoder pins
-    let mut enc_clk = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::None));
+    // // rotary encoder pins
+    let mut enc_clk = Input::new(p.GPIO18, InputConfig::default().with_pull(Pull::None));
     let mut enc_dt  = Input::new(p.GPIO17, InputConfig::default().with_pull(Pull::None));
     enc_clk.listen(Event::AnyEdge);
     enc_dt.listen(Event::AnyEdge);
+    // Enable pull-ups; only CLK generates interrupts (DT sampled in ISR)
+    // let mut enc_clk = Input::new(p.GPIO18, InputConfig::default().with_pull(Pull::Up));
+    // let mut enc_dt  = Input::new(p.GPIO17, InputConfig::default().with_pull(Pull::Up));
+    // enc_clk.listen(Event::AnyEdge);
 
     // OLED control pins — do NOT touch GPIO10/11 here (SPI SCK/MOSI)
     let cs  = Output::new(p.GPIO9,  Level::High, OutputConfig::default());

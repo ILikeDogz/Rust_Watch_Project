@@ -115,7 +115,6 @@ pub fn handle_encoder_generic(encoder: &RotaryState) {
             encoder.position.borrow(cs).set(p);
             encoder.last_step.borrow(cs).set(step_delta);
         }
-        esp_println::println!("Encoder step: {}, pos: {}", step_delta, encoder.position.borrow(cs).get());
         // Save current state for next transition
         encoder.last_qstate.borrow(cs).set(current);
     });

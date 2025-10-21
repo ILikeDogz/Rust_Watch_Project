@@ -142,7 +142,6 @@ fn main() -> ! {
 
     // one call gives you IO handler + all your role pins from wiring.rs
     let (mut io, pins) = init_board_pins(peripherals);
-    io.set_interrupt_handler(handler);
 
     // Destructure pins for easier access
     let BoardPins {
@@ -173,6 +172,8 @@ fn main() -> ! {
         ROTARY.last_step.borrow(cs).set(0);
     });
 
+    io.set_interrupt_handler(handler);
+
     // set up display
     let mut display_buf = [0u8; 1024];
     let mut my_display = setup_display(
@@ -186,45 +187,45 @@ fn main() -> ! {
     }
 
     // --- FIRST DRAW ----------------------------------------------------------
-    my_display.clear(Rgb565::RED).ok();
+    my_display.clear(Rgb565::BLACK).ok();
     
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    {
-        // // 1) single white pixel at (50,50)
-        // my_display.set_window(50, 50, 50, 50).unwrap();
-        // let pix = Rgb565::WHITE.into_storage().to_be_bytes();
-        // my_display.write_pixels(&pix).unwrap();
+    // #[cfg(feature = "esp32s3-disp143Oled")]
+    // {
+    //     // // 1) single white pixel at (50,50)
+    //     // my_display.set_window(50, 50, 50, 50).unwrap();
+    //     // let pix = Rgb565::WHITE.into_storage().to_be_bytes();
+    //     // my_display.write_pixels(&pix).unwrap();
 
-        // 2) small 20x20 red block at (100,100) using a contiguous buffer
-        const BW: usize = 300;
-        const BH: usize = 300;
-        let bx: u16 = 0;
-        let by: u16 = 0;
-        my_display.set_window(bx, by, bx + (BW as u16) - 1, by + (BH as u16) - 1).unwrap();
+    //     // 2) small 20x20 red block at (100,100) using a contiguous buffer
+    //     const BW: usize = 300;
+    //     const BH: usize = 300;
+    //     let bx: u16 = 0;
+    //     let by: u16 = 0;
+    //     my_display.set_window(bx, by, bx + (BW as u16) - 1, by + (BH as u16) - 1).unwrap();
 
-        let mut buf = [0u8; BW * BH * 2];
-        let color = Rgb565::WHITE.into_storage().to_be_bytes();
-        for i in (0..buf.len()).step_by(2) {
-            buf[i] = color[0];
-            buf[i + 1] = color[1];
-        }
-        my_display.write_pixels(&buf).unwrap();
+    //     let mut buf = [0u8; BW * BH * 2];
+    //     let color = Rgb565::WHITE.into_storage().to_be_bytes();
+    //     for i in (0..buf.len()).step_by(2) {
+    //         buf[i] = color[0];
+    //         buf[i + 1] = color[1];
+    //     }
+    //     my_display.write_pixels(&buf).unwrap();
 
-        // Optional: also test the rows API (no copy of whole image)
-        /*
-        let mut row = [0u8; BW * 2];
-        for i in (0..row.len()).step_by(2) {
-            row[i] = red[0];
-            row[i + 1] = red[1];
-        }
-        let mut rows: heapless::Vec<&[u8], BH> = heapless::Vec::new();
-        for _ in 0..BH { rows.push(&row).ok(); }
-        my_display.set_window(bx, by, bx + (BW as u16) - 1, by + (BH as u16) - 1).unwrap();
-        my_display.write_pixels_rows(&rows).unwrap();
-        */
+    //     // Optional: also test the rows API (no copy of whole image)
+    //     /*
+    //     let mut row = [0u8; BW * 2];
+    //     for i in (0..row.len()).step_by(2) {
+    //         row[i] = red[0];
+    //         row[i + 1] = red[1];
+    //     }
+    //     let mut rows: heapless::Vec<&[u8], BH> = heapless::Vec::new();
+    //     for _ in 0..BH { rows.push(&row).ok(); }
+    //     my_display.set_window(bx, by, bx + (BW as u16) - 1, by + (BH as u16) - 1).unwrap();
+    //     my_display.write_pixels_rows(&rows).unwrap();
+    //     */
 
-        println!("co5300 write_pixels test done");
-    }
+    //     println!("co5300 write_pixels test done");
+    // }
 
     // my_display
     //     .fill_rect_solid(
@@ -313,31 +314,50 @@ fn main() -> ! {
         let pos = critical_section::with(|cs| ROTARY.position.borrow(cs).get());
         let detent = pos / DETENT_STEPS; // use division (works well for negatives too)
         
-        // If detent changed, update UI state
-        if Some(detent) != last_detent {
-            if let Some(prev) = last_detent {
-                let step_delta = detent - prev;
-                if step_delta > 0 {
-                    // turned clockwise: go to next state
-                    critical_section::with(|cs| {
-                        esp_println::println!("Rotary turned clockwise to detent {}", detent);
-                        // let state = UI_STATE.borrow(cs).get();
-                        // let new_state = state.next_item();
-                        // UI_STATE.borrow(cs).set(new_state);
-                    });
-                } else if step_delta < 0 {
-                    // turned counter-clockwise: go to previous state (optional)
-                    critical_section::with(|cs| {
-                        esp_println::println!("Rotary turned counter-clockwise to detent {}", detent);
-                        // let state = UI_STATE.borrow(cs).get();
-                        // let new_state = state.prev_item();
-                        // UI_STATE.borrow(cs).set(new_state);
-                    });
-                }
-            }
-            last_detent = Some(detent);
-        }
+        // // If detent changed, update UI state
+        // if Some(detent) != last_detent {
+        //     if let Some(prev) = last_detent {
+        //         let step_delta = detent - prev;
+        //         if step_delta > 0 {
+        //             // turned clockwise: go to next state
+        //             critical_section::with(|cs| {
+        //                 esp_println::println!("Rotary turned clockwise to detent {} pos {}", detent, pos);
+        //                 let state = UI_STATE.borrow(cs).get();
+        //                 let new_state = state.next_item();
+        //                 UI_STATE.borrow(cs).set(new_state);
+        //             });
+        //         } else if step_delta < 0 {
+        //             // turned counter-clockwise: go to previous state (optional)
+        //             critical_section::with(|cs| {
+        //                 esp_println::println!("Rotary turned counter-clockwise to detent {} pos {}", detent, pos);
+        //                 let state = UI_STATE.borrow(cs).get();
+        //                 let new_state = state.prev_item();
+        //                 UI_STATE.borrow(cs).set(new_state);
+        //             });
+        //         }
+        //     }
+        //     last_detent = Some(detent);
+        // }
 
+        // Quick poll to verify encoder pins change (run for a few seconds)
+        let mut last_clk = critical_section::with(|cs| ROTARY.last_qstate.borrow(cs).get() >> 1);
+        let mut last_dt  = critical_section::with(|cs| ROTARY.last_qstate.borrow(cs).get() & 1);
+        for _ in 0..5_000 {
+            critical_section::with(|cs| {
+                if let (Some(clk), Some(dt)) = (
+                    ROTARY.clk.borrow_ref_mut(cs).as_ref(),
+                    ROTARY.dt.borrow_ref_mut(cs).as_ref(),
+                ) {
+                    let c = clk.is_high() as u8;
+                    let d = dt.is_high() as u8;
+                    if c != last_clk || d != last_dt {
+                        esp_println::println!("ENC poll: CLK={}, DT={}, pos={}", c, d, pos);
+                        last_clk = c; last_dt = d;
+                    }
+                }
+            });
+            for _ in 0..20_000 { core::hint::spin_loop(); }
+        }
         // Small delay to reduce CPU usage
         for _ in 0..10000 { core::hint::spin_loop(); }
     }
