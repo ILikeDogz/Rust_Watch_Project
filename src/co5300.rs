@@ -26,6 +26,7 @@ use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
 };
+use embedded_hal::delay;
 use embedded_hal::{
     digital::OutputPin,
     spi::SpiDevice,
@@ -42,21 +43,71 @@ use heapless::Vec;
 // Public constants so the rest of your code can adopt 466×466 easily.
 pub const CO5300_WIDTH: u16 = 466;
 pub const CO5300_HEIGHT: u16 = 466;
+const RAMWR_OPCODE: u8 = 0x2C;
+
+use embedded_graphics::prelude::IntoStorage;
+
+fn flush_full(display: &mut DisplayType, fb: &[u16]) -> Result<(), core::convert::Infallible> {
+    // Ensure the address window covers the whole screen once
+    display.set_window(0, 0, CO5300_WIDTH - 1, CO5300_HEIGHT - 1).unwrap();
+
+    // Scratch row buffer in internal SRAM (fast & small)
+    let mut row_be: [u8; (466 * 2)] = [0; 466 * 2];
+
+    // Stream each scanline: convert u16->BE bytes on the fly to avoid a second full-size buffer
+    for y in 0..CO5300_HEIGHT as usize {
+        let row = &fb[y * CO5300_WIDTH as usize .. y * CO5300_WIDTH as usize + CO5300_WIDTH as usize];
+
+        // If your fb is plain u16 RGB565:
+        for (x, px) in row.iter().enumerate() {
+            let be = px.to_be_bytes();
+            row_be[2 * x] = be[0];
+            row_be[2 * x + 1] = be[1];
+        }
+
+        // Send the row (CO5300 driver frames this with 0x02 0x00 0x2C 0x00)
+        ramwr_stream(&mut display.spi, &[&row_be]).unwrap();
+    }
+    Ok(())
+}
 
 pub fn ramwr_stream<SD: SpiDevice<u8>>(
     spi: &mut SD,
-    chunks: &[&[u8]],   // a list of pixel slices to send back-to-back
-) {
-    
-    let hdr = [0x02, 0x00, 0x2C, 0x00];
-    // Build one transaction: header + N data chunks (CS stays asserted)
-    // If you don't have heapless, just do two writes: header then a big concat buffer.
-    let mut ops: Vec<Operation<'_, u8>, 512> = Vec::new();
+    chunks: &[&[u8]],
+) -> Result<(), SD::Error> {
+    use embedded_hal::spi::Operation;
+
+    let hdr: [u8; 4] = [0x02, 0x00, RAMWR_OPCODE, 0x00];
+
+    // Fast path: single chunk (use the same transaction style as multi-chunk)
+    if chunks.len() == 1 {
+        if let Some(&data) = chunks.first() {
+            // Build a small op list to match the path that works for you
+            let mut ops: heapless::Vec<Operation<'_, u8>, 2> = heapless::Vec::new();
+            ops.push(Operation::Write(&hdr)).ok();
+            ops.push(Operation::Write(data)).ok();
+            return spi.transaction(&mut ops);
+        }
+        return Ok(());
+    }
+
+    // Multi-chunk path (e.g., row-by-row streaming)
+    let mut ops: heapless::Vec<Operation<'_, u8>, 512> = heapless::Vec::new();
     ops.push(Operation::Write(&hdr)).ok();
+
     for &c in chunks {
         ops.push(Operation::Write(c)).ok();
+        if ops.is_full() {
+            // If we overflow, flush what we have, then continue
+            spi.transaction(&mut ops)?;
+            ops.clear();
+            ops.push(Operation::Write(&hdr)).ok();
+        }
     }
-    spi.transaction(&mut ops).ok();
+    if !ops.is_empty() {
+        spi.transaction(&mut ops)?;
+    }
+    Ok(())
 }
 
 /// Error type that wraps SPI and GPIO errors.
@@ -65,7 +116,6 @@ pub enum Co5300Error<SpiE, GpioE> {
     Spi(SpiE),
     Gpio(GpioE),
     OutOfBounds,
-
 }
 
 impl<SpiE: fmt::Debug, GpioE: fmt::Debug> From<SpiE> for Co5300Error<SpiE, GpioE> {
@@ -219,25 +269,151 @@ where
         Ok(())
     }
 
+    // //---- Power control ---- all untested:
+    // // Quick blank/unblank without sleep
+    // pub fn display_off(&mut self) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+    //     self.cmd(0x28, &[])?; // DISP OFF
+    //     Ok(())
+    // }
 
-    /// Write a contiguous buffer of RGB565 big-endian pixels to the current window.
-    pub fn write_pixels(&mut self, rgb565_be: &[u8])
-        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    {
-        // Use ramwr_stream with a single chunk
-        let chunks = [&rgb565_be[..]];
-        ramwr_stream(&mut self.spi, &chunks);
-        Ok(())
-    }
+    // pub fn display_on(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    // {
+    //     self.cmd(0x29, &[])?; // DISP ON
+    //     delay.delay_ms(10);   // small settle before first RAMWR
+    //     Ok(())
+    // }
+
+    // // Deep sleep control
+    // pub fn sleep_in(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    // {
+    //     self.cmd(0x10, &[])?; // SLP IN
+    //     delay.delay_ms(120);
+    //     Ok(())
+    // }
+
+    // pub fn sleep_out(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    // {
+    //     self.cmd(0x11, &[])?; // SLP OUT
+    //     delay.delay_ms(120);
+    //     Ok(())
+    // }
+
+    //     // Convenience: full disable (blank + sleep)
+    // pub fn disable(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    // {
+    //     self.display_off()?;
+    //     self.sleep_in(delay)?;
+    //     Ok(())
+    // }
+
+    // // Convenience: full enable (wake + on + re-assert opts if needed)
+    // pub fn enable(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    // {
+    //     self.sleep_out(delay)?;
+
+    //     // Some panels lose format/orientation in sleep; re-assert if needed
+    //     self.cmd(0x3A, &[0x55])?; // RGB565
+    //     self.cmd(0x36, &[0x00])?; // MADCTL (adjust if you rotate)
+
+    //     self.display_on(delay)?;
+    //     // Optionally restore brightness
+    //     // self.cmd(0x51, &[0xFF])?;
+    //     Ok(())
+    // }
+
 
     /// Write a list of pixel rows (each row is &[u8]) in one RAMWR transaction.
     pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
-        ramwr_stream(&mut self.spi, rows);
-        Ok(())
+        ramwr_stream(&mut self.spi, rows).map_err(Co5300Error::Spi)
     }
 
+
+    pub fn write_1x2(
+        &mut self,
+        x: u16,
+        y: u16,
+        color_1: Rgb565,
+        color_2: Rgb565,
+    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+        if x >= self.w || y >= self.h || y + 1 >= self.h {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        // Align to even x and ensure we have 2px width
+        let x0 = x & !1;
+        if x0 + 1 >= self.w {
+            return Err(Co5300Error::OutOfBounds);
+        }
+
+        self.set_window(x0, y, x0 + 1, y + 1)?;
+
+        let t = color_1.into_storage().to_be_bytes();
+        let b = color_2.into_storage().to_be_bytes();
+
+        // row 0: [top, top] (2px)
+        let row0 = [t[0], t[1], t[0], t[1]]; 
+        // row 1: [bottom, bottom] (2px)
+        let row1 = [b[0], b[1], b[0], b[1]]; 
+
+        let rows: [&[u8]; 2] = [&row0, &row1];
+        self.write_pixels_rows(&rows)
+    }
+
+    pub fn write_2x2(
+        &mut self,
+        x: u16,
+        y: u16,
+        color_1: Rgb565,
+        color_2: Rgb565,
+        color_3: Rgb565,
+        color_4: Rgb565,
+    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+        if x >= self.w || y >= self.h || x + 1 >= self.w || y + 1 >= self.h {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        // Align to even x (panel quirk-friendly)
+        let x0 = x & !1;
+
+        self.set_window(x0, y, x0 + 1, y + 1)?;
+
+        let a = color_1.into_storage().to_be_bytes();
+        let b = color_2.into_storage().to_be_bytes();
+        let c = color_3.into_storage().to_be_bytes();
+        let d = color_4.into_storage().to_be_bytes();
+
+        let row0 = [a[0], a[1], b[0], b[1]];
+        let row1 = [c[0], c[1], d[0], d[1]];
+
+        let rows: [&[u8]; 2] = [&row0, &row1];
+        self.write_pixels_rows(&rows)
+    }
+
+
+    /// Convenience: 1x2 solid color tile.
+    pub fn write_1x2_solid(
+        &mut self,
+        x: u16,
+        y: u16,
+        color: Rgb565,
+    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+        self.write_1x2(x, y, color, color)
+    }
+
+    /// Convenience: 2x2 solid color tile.
+    pub fn write_2x2_solid(
+        &mut self,
+        x: u16,
+        y: u16,
+        color: Rgb565,
+    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+        self.write_2x2(x, y, color, color, color, color)
+    }
 
     /// Convenience: fill a rectangle with a solid color (fast path).
     pub fn fill_rect_solid(&mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565)
@@ -320,37 +496,32 @@ where
     SPI: embedded_hal::spi::SpiDevice<u8>,
     RST: embedded_hal::digital::OutputPin,
 {
-    /// Flush one horizontal run. Pads to even length only if align_even is enabled.
+    /// Flush a run of pixels on an even-aligned row.
     fn flush_run_row_even(
         &mut self,
         y: u16,
         x0: u16,
-        len: u16,
-        buf: &mut [u8], // must have +2 spare bytes if padding
+        run_len: u16,
+        buf: &mut [u8],
     ) {
-        if len == 0 { return; }
-
-        // Optional even padding
-        let mut out_len = len;
-        if self.align_even && (out_len & 1) != 0 {
-            let byte_len = (out_len as usize) * 2;
-            if byte_len + 1 < buf.len() {
-                buf[byte_len]     = buf[byte_len - 2];
-                buf[byte_len + 1] = buf[byte_len - 1];
-                out_len += 1;
-            }
+        if run_len == 0 { return; }
+        // Set window for the run
+        let x1 = x0 + run_len - 1;
+        let y1 = y;
+        if let Err(e) = self.set_window(x0, y, x1, y1) {
+            // eprintln!("set_window err: {:?}", e);
+            return;
         }
 
-        // Clamp to right edge just in case
-        let max_len = self.w.saturating_sub(x0);
-        if out_len > max_len {
-            out_len = max_len;
-        }
+        // Prepare row slice
+        let nbytes = (run_len as usize) * 2;
+        let row = &buf[..nbytes];
 
-        let x1 = x0 + out_len - 1;
-        let _ = self.set_window(x0, y, x1, y);
-        let byte_len = (out_len as usize) * 2;
-        let _ = self.write_pixels(&buf[..byte_len]);
+        // Write the row
+        let rows: [&[u8]; 1] = [row];
+        if let Err(e) = self.write_pixels_rows(&rows) {
+            // eprintln!("write_pixels_rows err: {:?}", e);
+        }
     }
 }
 

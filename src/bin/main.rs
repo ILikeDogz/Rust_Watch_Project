@@ -65,6 +65,8 @@ use embedded_hal::{
 // use esp_hal::spi::FullDuplexMode;
 
 use core::sync::atomic::{AtomicBool, Ordering};
+extern crate alloc;
+use alloc::{boxed::Box, vec, vec::Vec};
 
 static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
 static BUTTON2_PRESSED: AtomicBool = AtomicBool::new(false);
@@ -139,6 +141,19 @@ fn main() -> ! {
 
     // Initialize peripherals
     let peripherals = esp_hal::init(esp_hal::Config::default());
+        
+    // Initialize PSRAM allocator
+    esp_alloc::psram_allocator!(&peripherals.PSRAM, esp_hal::psram);
+
+    const W: usize = 466;
+    const H: usize = 466;
+
+    // ~424 KiB in PSRAM
+    let mut fb: Box<[u16]> = vec![0u16; W * H].into_boxed_slice();
+
+    // Example: clear to black
+    for px in fb.iter_mut() { *px = 0x0000; } // RGB565
+
 
     // one call gives you IO handler + all your role pins from wiring.rs
     let (mut io, pins) = init_board_pins(peripherals);
@@ -183,56 +198,62 @@ fn main() -> ! {
     #[cfg(feature = "esp32s3-disp143Oled")]
     {
         // if your type exposes set_align_even:
-        my_display.set_align_even(false);
+        my_display.set_align_even(true);
     }
 
     // --- FIRST DRAW ----------------------------------------------------------
+
     my_display.clear(Rgb565::BLACK).ok();
-    
-    // #[cfg(feature = "esp32s3-disp143Oled")]
+    my_display.set_align_even(true);
+
+
+    // 2x2 tile (four colors) – should match your working 2x2
+    my_display
+        .write_2x2(70, 233, Rgb565::BLUE, Rgb565::YELLOW, Rgb565::RED, Rgb565::GREEN)
+        .unwrap();
+
+    // 1x2 tile (top/bottom)
+    my_display
+        .write_1x2(100, 100, Rgb565::WHITE, Rgb565::RED)
+        .unwrap();
+
+    // 2x2 solid
+    my_display
+        .write_2x2_solid(110, 110, Rgb565::CYAN)
+        .unwrap();
+
+    // 1x2 solid
+    my_display
+        .write_1x2_solid(120, 120, Rgb565::MAGENTA)
+        .unwrap();
+
+    // 2x2 at 70,233 using rows (same as fill_rect_solid path)
     // {
-    //     // // 1) single white pixel at (50,50)
-    //     // my_display.set_window(50, 50, 50, 50).unwrap();
-    //     // let pix = Rgb565::WHITE.into_storage().to_be_bytes();
-    //     // my_display.write_pixels(&pix).unwrap();
+    //     my_display.set_window(70, 233, 71, 234).unwrap();
+    //     let color_1 = Rgb565::BLUE.into_storage().to_be_bytes();
+    //     let color_2 = Rgb565::YELLOW.into_storage().to_be_bytes();
+    //     let color_3 = Rgb565::RED.into_storage().to_be_bytes();
+    //     let color_4 = Rgb565::GREEN.into_storage().to_be_bytes();
 
-    //     // 2) small 20x20 red block at (100,100) using a contiguous buffer
-    //     const BW: usize = 300;
-    //     const BH: usize = 300;
-    //     let bx: u16 = 0;
-    //     let by: u16 = 0;
-    //     my_display.set_window(bx, by, bx + (BW as u16) - 1, by + (BH as u16) - 1).unwrap();
-
-    //     let mut buf = [0u8; BW * BH * 2];
-    //     let color = Rgb565::WHITE.into_storage().to_be_bytes();
-    //     for i in (0..buf.len()).step_by(2) {
-    //         buf[i] = color[0];
-    //         buf[i + 1] = color[1];
-    //     }
-    //     my_display.write_pixels(&buf).unwrap();
-
-    //     // Optional: also test the rows API (no copy of whole image)
-    //     /*
-    //     let mut row = [0u8; BW * 2];
-    //     for i in (0..row.len()).step_by(2) {
-    //         row[i] = red[0];
-    //         row[i + 1] = red[1];
-    //     }
-    //     let mut rows: heapless::Vec<&[u8], BH> = heapless::Vec::new();
-    //     for _ in 0..BH { rows.push(&row).ok(); }
-    //     my_display.set_window(bx, by, bx + (BW as u16) - 1, by + (BH as u16) - 1).unwrap();
+    //     let row0 = [color_1[0], color_1[1], color_2[0], color_2[1]];
+    //     let row1 = [color_3[0], color_3[1], color_4[0], color_4[1]];
+    //     let rows: [&[u8]; 2] = [&row0, &row1];
     //     my_display.write_pixels_rows(&rows).unwrap();
-    //     */
-
-    //     println!("co5300 write_pixels test done");
     // }
 
+    
+
+    // my_display.set_window(70, 233, 71, 234).unwrap();
+    // let w = Rgb565::WHITE.into_storage().to_be_bytes();
+    // let row = [w[0], w[1], w[0], w[1]];
+    // let rows: [&[u8]; 2] = [&row, &row];
+    // my_display.write_pixels_rows(&rows).unwrap();
     // my_display
     //     .fill_rect_solid(
-    //         233/2,
-    //         233/2,
+    //         70,
     //         233,
-    //         233,
+    //         2,
+    //         2,
     //         Rgb565::WHITE,
     //     )
     //     .ok();

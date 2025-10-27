@@ -10,12 +10,13 @@ path = "./src/bin/main.rs"
 
 [dependencies]
 # HAL + runtime
-esp-hal = { version = "1.0.0-rc.0", features = ["esp32s3", "unstable"] }
-esp-println = "0.15.0"
-esp-backtrace = { version = "0.17.0", features = ["panic-handler", "println"] }
-esp-bootloader-esp-idf = "0.2.0"
+esp-hal = { version = "1.0.0-rc.1", features = ["esp32s3", "unstable", "psram"] }
+esp-println = "0.16.0"
+esp-backtrace = { version = "0.18.0", features = ["panic-handler", "println"] }
+esp-bootloader-esp-idf = "0.3.0"
 critical-section = "1.1"
-cfg-if = "1.0"
+cfg-if = "1.0.4"
+esp-alloc = "0.8"
 
 # Display stack (all on embedded-hal 1.0)
 mipidsi = { version = "0.9.0", optional = true }
@@ -45,7 +46,7 @@ esp32s2   = ["esp-hal/esp32s2",   "esp-println/esp32s2",   "esp-backtrace/esp32"
 esp32s3   = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3"]
 devkit-esp32s3-disp128 = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3", "disp_mipidsi"]
 allinone = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3"]
-esp32s3-disp143Oled = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3", "disp_co5300"]
+esp32s3-disp143Oled = ["esp-hal/esp32s3", "esp-hal/psram", "esp-println/esp32s3", "esp-backtrace/esp32s3", "esp-bootloader-esp-idf/esp32s3", "disp_co5300"]
 alt = []
 
 [profile.dev]

@@ -173,7 +173,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 
     // // rotary encoder pins
     let mut enc_clk = Input::new(p.GPIO2, InputConfig::default().with_pull(Pull::None));
-    let mut enc_dt  = Input::new(p.GPIO1, InputConfig::default().with_pull(Pull::None));
+    let mut enc_dt  = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::None));
     enc_clk.listen(Event::AnyEdge);
     enc_dt.listen(Event::AnyEdge);
 
