@@ -22,6 +22,7 @@
 
 use core::fmt;
 
+use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
@@ -38,6 +39,9 @@ use esp_hal::Blocking;
 
 use embedded_hal::spi::Operation;
 
+extern crate alloc;
+use alloc::vec::Vec;
+
 // Public constants so the rest of your code can adopt 466×466 easily.
 pub const CO5300_WIDTH: u16 = 466;
 pub const CO5300_HEIGHT: u16 = 466;
@@ -45,6 +49,7 @@ const RAMWR_OPCODE: u8 = 0x2C;
 
 use embedded_graphics::prelude::IntoStorage;
 
+/// Low-level command send helper (basically holds this entire thing together)
 pub fn ramwr_stream<SD: SpiDevice<u8>>(
     spi: &mut SD,
     chunks: &[&[u8]],
@@ -53,10 +58,8 @@ pub fn ramwr_stream<SD: SpiDevice<u8>>(
 
     let hdr: [u8; 4] = [0x02, 0x00, RAMWR_OPCODE, 0x00];
 
-    // Fast path: single chunk (use the same transaction style as multi-chunk)
     if chunks.len() == 1 {
         if let Some(&data) = chunks.first() {
-            // Build a small op list to match the path that works for you
             let mut ops: heapless::Vec<Operation<'_, u8>, 2> = heapless::Vec::new();
             ops.push(Operation::Write(&hdr)).ok();
             ops.push(Operation::Write(data)).ok();
@@ -65,23 +68,15 @@ pub fn ramwr_stream<SD: SpiDevice<u8>>(
         return Ok(());
     }
 
-    // Multi-chunk path (e.g., row-by-row streaming)
-    let mut ops: heapless::Vec<Operation<'_, u8>, 512> = heapless::Vec::new();
+    // Increase capacity so we can write whole images (<= 2 ops per row + 1 hdr)
+    let mut ops: heapless::Vec<Operation<'_, u8>, 1024> = heapless::Vec::new();
     ops.push(Operation::Write(&hdr)).ok();
 
     for &c in chunks {
         ops.push(Operation::Write(c)).ok();
-        if ops.is_full() {
-            // If we overflow, flush what we have, then continue
-            spi.transaction(&mut ops)?;
-            ops.clear();
-            ops.push(Operation::Write(&hdr)).ok();
-        }
     }
-    if !ops.is_empty() {
-        spi.transaction(&mut ops)?;
-    }
-    Ok(())
+
+    spi.transaction(&mut ops)
 }
 
 /// Error type that wraps SPI and GPIO errors.
@@ -153,7 +148,7 @@ where
             fb,
         };
 
-        // Hard reset sequence (keep it)
+        // Hard reset sequence
         if let Some(r) = this.rst.as_mut() {
             r.set_high().map_err(Co5300Error::Gpio)?;
             delay.delay_ms(1);
@@ -168,7 +163,7 @@ where
         this.cmd(0x01, &[])?; // SWRESET
 
         delay.delay_ms(10);
-        // ==== Init table equivalent ====
+    
         // 0x11 (SLPOUT), no data, 80 ms delay
         this.cmd(0x11, &[])?;
         delay.delay_ms(120);
@@ -411,7 +406,6 @@ where
                 Co5300Error::Spi(e)
             })
         }
-    
     }
 
     // Flush a single 2×2 tile from the framebuffer at (x0,y0).
@@ -442,6 +436,94 @@ where
         self.set_window(x0, y0, x0 + 1, y0 + 1)?;
         self.write_pixels_rows(&rows)
     }
+
+    /// Fast path: stream a BE RGB565 rectangle at (x0,y0).
+    /// `data` is w*h*2 bytes, row-major, big-endian.
+    pub fn blit_rect_be_fast(
+        &mut self,
+        x0: u16,
+        y0: u16,
+        w: u16,
+        h: u16,
+        data: &[u8],
+    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
+        if data.len() != (w as usize) * (h as usize) * 2 {
+            return Ok(());
+        }
+        // Clip to panel (should already be within bounds when called from fill_contiguous)
+        if x0 >= self.w || y0 >= self.h {
+            return Ok(());
+        }
+        let w = w.min(self.w.saturating_sub(x0));
+        let h = h.min(self.h.saturating_sub(y0));
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
+
+        // Even alignment padding if required by the controller
+        let pad_w = self.align_even && (w & 1) == 1;
+        let pad_h = self.align_even && (h & 1) == 1;
+
+        // Program a single window (inclusive coords), expanded if padding
+        let x1 = x0 + w - 1 + if pad_w { 1 } else { 0 };
+        let y1 = y0 + h - 1 + if pad_h { 1 } else { 0 };
+        self.set_window(x0, y0, x1, y1)?;
+
+        // Build chunk list referencing the source buffer (zero-copy)
+        let mut chunks: heapless::Vec<&[u8], 1024> = heapless::Vec::new();
+        let stride = (w as usize) * 2;
+
+        for r in 0..(h as usize) {
+            let off = r * stride;
+            let span = &data[off..off + stride];
+            chunks.push(span).map_err(|_| Co5300Error::OutOfBounds)?;
+            if pad_w {
+                chunks.push(&span[span.len() - 2..]).map_err(|_| Co5300Error::OutOfBounds)?;
+            }
+
+            // Keep framebuffer in sync
+            let fb_w = self.w as usize;
+            let fb_off = (y0 as usize + r) * fb_w + (x0 as usize);
+            for i in 0..(w as usize) {
+                let hi = span[i * 2];
+                let lo = span[i * 2 + 1];
+                self.fb[fb_off + i] = u16::from_be_bytes([hi, lo]);
+            }
+            if pad_w && fb_off + (w as usize) < self.fb.len() {
+                self.fb[fb_off + (w as usize)] = self.fb[fb_off + (w as usize) - 1];
+            }
+        }
+
+        // Duplicate last row if height is odd and padding is required
+        if pad_h {
+            let r = (h as usize) - 1;
+            let off = r * stride;
+            let span = &data[off..off + stride];
+            chunks.push(span).map_err(|_| Co5300Error::OutOfBounds)?;
+            if pad_w {
+                chunks.push(&span[span.len() - 2..]).map_err(|_| Co5300Error::OutOfBounds)?;
+            }
+
+            // FB sync for duplicated row
+            let fb_w = self.w as usize;
+            let fb_off = (y0 as usize + r + 1) * fb_w + (x0 as usize);
+            for i in 0..(w as usize) {
+                let hi = span[i * 2];
+                let lo = span[i * 2 + 1];
+                self.fb[fb_off + i] = u16::from_be_bytes([hi, lo]);
+            }
+            if pad_w && fb_off + (w as usize) < self.fb.len() {
+                self.fb[fb_off + (w as usize)] = self.fb[fb_off + (w as usize) - 1];
+            }
+        }
+
+        // Single RAMWR with all chunks
+        self.write_pixels_rows(&chunks)
+    }
+
  
 }
 
@@ -478,7 +560,10 @@ where
         const TILE_CAP: usize = 256;
         let mut dirty: heapless::Vec<(u16, u16), TILE_CAP> = heapless::Vec::new();
 
+        // Process each pixel
         for Pixel(Point { x, y }, color) in pixels.into_iter() {
+
+            // Bounds check
             if x < 0 || y < 0 { continue; }
             let (x, y) = (x as u16, y as u16);
             if x >= self.w || y >= self.h { continue; }
@@ -513,17 +598,84 @@ where
         Ok(())
     }
 
+    // FAST PATH: row streaming for images and large fills
+    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Rgb565>,
+    {
+        use embedded_graphics::prelude::*;
+
+        // Clip to panel
+        let bounds = Rectangle::new(Point::new(0, 0), Size::new(self.w as u32, self.h as u32));
+        let inter = area.intersection(&bounds);
+        if inter.size.width == 0 || inter.size.height == 0 {
+            // Drain iterator to keep semantics
+            let mut it = colors.into_iter();
+            let total = (area.size.width as usize) * (area.size.height as usize);
+            for _ in 0..total { let _ = it.next(); }
+            return Ok(());
+        }
+
+        // Precompute skips and takes
+        let area_w = area.size.width as usize;
+        let area_h = area.size.height as usize;
+
+        let x0 = inter.top_left.x as u16;
+        let y0 = inter.top_left.y as u16;
+        let take = inter.size.width as usize;
+        let inter_h = inter.size.height as usize;
+
+        let left_skip = (inter.top_left.x - area.top_left.x).max(0) as usize;
+        let right_skip = area_w.saturating_sub(left_skip + take);
+        let top_skip = (inter.top_left.y - area.top_left.y).max(0) as usize;
+
+        // Collect visible span into a PSRAM buffer (W*H*2 bytes, BE RGB565)
+        let mut buf: Vec<u8> = Vec::with_capacity(take * inter_h * 2);
+        let mut it = colors.into_iter();
+
+        // Skip full rows above intersection
+        for _ in 0..top_skip {
+            for _ in 0..area_w { let _ = it.next(); }
+        }
+
+        // Collect intersecting rows
+        for _r in 0..inter_h {
+            // Skip left columns
+            for _ in 0..left_skip { let _ = it.next(); }
+            // Take visible span
+            for _ in 0..take {
+                if let Some(c) = it.next() {
+                    let b = c.into_storage().to_be_bytes();
+                    buf.push(b[0]);
+                    buf.push(b[1]);
+                }
+            }
+            // Skip right columns
+            for _ in 0..right_skip { let _ = it.next(); }
+        }
+
+        // Drain rows below to preserve iterator semantics
+        let rows_below = area_h.saturating_sub(top_skip + inter_h);
+        for _ in 0..rows_below {
+            for _ in 0..area_w { let _ = it.next(); }
+        }
+
+        // One-window, one-RAMWR fast path
+        let _ = self.blit_rect_be_fast(x0, y0, take as u16, inter_h as u16, &buf);
+        Ok(())
+    }
+
+
+
+
     fn clear(&mut self, color: embedded_graphics::pixelcolor::Rgb565) -> Result<(), Self::Error> {
         let v = color.into_storage();
         for px in self.fb.iter_mut() { *px = v; }
         let _ = self.fill_rect_solid(0, 0, self.w, self.h, color);
         Ok(())
     }
-}
-// ...existing code...
 
-/// Backend's public "Display" name, used by display.rs
-// pub type Display<SPI, RST> = Co5300Display<SPI, RST>;
+}
 
 /// Convenience builder that picks common defaults and returns the concrete type.
 /// Returning the concrete type lets display.rs use `impl Trait` to erase it later.

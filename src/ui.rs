@@ -8,6 +8,17 @@
 //! Designed for use with embedded-graphics, mipidsi, and ESP-HAL display drivers.
 //! All drawing is centered on a 240x240 display, but can be adapted for other sizes.
 
+#[cfg(feature = "esp32s3-disp143Oled")]
+extern crate alloc;
+#[cfg(feature = "esp32s3-disp143Oled")]
+use alloc::vec::Vec;
+#[cfg(feature = "esp32s3-disp143Oled")]
+use core::{any::Any, cell::RefCell};
+#[cfg(feature = "esp32s3-disp143Oled")]
+use critical_section::Mutex;
+#[cfg(feature = "esp32s3-disp143Oled")]
+const CACHE_CAP: usize = 3;
+
 
 use esp_backtrace as _;
 
@@ -21,30 +32,15 @@ use esp_backtrace as _;
 
 // Embedded-graphics
 use embedded_graphics::{
-    Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::Rgb565, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
+    Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::{Rgb565, raw::RawU16}, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
 };
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 
 
 // Make a lightweight trait bound we’ll use for the factory’s return type.
+pub trait PanelRgb565: DrawTarget<Color = Rgb565> + OriginDimensions + Any {}
+impl<T> PanelRgb565 for T where T: DrawTarget<Color = Rgb565> + OriginDimensions + Any {}
 
-pub trait PanelRgb565: DrawTarget<Color = Rgb565> + OriginDimensions {}
-impl<T> PanelRgb565 for T where T: DrawTarget<Color = Rgb565> + OriginDimensions {}
-
-// static TRANSFORM_FLASH: AtomicU8 = AtomicU8::new(0);
-
-// #[cfg(feature = "devkit-esp32s3-disp128")]
-// type DisplayType<'a> = Display<
-//     SpiInterface<'a,
-//         ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, embedded_hal_bus::spi::NoDelay>,
-//         Output<'a>,
-//     >,
-//     GC9A01,
-//     Output<'a>,
-// >;
-
-// #[cfg(feature = "esp32s3-disp143Oled")]
-// type DisplayType<'a> = crate::co5300::DisplayType<'a>;
 
 // Display configuration, (0,0) is top-left corner
 #[cfg(feature = "devkit-esp32s3-disp128")]
@@ -296,32 +292,200 @@ fn draw_text(
     .ok();
 }
 
-// helper function to draw a centered image
-fn draw_image_runtime(
+// // apart of debug to try and speed up display
+// fn draw_image_runtime(
+//     disp: &mut impl PanelRgb565,
+//     data_zlib: &'static [u8],
+//     w: u32,
+//     h: u32,
+//     clear: bool,
+// ) {
+//     if clear { let _ = disp.clear(Rgb565::BLACK); }
+
+//     let bytes = decompress_to_vec_zlib(data_zlib).unwrap_or_default();
+//     if bytes.len() != (w * h * 2) as usize { return; }
+
+//     let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
+//     let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
+
+//     // OLED fast path: one window + one RAMWR, zero extra copies
+//     #[cfg(feature = "esp32s3-disp143Oled")]
+//     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::co5300::DisplayType<'static>>() {
+//         let _ = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, &bytes);
+//         return;
+//     }
+
+//     // Fallbacks
+//     #[cfg(feature = "devkit-esp32s3-disp128")]
+//     {
+//         let raw = ImageRawBE::<Rgb565>::new(&bytes, w);
+//         let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
+//         return;
+//     }
+//     let area = Rectangle::new(Point::new(x, y), Size::new(w, h));
+//     let colors = bytes.chunks_exact(2).map(|b| {
+//         let v = u16::from_be_bytes([b[0], b[1]]);
+//         Rgb565::from(RawU16::new(v))
+//     });
+//     let _ = disp.fill_contiguous(&area, colors);
+// }
+
+
+// Draw from already-decompressed bytes (used by cache on OLED)
+fn draw_image_bytes(
     disp: &mut impl PanelRgb565,
-    data_zlib: &'static [u8],
+    bytes: &[u8],
     w: u32,
     h: u32,
     clear: bool,
-) {
-    if clear { disp.clear(Rgb565::BLACK).ok(); }
-
-    // Decompress into PSRAM
-    let bytes = decompress_to_vec_zlib(data_zlib).unwrap_or_default();
+){
+    if clear { let _ = disp.clear(Rgb565::BLACK); }
     if bytes.len() != (w * h * 2) as usize { return; }
+    let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
+    let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
 
-    // Generic path (works on GC9A01 too)
-    let raw = ImageRawBE::<Rgb565>::new(&bytes, w);
-    let x = (RESOLUTION - w) as i32 / 2;
-    let y = (RESOLUTION - h) as i32 / 2;
-    Image::new(&raw, Point::new(x, y)).draw(disp).ok();
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::co5300::DisplayType<'static>>() {
+        let _ = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes);
+        return;
+    }
 
-    // If on CO5300, you can call the fast blit instead (more efficient):
-    // if let Some(co) = (<&mut dyn core::any::Any>::from(disp)).downcast_mut::<crate::co5300::DisplayType<'_>>() {
-    //     let _ = co.blit_image_be_centered(w as u16, h as u16, &bytes);
-    // }
+    // Generic fallback
+    let raw = ImageRawBE::<Rgb565>::new(bytes, w);
+    let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
 }
 
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+static IMAGE_CACHE: Mutex<RefCell<[Option<(OmnitrixState, Vec<u8>)>; CACHE_CAP]>> =
+    Mutex::new(RefCell::new([None, None, None]));
+
+
+// Helper: select the compressed asset by state
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn asset_for(state: OmnitrixState) -> &'static [u8] {
+    match state {
+        OmnitrixState::Alien1  => ALIEN1_IMAGE,
+        OmnitrixState::Alien2  => ALIEN2_IMAGE,
+        OmnitrixState::Alien3  => ALIEN3_IMAGE,
+        OmnitrixState::Alien4  => ALIEN4_IMAGE,
+        OmnitrixState::Alien5  => ALIEN5_IMAGE,
+        OmnitrixState::Alien6  => ALIEN6_IMAGE,
+        OmnitrixState::Alien7  => ALIEN7_IMAGE,
+        OmnitrixState::Alien8  => ALIEN8_IMAGE,
+        OmnitrixState::Alien9  => ALIEN9_IMAGE,
+        OmnitrixState::Alien10 => ALIEN10_IMAGE,
+    }
+}
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn omni_next(s: OmnitrixState) -> OmnitrixState {
+    match s {
+        OmnitrixState::Alien1  => OmnitrixState::Alien2,
+        OmnitrixState::Alien2  => OmnitrixState::Alien3,
+        OmnitrixState::Alien3  => OmnitrixState::Alien4,
+        OmnitrixState::Alien4  => OmnitrixState::Alien5,
+        OmnitrixState::Alien5  => OmnitrixState::Alien6,
+        OmnitrixState::Alien6  => OmnitrixState::Alien7,
+        OmnitrixState::Alien7  => OmnitrixState::Alien8,
+        OmnitrixState::Alien8  => OmnitrixState::Alien9,
+        OmnitrixState::Alien9  => OmnitrixState::Alien10,
+        OmnitrixState::Alien10 => OmnitrixState::Alien1,
+    }
+}
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn omni_prev(s: OmnitrixState) -> OmnitrixState {
+    match s {
+        OmnitrixState::Alien1  => OmnitrixState::Alien10,
+        OmnitrixState::Alien2  => OmnitrixState::Alien1,
+        OmnitrixState::Alien3  => OmnitrixState::Alien2,
+        OmnitrixState::Alien4  => OmnitrixState::Alien3,
+        OmnitrixState::Alien5  => OmnitrixState::Alien4,
+        OmnitrixState::Alien6  => OmnitrixState::Alien5,
+        OmnitrixState::Alien7  => OmnitrixState::Alien6,
+        OmnitrixState::Alien8  => OmnitrixState::Alien7,
+        OmnitrixState::Alien9  => OmnitrixState::Alien8,
+        OmnitrixState::Alien10 => OmnitrixState::Alien9,
+    }
+}
+
+// LRU helpers
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn cache_take(state: OmnitrixState) -> Option<Vec<u8>> {
+    critical_section::with(|cs| {
+        let mut arr = IMAGE_CACHE.borrow(cs).borrow_mut();
+        if let Some(idx) =
+            (0..CACHE_CAP).find(|&i| arr[i].as_ref().map(|(s, _)| *s) == Some(state))
+        {
+            let (_, buf) = arr[idx].take().unwrap();
+            // Shift newer entries forward (maintain recency)
+            for j in (0..idx).rev() {
+                arr[j + 1] = arr[j].take();
+            }
+            return Some(buf);
+        }
+        None
+    })
+}
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn cache_put(state: OmnitrixState, buf: Vec<u8>) {
+    if buf.len() != (IMG_W * IMG_H * 2) as usize {
+        return;
+    }
+    critical_section::with(|cs| {
+        let mut arr = IMAGE_CACHE.borrow(cs).borrow_mut();
+        // Remove existing same key if present
+        if let Some(idx) =
+            (0..CACHE_CAP).find(|&i| arr[i].as_ref().map(|(s, _)| *s) == Some(state))
+        {
+            arr[idx] = None;
+        } else {
+            // Evict LRU (last)
+            arr[CACHE_CAP - 1] = None;
+        }
+        // Shift right and insert as MRU at index 0
+        for j in (0..CACHE_CAP - 1).rev() {
+            arr[j + 1] = arr[j].take();
+        }
+        arr[0] = Some((state, buf));
+    });
+}
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn cache_contains(state: OmnitrixState) -> bool {
+    critical_section::with(|cs| {
+        IMAGE_CACHE
+            .borrow(cs)
+            .borrow()
+            .iter()
+            .any(|e| e.as_ref().map(|(s, _)| *s) == Some(state))
+    })
+}
+
+// Prefetch up to two neighbors after drawing (amortizes cost)
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn prefetch_neighbors(current: OmnitrixState) {
+    let n = omni_next(current);
+    let p = omni_prev(current);
+
+    // Prefetch next if missing
+    if !cache_contains(n) {
+        let z = asset_for(n);
+        let bytes = decompress_to_vec_zlib(z).unwrap_or_default();
+        if bytes.len() == (IMG_W * IMG_H * 2) as usize {
+            cache_put(n, bytes);
+        }
+    }
+    // Prefetch prev if missing
+    if !cache_contains(p) {
+        let z = asset_for(p);
+        let bytes = decompress_to_vec_zlib(z).unwrap_or_default();
+        if bytes.len() == (IMG_W * IMG_H * 2) as usize {
+            cache_put(p, bytes);
+        }
+    }
+}
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
@@ -345,7 +509,7 @@ pub fn update_ui(
                 draw_text(disp, "About Page (TEMP)", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true),
             Dialog::TransformPage => {
                 let style = PrimitiveStyle::with_fill(Rgb565::GREEN);
-                let diameter: u32 = 240;
+                let diameter: u32 = RESOLUTION / 2;
                 Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
                     .into_styled(style)
                     .draw(disp)
@@ -400,9 +564,23 @@ pub fn update_ui(
                 OmnitrixState::Alien9  => ("Omnitrix: Alien 9", ALIEN9_IMAGE),
                 OmnitrixState::Alien10 => ("Omnitrix: Alien 10", ALIEN10_IMAGE),
             };
-            draw_image_runtime(disp, image, IMG_W, IMG_H, false);
-            // Optionally, overlay the name as text:
-            // draw_text(disp, msg, Rgb565::BLACK, Rgb565::WHITE, CENTER, 20);
+            #[cfg(feature = "esp32s3-disp143Oled")]
+            {
+                // Take from cache or decompress once
+                let bytes = cache_take(omnitrix_state).unwrap_or_else(|| {
+                    let b = decompress_to_vec_zlib(image).unwrap_or_default();
+                    b
+                });
+                draw_image_bytes(disp, &bytes, IMG_W, IMG_H, false);
+                // Put back as most-recent
+                cache_put(omnitrix_state, bytes);
+                // Warm both neighbors
+                prefetch_neighbors(omnitrix_state);
+            }
+            #[cfg(feature = "devkit-esp32s3-disp128")]
+            {
+                draw_image_runtime(disp, image, IMG_W, IMG_H, false);
+            }
         }
         
         Page::Info => {
