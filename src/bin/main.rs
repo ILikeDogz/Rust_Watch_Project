@@ -18,8 +18,8 @@
 // The macro automatically fills in the fields. 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-use embedded_graphics::prelude::IntoStorage;
-use esp32s3_tests::co5300;
+#[cfg(feature = "esp32s3-disp143Oled")]
+
 use esp32s3_tests::display::setup_display;
 use esp32s3_tests::ui::MainMenuState;
 use esp32s3_tests::ui::Page;
@@ -31,7 +31,6 @@ use esp32s3_tests::input::{ButtonState, RotaryState, handle_button_generic, hand
 use esp32s3_tests::ui::{UiState, update_ui};
 
 
-use esp32s3_tests::wiring::DisplayPins;
 use esp_backtrace as _;
 use core::cell::{Cell, RefCell};
 use critical_section::Mutex;
@@ -41,6 +40,8 @@ use esp_hal::{
     handler,
     main,
     ram,
+    psram,
+    Config,
     timer::systimer::{SystemTimer, Unit},
 };
 
@@ -52,7 +53,7 @@ use embedded_graphics::{
 };
 
 
-use esp_println::println; // already part of esp-hal projects
+// use esp_println::println; // already part of esp-hal projects
 use esp_hal::spi::master::{Spi, Config as SpiConfig};
 use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
@@ -64,12 +65,19 @@ use embedded_hal::{
 };
 // use esp_hal::spi::FullDuplexMode;
 
-use core::sync::atomic::{AtomicBool, Ordering};
-extern crate alloc;
-use alloc::{boxed::Box, vec, vec::Vec};
 
-static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
-static BUTTON2_PRESSED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "esp32s3-disp143Oled")]
+extern crate alloc;
+#[cfg(feature = "esp32s3-disp143Oled")]
+use alloc::{boxed::Box, vec, vec::Vec};
+#[cfg(feature = "esp32s3-disp143Oled")]
+
+
+static BUTTON1_FLAG: critical_section::Mutex<core::cell::Cell<bool>> =
+    critical_section::Mutex::new(core::cell::Cell::new(false));
+static BUTTON2_FLAG: critical_section::Mutex<core::cell::Cell<bool>> =
+     critical_section::Mutex::new(core::cell::Cell::new(false));
+
 
 // Shared resources for Button
 static BUTTON1: ButtonState<'static> = ButtonState {
@@ -116,12 +124,16 @@ fn handler() {
     
     // Button 1: JUST SET THE FLAG
     handle_button_generic(&BUTTON1, now_ms, DEBOUNCE_MS, || {
-        BUTTON1_PRESSED.store(true, Ordering::Relaxed);
+        critical_section::with(|cs| {
+            BUTTON1_FLAG.borrow(cs).set(true);
+        });
     });
 
     // Button 2: JUST SET THEFlag
     handle_button_generic(&BUTTON2, now_ms, DEBOUNCE_MS, || {
-        BUTTON2_PRESSED.store(true, Ordering::Relaxed);
+        critical_section::with(|cs| {
+            BUTTON2_FLAG.borrow(cs).set(true);
+        });
     });
 
     // Encoder logic is fine, it's just math
@@ -140,19 +152,10 @@ fn main() -> ! {
     let mut last_ui_state = UiState { page: Page::Main(MainMenuState::Home), dialog: None };
 
     // Initialize peripherals
-    let peripherals = esp_hal::init(esp_hal::Config::default());
-        
-    // Initialize PSRAM allocator
-    esp_alloc::psram_allocator!(&peripherals.PSRAM, esp_hal::psram);
+    let peripherals = esp_hal::init(Config::default());
 
-    const W: usize = 466;
-    const H: usize = 466;
-
-    // ~424 KiB in PSRAM
-    let mut fb: Box<[u16]> = vec![0u16; W * H].into_boxed_slice();
-
-    // Example: clear to black
-    for px in fb.iter_mut() { *px = 0x0000; } // RGB565
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    esp_alloc::psram_allocator!(&peripherals.PSRAM, psram);
 
 
     // one call gives you IO handler + all your role pins from wiring.rs
@@ -189,115 +192,35 @@ fn main() -> ! {
 
     io.set_interrupt_handler(handler);
 
-    // set up display
+    #[cfg(feature = "devkit-esp32s3-disp128")]  
     let mut display_buf = [0u8; 1024];
-    let mut my_display = setup_display(
-        display_pins, &mut display_buf,
-    );
+        
 
+    let mut my_display = {
+        #[cfg(feature = "devkit-esp32s3-disp128")]
+        {
+            setup_display(display_pins, &mut display_buf)
+        }
+
+        #[cfg(feature = "esp32s3-disp143Oled")]
+        {
+            // CO5300: PSRAM-backed RGB565 framebuffer without unsafe
+            // Ensure psram_allocator! was called before this allocation
+            const W: usize = 466;
+            let fb: &'static mut [u16] = Box::leak(vec![0u16; W * W].into_boxed_slice());
+            setup_display(display_pins, fb)
+        }
+    };
+    
     #[cfg(feature = "esp32s3-disp143Oled")]
-    {
-        // if your type exposes set_align_even:
-        my_display.set_align_even(true);
-    }
-
-    // --- FIRST DRAW ----------------------------------------------------------
-
-    my_display.clear(Rgb565::BLACK).ok();
     my_display.set_align_even(true);
 
+    // // --- FIRST DRAW ----------------------------------------------------------
 
-    // 2x2 tile (four colors) – should match your working 2x2
-    my_display
-        .write_2x2(70, 233, Rgb565::BLUE, Rgb565::YELLOW, Rgb565::RED, Rgb565::GREEN)
-        .unwrap();
+    my_display.clear(Rgb565::BLACK).ok();
 
-    // 1x2 tile (top/bottom)
-    my_display
-        .write_1x2(100, 100, Rgb565::WHITE, Rgb565::RED)
-        .unwrap();
-
-    // 2x2 solid
-    my_display
-        .write_2x2_solid(110, 110, Rgb565::CYAN)
-        .unwrap();
-
-    // 1x2 solid
-    my_display
-        .write_1x2_solid(120, 120, Rgb565::MAGENTA)
-        .unwrap();
-
-    // 2x2 at 70,233 using rows (same as fill_rect_solid path)
-    // {
-    //     my_display.set_window(70, 233, 71, 234).unwrap();
-    //     let color_1 = Rgb565::BLUE.into_storage().to_be_bytes();
-    //     let color_2 = Rgb565::YELLOW.into_storage().to_be_bytes();
-    //     let color_3 = Rgb565::RED.into_storage().to_be_bytes();
-    //     let color_4 = Rgb565::GREEN.into_storage().to_be_bytes();
-
-    //     let row0 = [color_1[0], color_1[1], color_2[0], color_2[1]];
-    //     let row1 = [color_3[0], color_3[1], color_4[0], color_4[1]];
-    //     let rows: [&[u8]; 2] = [&row0, &row1];
-    //     my_display.write_pixels_rows(&rows).unwrap();
-    // }
-
-    
-
-    // my_display.set_window(70, 233, 71, 234).unwrap();
-    // let w = Rgb565::WHITE.into_storage().to_be_bytes();
-    // let row = [w[0], w[1], w[0], w[1]];
-    // let rows: [&[u8]; 2] = [&row, &row];
-    // my_display.write_pixels_rows(&rows).unwrap();
-    // my_display
-    //     .fill_rect_solid(
-    //         70,
-    //         233,
-    //         2,
-    //         2,
-    //         Rgb565::WHITE,
-    //     )
-    //     .ok();
-
-    // use embedded_graphics::{primitives::{Rectangle, PrimitiveStyle}, prelude::*};
-
-    // // After clear()
-    // Rectangle::new(Point::new(10, 10), Size::new(80, 20))
-    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
-    //     .draw(&mut my_display)
-    //     .ok();
-
-    // // 1px line (catches single-row issues)
-    // Rectangle::new(Point::new(10, 40), Size::new(120, 1))
-    //     .into_styled(PrimitiveStyle::with_fill(Rgb565::YELLOW))
-    //     .draw(&mut my_display)
-    //     .ok();
-
-    // use embedded_graphics::{
-    // mono_font::{ascii::{FONT_10X20, FONT_6X10}, 
-    // MonoTextStyle, MonoTextStyleBuilder}, 
-    // pixelcolor::Rgb565, 
-    // prelude::{Point, Primitive, RgbColor, Size, OriginDimensions}, 
-    // primitives::{PrimitiveStyle, Rectangle, Circle, Triangle}, text::{Alignment, Baseline, Text}, 
-    // Drawable,
-    // draw_target::DrawTarget, 
-    // };
-
-    // let style = MonoTextStyleBuilder::new()
-    //     .font(&FONT_10X20)
-    //     .text_color(Rgb565::WHITE)
-    //     .background_color(Rgb565::BLACK)
-    //     .build();
-
-    // Text::with_alignment(
-    //     "Watch Prototype",
-    //     Point::new(0, 0),
-    //     style,
-    //     Alignment::Center,
-    // )
-    // .draw(&mut my_display)
-    // .ok();
      
-    // update_ui(&mut my_display, last_ui_state);
+    update_ui(&mut my_display, last_ui_state);
 
     // --- MAIN LOOP -----------------------------------------------------------
     loop {
@@ -305,12 +228,17 @@ fn main() -> ! {
         // Check for UI state changes
         let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
         if ui_state != last_ui_state {
-            // update_ui(&mut my_display, ui_state);
+            update_ui(&mut my_display, ui_state);
             esp_println::println!("UI state changed: {:?}", ui_state);
             last_ui_state = ui_state;
         }
-        
-        if BUTTON1_PRESSED.swap(false, Ordering::Acquire) {
+
+        let b1 = critical_section::with(|cs| {
+            let f = BUTTON1_FLAG.borrow(cs).get();
+            if f { BUTTON1_FLAG.borrow(cs).set(false); }
+            f
+        });
+        if b1 {
             // All work is now SAFE here in the main loop
             esp_println::println!("Button 1 pressed!"); // Debug prints are safe here
             critical_section::with(|cs| {
@@ -321,8 +249,13 @@ fn main() -> ! {
         }
 
         // --- Handle Button 2 Press ---
-        if BUTTON2_PRESSED.swap(false, Ordering::Acquire) {
-            // All work is now SAFE here in the main loop
+        let b2 = critical_section::with(|cs| {
+            let f = BUTTON2_FLAG.borrow(cs).get();
+            if f { BUTTON2_FLAG.borrow(cs).set(false); }
+            f
+        });
+        if b2 {
+                // All work is now SAFE here in the main loop
              esp_println::println!("Button 2 pressed!"); // Debug prints are safe here
             critical_section::with(|cs| {
                 let state = UI_STATE.borrow(cs).get();

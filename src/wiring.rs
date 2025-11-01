@@ -41,7 +41,7 @@ use esp_hal::{
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
 use esp_hal::{
-    peripherals::{GPIO10, GPIO1},
+    peripherals::{GPIO10, GPIO11},
 };
 
 

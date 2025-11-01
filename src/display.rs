@@ -122,15 +122,14 @@ mod co5300_backend {
 
     // Concrete type we return for this backend:
     pub type DisplayType<'a> =
-        Co5300Display<ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>, Output<'a>>;
+        Co5300Display<'a,ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>, Output<'a>>;
 
     /// OLED setup:
     /// - `spi2`: the SPI2 peripheral (pass `peripherals.SPI2` from main)
     /// - `display_pins`: your new QSPI-style pin bundle
-    /// - `_display_buf`: unused for CO5300 (kept for API parity with TFT path)
     pub fn setup_display<'a>(
         display_pins: DisplayPins<'a>,
-        _display_buf: &'a mut [u8],
+        display_buf: &'a mut [u16],            // required framebuffer
     ) -> DisplayType<'a> {
         // Destructure the pins as defined in your new wiring
         let DisplayPins {
@@ -163,7 +162,7 @@ mod co5300_backend {
 
         let spi_dev = ExclusiveDevice::new(spi, cs, NoDelay).unwrap();
 
-        let display = co5300::new_with_defaults(spi_dev, Some(rst), &mut delay)
+        let display = co5300::new_with_defaults(spi_dev, Some(rst), &mut delay, display_buf)
             .expect("CO5300 init failed");
 
         display

@@ -26,7 +26,6 @@ use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
 };
-use embedded_hal::delay;
 use embedded_hal::{
     digital::OutputPin,
     spi::SpiDevice,
@@ -38,7 +37,6 @@ use esp_hal::spi::master::Spi;
 use esp_hal::Blocking;
 
 use embedded_hal::spi::Operation;
-use heapless::Vec;
 
 // Public constants so the rest of your code can adopt 466×466 easily.
 pub const CO5300_WIDTH: u16 = 466;
@@ -46,30 +44,6 @@ pub const CO5300_HEIGHT: u16 = 466;
 const RAMWR_OPCODE: u8 = 0x2C;
 
 use embedded_graphics::prelude::IntoStorage;
-
-fn flush_full(display: &mut DisplayType, fb: &[u16]) -> Result<(), core::convert::Infallible> {
-    // Ensure the address window covers the whole screen once
-    display.set_window(0, 0, CO5300_WIDTH - 1, CO5300_HEIGHT - 1).unwrap();
-
-    // Scratch row buffer in internal SRAM (fast & small)
-    let mut row_be: [u8; (466 * 2)] = [0; 466 * 2];
-
-    // Stream each scanline: convert u16->BE bytes on the fly to avoid a second full-size buffer
-    for y in 0..CO5300_HEIGHT as usize {
-        let row = &fb[y * CO5300_WIDTH as usize .. y * CO5300_WIDTH as usize + CO5300_WIDTH as usize];
-
-        // If your fb is plain u16 RGB565:
-        for (x, px) in row.iter().enumerate() {
-            let be = px.to_be_bytes();
-            row_be[2 * x] = be[0];
-            row_be[2 * x + 1] = be[1];
-        }
-
-        // Send the row (CO5300 driver frames this with 0x02 0x00 0x2C 0x00)
-        ramwr_stream(&mut display.spi, &[&row_be]).unwrap();
-    }
-    Ok(())
-}
 
 pub fn ramwr_stream<SD: SpiDevice<u8>>(
     spi: &mut SD,
@@ -125,7 +99,7 @@ impl<SpiE: fmt::Debug, GpioE: fmt::Debug> From<SpiE> for Co5300Error<SpiE, GpioE
 /// A very small CO5300 panel driver speaking the "0x02 + CMD + DATA" SPI framing.
 /// No D/C pin is used; CS is handled by the `SpiDevice` implementation.
 /// Implements `DrawTarget<Rgb565>` for convenience (per-pixel path is simple but slow).
-pub struct Co5300Display<SPI, RST> {
+pub struct Co5300Display<'fb,SPI, RST> {
     pub spi: SPI,
     rst: Option<RST>,
     w: u16,
@@ -133,10 +107,11 @@ pub struct Co5300Display<SPI, RST> {
     x_off: u16,
     y_off: u16,
     align_even: bool,
+    fb: &'fb mut [u16], // framebuffer storage
 }
 
 
-impl<SPI, RST> Co5300Display<SPI, RST>
+impl<'fb, SPI, RST> Co5300Display<'fb, SPI, RST>
 where
     // embedded-hal 1.0 `SpiDevice<u8>` so we can do atomic CS-asserted transfers.
     SPI: SpiDevice<u8>,
@@ -157,7 +132,14 @@ where
         delay: &mut impl embedded_hal::delay::DelayNs,
         width: u16,
         height: u16,
+        fb: &'fb mut [u16],
     ) -> Result<Self, Co5300Error<SPI::Error, RST::Error>> {
+
+        // Validate FB size matches WxH (RGB565)
+        let expected = (width as usize) * (height as usize);
+        if fb.len() != expected {
+            return Err(Co5300Error::OutOfBounds);
+        }
 
         // Construct with NO offsets and NO even alignment for now
         let mut this = Self {
@@ -168,7 +150,7 @@ where
             x_off: 0x0006,
             y_off: 0x0000,
             align_even: false,
-
+            fb,
         };
 
         // Hard reset sequence (keep it)
@@ -335,36 +317,6 @@ where
     }
 
 
-    pub fn write_1x2(
-        &mut self,
-        x: u16,
-        y: u16,
-        color_1: Rgb565,
-        color_2: Rgb565,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        if x >= self.w || y >= self.h || y + 1 >= self.h {
-            return Err(Co5300Error::OutOfBounds);
-        }
-        // Align to even x and ensure we have 2px width
-        let x0 = x & !1;
-        if x0 + 1 >= self.w {
-            return Err(Co5300Error::OutOfBounds);
-        }
-
-        self.set_window(x0, y, x0 + 1, y + 1)?;
-
-        let t = color_1.into_storage().to_be_bytes();
-        let b = color_2.into_storage().to_be_bytes();
-
-        // row 0: [top, top] (2px)
-        let row0 = [t[0], t[1], t[0], t[1]]; 
-        // row 1: [bottom, bottom] (2px)
-        let row1 = [b[0], b[1], b[0], b[1]]; 
-
-        let rows: [&[u8]; 2] = [&row0, &row1];
-        self.write_pixels_rows(&rows)
-    }
-
     pub fn write_2x2(
         &mut self,
         x: u16,
@@ -394,16 +346,6 @@ where
         self.write_pixels_rows(&rows)
     }
 
-
-    /// Convenience: 1x2 solid color tile.
-    pub fn write_1x2_solid(
-        &mut self,
-        x: u16,
-        y: u16,
-        color: Rgb565,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        self.write_1x2(x, y, color, color)
-    }
 
     /// Convenience: 2x2 solid color tile.
     pub fn write_2x2_solid(
@@ -471,15 +413,45 @@ where
         }
     
     }
+
+    // Flush a single 2×2 tile from the framebuffer at (x0,y0).
+    // Uses fb values for the 3 neighbors so only the intended pixel changes.
+    fn flush_tile2x2_from_fb(
+        &mut self,
+        x0: u16,
+        y0: u16,
+    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+        if x0 + 1 >= self.w || y0 + 1 >= self.h {
+            return Ok(());
+        }
+        let w = self.w as usize;
+        let base = (y0 as usize) * w + (x0 as usize);
+
+        let a = self.fb[base + 0];         // (x0,   y0)
+        let b = self.fb[base + 1];         // (x0+1, y0)
+        let c = self.fb[base + w + 0];     // (x0,   y0+1)
+        let d = self.fb[base + w + 1];     // (x0+1, y0+1)
+
+        let ab0 = a.to_be_bytes(); let ab1 = b.to_be_bytes();
+        let cd0 = c.to_be_bytes(); let cd1 = d.to_be_bytes();
+
+        let row0 = [ab0[0], ab0[1], ab1[0], ab1[1]];
+        let row1 = [cd0[0], cd0[1], cd1[0], cd1[1]];
+        let rows: [&[u8]; 2] = [&row0, &row1];
+
+        self.set_window(x0, y0, x0 + 1, y0 + 1)?;
+        self.write_pixels_rows(&rows)
+    }
  
 }
+
 
 // -------------------- embedded-graphics integration --------------------
 // NOTE: This is a simple per-pixel fallback so your existing UI compiles
 // without refactoring. It’s not fast.
 // Prefer using `set_window()` + `write_pixels()` for images/buffers.
 
-impl<SPI, RST> OriginDimensions for Co5300Display<SPI, RST>
+impl<'fb, SPI, RST> OriginDimensions for Co5300Display<'fb, SPI, RST>
 where
     SPI: SpiDevice<u8>,
     RST: OutputPin,
@@ -489,46 +461,7 @@ where
     }
 }
 
-// ...existing code...
-
-impl<SPI, RST> Co5300Display<SPI, RST>
-where
-    SPI: embedded_hal::spi::SpiDevice<u8>,
-    RST: embedded_hal::digital::OutputPin,
-{
-    /// Flush a run of pixels on an even-aligned row.
-    fn flush_run_row_even(
-        &mut self,
-        y: u16,
-        x0: u16,
-        run_len: u16,
-        buf: &mut [u8],
-    ) {
-        if run_len == 0 { return; }
-        // Set window for the run
-        let x1 = x0 + run_len - 1;
-        let y1 = y;
-        if let Err(e) = self.set_window(x0, y, x1, y1) {
-            // eprintln!("set_window err: {:?}", e);
-            return;
-        }
-
-        // Prepare row slice
-        let nbytes = (run_len as usize) * 2;
-        let row = &buf[..nbytes];
-
-        // Write the row
-        let rows: [&[u8]; 1] = [row];
-        if let Err(e) = self.write_pixels_rows(&rows) {
-            // eprintln!("write_pixels_rows err: {:?}", e);
-        }
-    }
-}
-
-// -------------------- embedded-graphics integration --------------------
-// ...existing code...
-
-impl<SPI, RST> embedded_graphics::draw_target::DrawTarget for Co5300Display<SPI, RST>
+impl<'fb, SPI, RST> embedded_graphics::draw_target::DrawTarget for Co5300Display<'fb, SPI, RST>
 where
     SPI: embedded_hal::spi::SpiDevice<u8>,
     RST: embedded_hal::digital::OutputPin,
@@ -540,59 +473,47 @@ where
     where
         I: IntoIterator<Item = embedded_graphics::Pixel<embedded_graphics::pixelcolor::Rgb565>>,
     {
-        use embedded_graphics::{pixelcolor::Rgb565, Pixel};
+        use embedded_graphics::{prelude::Point, Pixel};
 
-        // One scanline buffer (+2 bytes headroom for optional padding)
-        let mut buf: [u8; (466 * 2) + 2] = [0; (466 * 2) + 2];
+        // Collect unique 2×2 tile origins to flush
+        let mut dirty: heapless::Vec<(u16, u16), 128> = heapless::Vec::new();
 
-        // Current run state
-        let mut run_len: u16 = 0;
-        let mut run_x0: u16 = 0;
-        let mut run_y: u16 = 0;
-
-        for Pixel(coord, color) in pixels {
-            // Clip
-            if coord.x < 0 || coord.y < 0 { continue; }
-            let (x, y) = (coord.x as u16, coord.y as u16);
+        for Pixel(Point { x, y }, color) in pixels.into_iter() {
+            if x < 0 || y < 0 { continue; }
+            let x = x as u16;
+            let y = y as u16;
             if x >= self.w || y >= self.h { continue; }
 
-            // Flush if row changes or not contiguous
-            if run_len != 0 && (y != run_y || x != run_x0 + run_len) {
-                self.flush_run_row_even(run_y, run_x0, run_len, &mut buf);
-                run_len = 0;
+            // Update framebuffer
+            self.fb[(y as usize) * (self.w as usize) + (x as usize)] = color.into_storage();
+
+            // 2×2 tile aligned to even coordinates, clamped near edges
+            let mut tx = x & !1;
+            let mut ty = y & !1;
+            if tx + 1 >= self.w {
+                if self.w >= 2 { tx = self.w - 2; } else { continue; }
+            }
+            if ty + 1 >= self.h {
+                if self.h >= 2 { ty = self.h - 2; } else { continue; }
             }
 
-            // Start new run if needed
-            if run_len == 0 {
-                run_x0 = x;
-                run_y = y;
-            }
-
-            // Append pixel (RGB565 big-endian)
-            let be = Rgb565::into_storage(color).to_be_bytes();
-            let idx = (run_len as usize) * 2;
-            if idx + 1 < buf.len() {
-                buf[idx] = be[0];
-                buf[idx + 1] = be[1];
-                run_len = run_len.saturating_add(1);
-            } else {
-                // Buffer full (shouldn’t happen if width <= 466): flush then add
-                self.flush_run_row_even(run_y, run_x0, run_len, &mut buf);
-                run_x0 = x;
-                run_y = y;
-                buf[0] = be[0];
-                buf[1] = be[1];
-                run_len = 1;
+            if !dirty.iter().any(|&(dx, dy)| dx == tx && dy == ty) {
+                let _ = dirty.push((tx, ty));
             }
         }
 
-        // Flush remaining run
-        self.flush_run_row_even(run_y, run_x0, run_len, &mut buf);
+        // Flush each dirty tile from the framebuffer
+        for (tx, ty) in dirty {
+            let _ = self.flush_tile2x2_from_fb(tx, ty);
+        }
 
         Ok(())
     }
 
     fn clear(&mut self, color: embedded_graphics::pixelcolor::Rgb565) -> Result<(), Self::Error> {
+        // Keep FB and panel in sync
+        let v = color.into_storage();
+        for px in self.fb.iter_mut() { *px = v; }
         let _ = self.fill_rect_solid(0, 0, self.w, self.h, color);
         Ok(())
     }
@@ -604,16 +525,17 @@ where
 
 /// Convenience builder that picks common defaults and returns the concrete type.
 /// Returning the concrete type lets display.rs use `impl Trait` to erase it later.
-pub fn new_with_defaults<SPI, RST>(
+pub fn new_with_defaults<'fb, SPI, RST>(
     spi: SPI,
     rst: Option<RST>,
     delay: &mut impl embedded_hal::delay::DelayNs,
-) -> Result<Co5300Display<SPI, RST>, Co5300Error<SPI::Error, RST::Error>>
+    fb: &'fb mut [u16],
+) -> Result<Co5300Display<'fb, SPI, RST>, Co5300Error<SPI::Error, RST::Error>>
 where
     SPI: embedded_hal::spi::SpiDevice<u8>,
     RST: embedded_hal::digital::OutputPin,
 {
-    let mut display = Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT)?;
+    let mut display = Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT, fb)?;
     display.set_window(0, 0, CO5300_WIDTH - 1, CO5300_HEIGHT - 1)?;
     Ok(display)
 }
@@ -621,5 +543,5 @@ where
 // This matches your wiring: Spi<'a, Blocking> + CS pin + NoDelay
 pub type SpiDev<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>;
 
-// Expose a single ready-to-use display type that ui.rs can alias:
-pub type DisplayType<'a> = Co5300Display<SpiDev<'a>, Output<'a>>;
+// Expose a ready-to-use display type (share lifetime with SPI and FB)
+pub type DisplayType<'a> = Co5300Display<'a, SpiDev<'a>, Output<'a>>;
