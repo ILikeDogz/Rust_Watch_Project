@@ -13,10 +13,11 @@ extern crate alloc;
 #[cfg(feature = "esp32s3-disp143Oled")]
 use alloc::vec::Vec;
 #[cfg(feature = "esp32s3-disp143Oled")]
-use core::cell::{Cell, RefCell};
+use core::{cell::{Cell, RefCell}, ops::Range};
 #[cfg(feature = "esp32s3-disp143Oled")]
 use critical_section::Mutex;
 #[cfg(feature = "esp32s3-disp143Oled")]
+use core::slice;
 
 const CACHE_CAP: usize = 10; // max cached decompressed images
 
@@ -61,6 +62,7 @@ pub const IMG_H: u32 = 240;
 pub const IMG_W: u32 = 466; // change to 466 if you add 466×466 assets
 #[cfg(feature = "esp32s3-disp143Oled")]
 pub const IMG_H: u32 = 466; // change to 466 if you add 466×466 assets
+
 
 // Compile-time suffix for asset filenames
 #[cfg(feature = "devkit-esp32s3-disp128")]
@@ -360,6 +362,109 @@ static IMAGE_CACHE_ALL: Mutex<RefCell<[Option<Vec<u8>>; 10]>> =
 #[cfg(feature = "esp32s3-disp143Oled")]
 static PRECACHE_IDX: Mutex<Cell<usize>> = Mutex::new(Cell::new(0));
 
+// Size of one image in bytes
+#[cfg(feature = "esp32s3-disp143Oled")]
+const SLOT_BYTES: usize = (IMG_W as usize) * (IMG_H as usize) * 2;
+// Global arena: use raw pointer + len to avoid RefCell borrow lifetime issues
+#[cfg(feature = "esp32s3-disp143Oled")]
+static mut IMAGE_ARENA_PTR: *mut u8 = core::ptr::null_mut();
+#[cfg(feature = "esp32s3-disp143Oled")]
+static mut IMAGE_ARENA_LEN: usize = 0;
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+static ARENA_FILLED: Mutex<RefCell<[bool; 10]>> =
+    Mutex::new(RefCell::new([false; 10]));
+
+// Compute slot byte range inside the arena (idx 0..10)
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn slot_range(idx: usize) -> Range<usize> {
+    let start = idx * SLOT_BYTES;
+    start..start + SLOT_BYTES
+}
+
+// Allocate one big contiguous arena for up to `count` images.
+// Returns how many slots actually fit (<= count).
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub fn init_image_arena(count: usize) -> usize {
+    let want = count.min(10);
+    // Try to reserve total bytes without panicking
+    let mut v = Vec::<u8>::new();
+    let mut ok_slots = want;
+    while ok_slots > 0 {
+        let need = SLOT_BYTES * ok_slots;
+        if v.try_reserve_exact(need).is_ok() {
+            v.resize(need, 0);
+            let leaked: &'static mut [u8] = alloc::boxed::Box::leak(v.into_boxed_slice());
+            unsafe {
+                IMAGE_ARENA_PTR = leaked.as_mut_ptr();
+                IMAGE_ARENA_LEN = leaked.len();
+            }
+            // Mark slots empty
+            critical_section::with(|cs| {
+                *ARENA_FILLED.borrow(cs).borrow_mut() = [false; 10];
+            });
+            return ok_slots;
+        }
+        ok_slots -= 1;
+    }
+    0
+}
+
+// Mark/Check a slot as filled
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn set_filled(idx: usize) {
+    critical_section::with(|cs| ARENA_FILLED.borrow(cs).borrow_mut()[idx] = true);
+}
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn is_filled(idx: usize) -> bool {
+    critical_section::with(|cs| ARENA_FILLED.borrow(cs).borrow()[idx])
+}
+
+// Write bytes into a slot (copy). Returns false if arena not ready.
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn write_slot(idx: usize, src: &[u8]) -> bool {
+    if src.len() != SLOT_BYTES { return false; }
+    let start = idx * SLOT_BYTES;
+    unsafe {
+        if IMAGE_ARENA_PTR.is_null() || start + SLOT_BYTES > IMAGE_ARENA_LEN {
+            return false;
+        }
+        core::ptr::copy_nonoverlapping(src.as_ptr(), IMAGE_ARENA_PTR.add(start), SLOT_BYTES);
+    }
+    set_filled(idx);
+    true
+}
+
+// Decompress one image into its arena slot (bounded). Returns true on success.
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub fn cache_slot(idx: usize) -> bool {
+    if idx >= 10 || is_filled(idx) { return true; }
+    let state = match idx {
+        0 => OmnitrixState::Alien1, 1 => OmnitrixState::Alien2, 2 => OmnitrixState::Alien3,
+        3 => OmnitrixState::Alien4, 4 => OmnitrixState::Alien5, 5 => OmnitrixState::Alien6,
+        6 => OmnitrixState::Alien7, 7 => OmnitrixState::Alien8, 8 => OmnitrixState::Alien9,
+        _ => OmnitrixState::Alien10,
+    };
+    let z = asset_for(state);
+    let tmp = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
+        .unwrap_or_default();
+    if tmp.len() != SLOT_BYTES { return false; }
+    write_slot(idx, &tmp)
+}
+
+// Get a read-only slice for a cached image; None if not cached
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn get_cached_slice(state: OmnitrixState) -> Option<&'static [u8]> {
+    let idx = omni_index(state);
+    if !is_filled(idx) { return None; }
+    let start = idx * SLOT_BYTES;
+    unsafe {
+        if IMAGE_ARENA_PTR.is_null() || start + SLOT_BYTES > IMAGE_ARENA_LEN {
+            return None;
+        }
+        Some(slice::from_raw_parts(IMAGE_ARENA_PTR.add(start), SLOT_BYTES))
+    }
+}
 
 // Map OmnitrixState to a stable index 0..9
 #[cfg(feature = "esp32s3-disp143Oled")]
@@ -394,146 +499,146 @@ fn asset_for(state: OmnitrixState) -> &'static [u8] {
     }
 }
 
-// Decompress all images once (call this at boot or on first Omnitrix use)
-#[cfg(feature = "esp32s3-disp143Oled")]
-pub fn precache_all_images() {
-    // Try to cache as many as fit; stop before OOM.
-    critical_section::with(|cs| {
-        let mut slots = IMAGE_CACHE_ALL.borrow(cs).borrow_mut();
-        let img_bytes = (IMG_W * IMG_H * 2) as usize;
+// // Decompress all images once (call this at boot or on first Omnitrix use)
+// #[cfg(feature = "esp32s3-disp143Oled")]
+// pub fn precache_all_images() {
+//     // Try to cache as many as fit; stop before OOM.
+//     critical_section::with(|cs| {
+//         let mut slots = IMAGE_CACHE_ALL.borrow(cs).borrow_mut();
+//         let img_bytes = (IMG_W * IMG_H * 2) as usize;
 
-        let states = [
-            OmnitrixState::Alien1, OmnitrixState::Alien2, OmnitrixState::Alien3, OmnitrixState::Alien4, OmnitrixState::Alien5,
-            OmnitrixState::Alien6, OmnitrixState::Alien7, OmnitrixState::Alien8, OmnitrixState::Alien9, OmnitrixState::Alien10,
-        ];
+//         let states = [
+//             OmnitrixState::Alien1, OmnitrixState::Alien2, OmnitrixState::Alien3, OmnitrixState::Alien4, OmnitrixState::Alien5,
+//             OmnitrixState::Alien6, OmnitrixState::Alien7, OmnitrixState::Alien8, OmnitrixState::Alien9, OmnitrixState::Alien10,
+//         ];
 
-        for (i, st) in states.iter().enumerate() {
-            if slots[i].is_some() {
-                continue;
-            }
+//         for (i, st) in states.iter().enumerate() {
+//             if slots[i].is_some() {
+//                 continue;
+//             }
 
-            // Quick capacity probe for one image; if it fails, stop precaching.
-            let mut probe = Vec::<u8>::new();
-            if probe.try_reserve_exact(img_bytes).is_err() {
-                break;
-            }
-            drop(probe);
+//             // Quick capacity probe for one image; if it fails, stop precaching.
+//             let mut probe = Vec::<u8>::new();
+//             if probe.try_reserve_exact(img_bytes).is_err() {
+//                 break;
+//             }
+//             drop(probe);
 
-            // Bounded zlib inflate: never allocate beyond expected size
-            let z = asset_for(*st);
-            let bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, img_bytes)
-                .unwrap_or_default();
+//             // Bounded zlib inflate: never allocate beyond expected size
+//             let z = asset_for(*st);
+//             let bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, img_bytes)
+//                 .unwrap_or_default();
 
-            if bytes.len() == img_bytes {
-                slots[i] = Some(bytes);
-            } else {
-                // size mismatch; skip this slot
-            }
-        }
-    });
-}
+//             if bytes.len() == img_bytes {
+//                 slots[i] = Some(bytes);
+//             } else {
+//                 // size mismatch; skip this slot
+//             }
+//         }
+//     });
+// }
 
-// Optional: report how many are cached (for logging)
-#[cfg(feature = "esp32s3-disp143Oled")]
-pub fn cached_count() -> usize {
-    critical_section::with(|cs| {
-        IMAGE_CACHE_ALL
-            .borrow(cs)
-            .borrow()
-            .iter()
-            .filter(|e| e.is_some())
-            .count()
-    })
-}
+// // Optional: report how many are cached (for logging)
+// #[cfg(feature = "esp32s3-disp143Oled")]
+// pub fn cached_count() -> usize {
+//     critical_section::with(|cs| {
+//         IMAGE_CACHE_ALL
+//             .borrow(cs)
+//             .borrow()
+//             .iter()
+//             .filter(|e| e.is_some())
+//             .count()
+//     })
+// }
 
-// Try to cache the next missing image; returns true if one image was cached.
-#[cfg(feature = "esp32s3-disp143Oled")]
-pub fn precache_step() -> bool {
-    let img_bytes = (IMG_W * IMG_H * 2) as usize;
+// // Try to cache the next missing image; returns true if one image was cached.
+// #[cfg(feature = "esp32s3-disp143Oled")]
+// pub fn precache_step() -> bool {
+//     let img_bytes = (IMG_W * IMG_H * 2) as usize;
 
-    // Find next missing slot starting from rolling index
-    let (start_idx, slots_indices) = critical_section::with(|cs| {
-        let start = PRECACHE_IDX.borrow(cs).get();
-        let order = (start..10).chain(0..start).collect::<heapless::Vec<usize, 10>>();
-        (start, order)
-    });
+//     // Find next missing slot starting from rolling index
+//     let (_start_idx, slots_indices) = critical_section::with(|cs| {
+//         let start = PRECACHE_IDX.borrow(cs).get();
+//         let order = (start..10).chain(0..start).collect::<heapless::Vec<usize, 10>>();
+//         (start, order)
+//     });
 
-    for idx in slots_indices {
-        let need_cache = critical_section::with(|cs| IMAGE_CACHE_ALL.borrow(cs).borrow()[idx].is_none());
-        if !need_cache { continue; }
+//     for idx in slots_indices {
+//         let need_cache = critical_section::with(|cs| IMAGE_CACHE_ALL.borrow(cs).borrow()[idx].is_none());
+//         if !need_cache { continue; }
 
-        // Probe capacity for one image to avoid OOM
-        let mut probe = Vec::<u8>::new();
-        if probe.try_reserve_exact(img_bytes).is_err() {
-            // Not enough contiguous heap; stop trying this frame
-            return false;
-        }
-        drop(probe);
+//         // Probe capacity for one image to avoid OOM
+//         let mut probe = Vec::<u8>::new();
+//         if probe.try_reserve_exact(img_bytes).is_err() {
+//             // Not enough contiguous heap; stop trying this frame
+//             return false;
+//         }
+//         drop(probe);
 
-        // Decompress with limit to prevent runaway allocations
-        let state = match idx {
-            0 => OmnitrixState::Alien1,
-            1 => OmnitrixState::Alien2,
-            2 => OmnitrixState::Alien3,
-            3 => OmnitrixState::Alien4,
-            4 => OmnitrixState::Alien5,
-            5 => OmnitrixState::Alien6,
-            6 => OmnitrixState::Alien7,
-            7 => OmnitrixState::Alien8,
-            8 => OmnitrixState::Alien9,
-            _ => OmnitrixState::Alien10,
-        };
-        let z = asset_for(state);
-        let bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, img_bytes)
-            .unwrap_or_default();
-        if bytes.len() != img_bytes {
-            // Size mismatch; skip this slot
-            critical_section::with(|cs| PRECACHE_IDX.borrow(cs).set((idx + 1) % 10));
-            return false;
-        }
+//         // Decompress with limit to prevent runaway allocations
+//         let state = match idx {
+//             0 => OmnitrixState::Alien1,
+//             1 => OmnitrixState::Alien2,
+//             2 => OmnitrixState::Alien3,
+//             3 => OmnitrixState::Alien4,
+//             4 => OmnitrixState::Alien5,
+//             5 => OmnitrixState::Alien6,
+//             6 => OmnitrixState::Alien7,
+//             7 => OmnitrixState::Alien8,
+//             8 => OmnitrixState::Alien9,
+//             _ => OmnitrixState::Alien10,
+//         };
+//         let z = asset_for(state);
+//         let bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, img_bytes)
+//             .unwrap_or_default();
+//         if bytes.len() != img_bytes {
+//             // Size mismatch; skip this slot
+//             critical_section::with(|cs| PRECACHE_IDX.borrow(cs).set((idx + 1) % 10));
+//             return false;
+//         }
 
-        // Store and advance rolling index
-        critical_section::with(|cs| {
-            IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx] = Some(bytes);
-            PRECACHE_IDX.borrow(cs).set((idx + 1) % 10);
-        });
-        return true;
-    }
+//         // Store and advance rolling index
+//         critical_section::with(|cs| {
+//             IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx] = Some(bytes);
+//             PRECACHE_IDX.borrow(cs).set((idx + 1) % 10);
+//         });
+//         return true;
+//     }
 
-    // Nothing to cache
-    false
-}
+//     // Nothing to cache
+//     false
+// }
 
-// Cache first N images at boot (best-effort, stops on low memory)
-#[cfg(feature = "esp32s3-disp143Oled")]
-pub fn precache_first_n(n: usize) {
-    let mut done = 0;
-    while done < n {
-        if !precache_step() { break; }
-        done += 1;
-    }
-}
+// // Cache first N images at boot (best-effort, stops on low memory)
+// #[cfg(feature = "esp32s3-disp143Oled")]
+// pub fn precache_first_n(n: usize) {
+//     let mut done = 0;
+//     while done < n {
+//         if !precache_step() { break; }
+//         done += 1;
+//     }
+// }
 
-// Get/put remain the same
-#[cfg(feature = "esp32s3-disp143Oled")]
-fn get_cached_bytes(state: OmnitrixState) -> Vec<u8> {
-    let idx = omni_index(state);
-    if let Some(bytes) = critical_section::with(|cs| {
-        IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx].take()
-    }) {
-        return bytes;
-    }
-    decompress_to_vec_zlib(asset_for(state)).unwrap_or_default()
-}
+// // Get/put remain the same
+// #[cfg(feature = "esp32s3-disp143Oled")]
+// fn get_cached_bytes(state: OmnitrixState) -> Vec<u8> {
+//     let idx = omni_index(state);
+//     if let Some(bytes) = critical_section::with(|cs| {
+//         IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx].take()
+//     }) {
+//         return bytes;
+//     }
+//     decompress_to_vec_zlib(asset_for(state)).unwrap_or_default()
+// }
 
-#[cfg(feature = "esp32s3-disp143Oled")]
-fn put_cached_bytes(state: OmnitrixState, buf: Vec<u8>) {
-    if buf.len() != (IMG_W * IMG_H * 2) as usize { return; }
-    let idx = omni_index(state);
-    critical_section::with(|cs| {
-        IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx] = Some(buf);
-    });
-}
+// #[cfg(feature = "esp32s3-disp143Oled")]
+// fn put_cached_bytes(state: OmnitrixState, buf: Vec<u8>) {
+//     if buf.len() != (IMG_W * IMG_H * 2) as usize { return; }
+//     let idx = omni_index(state);
+//     critical_section::with(|cs| {
+//         IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx] = Some(buf);
+//     });
+// }
 
 
 // helper function to update the display based on UI_STATE
@@ -615,10 +720,18 @@ pub fn update_ui(
             };
             #[cfg(feature = "esp32s3-disp143Oled")]
             {
-                // Draw from cache (or decompress one if somehow missing)
-                let mut bytes = get_cached_bytes(omnitrix_state);
-                draw_image_bytes(disp, &bytes, IMG_W, IMG_H, false);
-                put_cached_bytes(omnitrix_state, bytes);
+                if let Some(bytes) = get_cached_slice(omnitrix_state) {
+                    draw_image_bytes(disp, bytes, IMG_W, IMG_H, false);
+                } else {
+                    let z = asset_for(omnitrix_state);
+                    let tmp = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
+                        .unwrap_or_default();
+                    if tmp.len() == SLOT_BYTES {
+                        draw_image_bytes(disp, &tmp, IMG_W, IMG_H, false);
+                        // Store into arena (copy) to avoid re-decompress
+                        let _ = write_slot(omni_index(omnitrix_state), &tmp);
+                    }
+                }
             }
             #[cfg(feature = "devkit-esp32s3-disp128")]
             {

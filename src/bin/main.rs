@@ -65,6 +65,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
 static BUTTON2_PRESSED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(feature = "esp32s3-disp143Oled")]
+static NEXT_CACHE_IDX: Mutex<Cell<usize>> = Mutex::new(Cell::new(0));
+
+
 // Shared resources for Button
 static BUTTON1: ButtonState<'static> = ButtonState {
     input: Mutex::new(RefCell::new(None)),
@@ -211,8 +215,18 @@ fn main() -> ! {
     // Clear display
     my_display.clear(Rgb565::BLACK).ok();
 
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    {
+        // Allocate one contiguous arena for all 10 images if possible; otherwise as many as fit.
+        let _slots = esp32s3_tests::ui::init_image_arena(10);
+        // Optionally, fill just the current and neighbors at boot to avoid spikes:
+        // let cur = OmnitrixState::Alien1; // or your real initial state
+        // let _ = esp32s3_tests::ui::cache_slot(esp32s3_tests::ui::omni_index(cur));
+    }
+
     // Initial UI draw
     update_ui(&mut my_display, last_ui_state);
+
 
     // Main loop
     loop {
@@ -223,12 +237,12 @@ fn main() -> ! {
             update_ui(&mut my_display, ui_state);
             #[cfg(feature = "esp32s3-disp143Oled")]
             {
-                // let cached_before = esp32s3_tests::ui::cached_count();
-                let _ = esp32s3_tests::ui::precache_step();
-                // let cached_after = esp32s3_tests::ui::cached_count();
-                // if cached_after != cached_before {
-                //     esp_println::println!("precache: {} images cached", cached_after);
-                // }
+                critical_section::with(|cs| {
+                    let i = NEXT_CACHE_IDX.borrow(cs).get();
+                    if esp32s3_tests::ui::cache_slot(i) {
+                        NEXT_CACHE_IDX.borrow(cs).set((i + 1) % 10);
+                    }
+                });
             }
             // esp_println::println!("UI state changed: {:?}", ui_state);
             last_ui_state = ui_state;

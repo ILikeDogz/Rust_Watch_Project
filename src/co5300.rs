@@ -246,6 +246,8 @@ where
         Ok(())
     }
 
+
+    // TODO LETS TEST THESE, also I want brightness control
     // //---- Power control ---- all untested:
     // // Quick blank/unblank without sleep
     // pub fn display_off(&mut self) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
