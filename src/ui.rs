@@ -23,6 +23,7 @@ use esp_backtrace as _;
 use embedded_graphics::{
     Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::Rgb565, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
 };
+use miniz_oxide::inflate::decompress_to_vec_zlib;
 
 
 // Make a lightweight trait bound we’ll use for the factory’s return type.
@@ -47,25 +48,43 @@ impl<T> PanelRgb565 for T where T: DrawTarget<Color = Rgb565> + OriginDimensions
 
 // Display configuration, (0,0) is top-left corner
 #[cfg(feature = "devkit-esp32s3-disp128")]
-pub const RESOLUTION: u32 = 240; // 240x240 display
+pub const RESOLUTION: u32 = 240;
 
 #[cfg(feature = "esp32s3-disp143Oled")]
-pub const RESOLUTION: u32 = 466; // 466x466 display
+pub const RESOLUTION: u32 = 466;
 
+pub const CENTER: i32 = (RESOLUTION / 2) as i32;
 
-pub const CENTER: i32 = RESOLUTION as i32 / 2;
-static MY_IMAGE: &[u8] = include_bytes!("assets/omnitrix_logo_240x240_rgb565_be.raw");
-static ALIEN1_IMAGE: &[u8] = include_bytes!("assets/alien1_240x240_rgb565_be.raw");
-static ALIEN2_IMAGE: &[u8] = include_bytes!("assets/alien2_240x240_rgb565_be.raw");
-static ALIEN3_IMAGE: &[u8] = include_bytes!("assets/alien3_240x240_rgb565_be.raw");
-static ALIEN4_IMAGE: &[u8] = include_bytes!("assets/alien4_240x240_rgb565_be.raw");
-static ALIEN5_IMAGE: &[u8] = include_bytes!("assets/alien5_240x240_rgb565_be.raw");
-static ALIEN6_IMAGE: &[u8] = include_bytes!("assets/alien6_240x240_rgb565_be.raw");
-static ALIEN7_IMAGE: &[u8] = include_bytes!("assets/alien7_240x240_rgb565_be.raw");
-static ALIEN8_IMAGE: &[u8] = include_bytes!("assets/alien8_240x240_rgb565_be.raw");
-static ALIEN9_IMAGE: &[u8] = include_bytes!("assets/alien9_240x240_rgb565_be.raw");
-static ALIEN10_IMAGE: &[u8] = include_bytes!("assets/alien10_240x240_rgb565_be.raw");
+// Feature-selected image dimensions (adjust OLED to 466 if you have 466×466 assets)
+#[cfg(feature = "devkit-esp32s3-disp128")]
+pub const IMG_W: u32 = 240;
+#[cfg(feature = "devkit-esp32s3-disp128")]
+pub const IMG_H: u32 = 240;
 
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub const IMG_W: u32 = 466; // change to 466 if you add 466×466 assets
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub const IMG_H: u32 = 466; // change to 466 if you add 466×466 assets
+
+// Compile-time suffix for asset filenames
+#[cfg(feature = "devkit-esp32s3-disp128")]
+macro_rules! res { () => { "240x240" } }
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+macro_rules! res { () => { "466x466" } } // set to "466x466" when you have OLED-sized assets
+
+// Feature-picked assets
+// static MY_IMAGE: &[u8]    = include_bytes!(concat!("assets/omnitrix_logo_", res!(), "_rgb565_be.raw"));
+static ALIEN1_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien1_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN2_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien2_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN3_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien3_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN4_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien4_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN5_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien5_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN6_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien6_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN7_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien7_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN8_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien8_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN9_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien9_",  res!(), "_rgb565_be.raw.zlib"));
+static ALIEN10_IMAGE: &[u8] = include_bytes!(concat!("assets/alien10_", res!(), "_rgb565_be.raw.zlib"));
 
 // UI State representation
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -278,29 +297,31 @@ fn draw_text(
 }
 
 // helper function to draw a centered image
-fn draw_image(
+fn draw_image_runtime(
     disp: &mut impl PanelRgb565,
-    image_data: &'static [u8],
-    width: u32,
-    height: u32,
+    data_zlib: &'static [u8],
+    w: u32,
+    h: u32,
     clear: bool,
 ) {
-    if clear {
-        // Clear the display with background color
-        disp.clear(Rgb565::BLACK).ok();
-    }
-    // Create an ImageRaw object (assuming RGB565 format)
-    let raw = ImageRawBE::<Rgb565>::new(image_data, width);
+    if clear { disp.clear(Rgb565::BLACK).ok(); }
 
-    // Center the image
-    let x = (RESOLUTION - width) as i32 / 2;
-    let y = (RESOLUTION - height) as i32 / 2;
+    // Decompress into PSRAM
+    let bytes = decompress_to_vec_zlib(data_zlib).unwrap_or_default();
+    if bytes.len() != (w * h * 2) as usize { return; }
 
-    // Draw the image
-    Image::new(&raw, Point::new(x, y))
-        .draw(disp)
-        .ok();
+    // Generic path (works on GC9A01 too)
+    let raw = ImageRawBE::<Rgb565>::new(&bytes, w);
+    let x = (RESOLUTION - w) as i32 / 2;
+    let y = (RESOLUTION - h) as i32 / 2;
+    Image::new(&raw, Point::new(x, y)).draw(disp).ok();
+
+    // If on CO5300, you can call the fast blit instead (more efficient):
+    // if let Some(co) = (<&mut dyn core::any::Any>::from(disp)).downcast_mut::<crate::co5300::DisplayType<'_>>() {
+    //     let _ = co.blit_image_be_centered(w as u16, h as u16, &bytes);
+    // }
 }
+
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
@@ -379,13 +400,14 @@ pub fn update_ui(
                 OmnitrixState::Alien9  => ("Omnitrix: Alien 9", ALIEN9_IMAGE),
                 OmnitrixState::Alien10 => ("Omnitrix: Alien 10", ALIEN10_IMAGE),
             };
-            draw_image(disp, image, 240, 240, false);
+            draw_image_runtime(disp, image, IMG_W, IMG_H, false);
             // Optionally, overlay the name as text:
             // draw_text(disp, msg, Rgb565::BLACK, Rgb565::WHITE, CENTER, 20);
         }
+        
         Page::Info => {
-            // draw_text(disp, "Info Screen", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true);
-            draw_image(disp, MY_IMAGE, 240, 240, false);
+            draw_text(disp, "Info Screen", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true);
+            // draw_image(disp, MY_IMAGE, IMG_W, IMG_H, false);
         }
     }
 }

@@ -28,7 +28,7 @@ embedded-graphics = { version = "0.8.1", optional = true }
 heapless = "0.9.1"
 # esp-idf-sys = { version = "0.35", features = ["binstart"], optional = true }
 # esp-idf-hal = { version = "0.44", optional = true }
-
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 
 [features]
 # Default to ESP32-S3

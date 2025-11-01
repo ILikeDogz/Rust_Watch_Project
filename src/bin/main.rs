@@ -51,7 +51,7 @@ use embedded_graphics::{
 };
 
 
-// use esp_println::println; // already part of esp-hal projects
+use esp_println::println; // already part of esp-hal projects
 use esp_hal::spi::master::{Spi, Config as SpiConfig};
 use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
@@ -134,6 +134,7 @@ fn handler() {
 #[main]
 fn main() -> ! {
 
+    println!("app: start");
     // rotary encoder detent tracking
     const DETENT_STEPS: i32 = 4; // set to 4 if your encoder is 4 steps per detent
     let mut last_detent: Option<i32> = None;
@@ -141,15 +142,25 @@ fn main() -> ! {
     // initial UI state
     let mut last_ui_state = UiState { page: Page::Main(MainMenuState::Home), dialog: None };
 
+    
+    
     // Initialize peripherals
     let peripherals = esp_hal::init(Config::default());
 
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    esp_alloc::psram_allocator!(&peripherals.PSRAM, psram);
+    println!("app: hal init ok");
 
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    {
+        esp_alloc::psram_allocator!(&peripherals.PSRAM, psram);
+        println!(
+            "app: psram allocator set (mode={})",
+            option_env!("ESP_HAL_CONFIG_PSRAM_MODE").unwrap_or("?")
+        );
+    }
 
     // one call gives you IO handler + all your role pins from wiring.rs
     let (mut io, pins) = init_board_pins(peripherals);
+    println!("app: pins ok");
 
     // Destructure pins for easier access
     let BoardPins {
@@ -181,11 +192,12 @@ fn main() -> ! {
     });
 
     io.set_interrupt_handler(handler);
+    println!("app: irq set");
 
     #[cfg(feature = "devkit-esp32s3-disp128")]  
     let mut display_buf = [0u8; 1024];
         
-
+    println!("app: about to setup display");
     let mut my_display = {
         #[cfg(feature = "devkit-esp32s3-disp128")]
         {
@@ -194,11 +206,19 @@ fn main() -> ! {
 
         #[cfg(feature = "esp32s3-disp143Oled")]
         {
-            // CO5300: PSRAM-backed RGB565 framebuffer without unsafe
-            // Ensure psram_allocator! was called before this allocation
             const W: usize = 466;
             let fb: &'static mut [u16] = Box::leak(vec![0u16; W * W].into_boxed_slice());
-            setup_display(display_pins, fb)
+            println!("app: fb @ {:p}, len={} (expect PSRAM ~0x3D...)", fb.as_ptr(), fb.len());
+
+            // Quick RAM sanity: write then restore
+            let old = fb[0];
+            fb[0] = 0xFFFF;
+            println!("app: fb test write ok, fb[0]={:#06x}", fb[0]);
+            fb[0] = old;
+
+            let d = setup_display(display_pins, fb);
+            println!("app: display (co5300) setup ok");
+            d
         }
     };
     
@@ -207,10 +227,13 @@ fn main() -> ! {
 
     // // --- FIRST DRAW ----------------------------------------------------------
 
+    println!("app: clear...");
     my_display.clear(Rgb565::BLACK).ok();
 
      
+    println!("app: clear done");
     update_ui(&mut my_display, last_ui_state);
+    println!("app: first ui drawn");
 
     // --- MAIN LOOP -----------------------------------------------------------
     loop {
