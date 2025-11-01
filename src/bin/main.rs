@@ -18,8 +18,6 @@
 // The macro automatically fills in the fields. 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[cfg(feature = "esp32s3-disp143Oled")]
-
 use esp32s3_tests::display::setup_display;
 use esp32s3_tests::ui::MainMenuState;
 use esp32s3_tests::ui::Page;
@@ -70,14 +68,10 @@ use embedded_hal::{
 extern crate alloc;
 #[cfg(feature = "esp32s3-disp143Oled")]
 use alloc::{boxed::Box, vec, vec::Vec};
-#[cfg(feature = "esp32s3-disp143Oled")]
 
-
-static BUTTON1_FLAG: critical_section::Mutex<core::cell::Cell<bool>> =
-    critical_section::Mutex::new(core::cell::Cell::new(false));
-static BUTTON2_FLAG: critical_section::Mutex<core::cell::Cell<bool>> =
-     critical_section::Mutex::new(core::cell::Cell::new(false));
-
+use core::sync::atomic::{AtomicBool, Ordering};
+static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
+static BUTTON2_PRESSED: AtomicBool = AtomicBool::new(false);
 
 // Shared resources for Button
 static BUTTON1: ButtonState<'static> = ButtonState {
@@ -124,16 +118,12 @@ fn handler() {
     
     // Button 1: JUST SET THE FLAG
     handle_button_generic(&BUTTON1, now_ms, DEBOUNCE_MS, || {
-        critical_section::with(|cs| {
-            BUTTON1_FLAG.borrow(cs).set(true);
-        });
+        BUTTON1_PRESSED.store(true, Ordering::Relaxed);
     });
 
     // Button 2: JUST SET THEFlag
     handle_button_generic(&BUTTON2, now_ms, DEBOUNCE_MS, || {
-        critical_section::with(|cs| {
-            BUTTON2_FLAG.borrow(cs).set(true);
-        });
+        BUTTON2_PRESSED.store(true, Ordering::Relaxed);
     });
 
     // Encoder logic is fine, it's just math
@@ -229,18 +219,13 @@ fn main() -> ! {
         let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
         if ui_state != last_ui_state {
             update_ui(&mut my_display, ui_state);
-            esp_println::println!("UI state changed: {:?}", ui_state);
+            // esp_println::println!("UI state changed: {:?}", ui_state);
             last_ui_state = ui_state;
         }
 
-        let b1 = critical_section::with(|cs| {
-            let f = BUTTON1_FLAG.borrow(cs).get();
-            if f { BUTTON1_FLAG.borrow(cs).set(false); }
-            f
-        });
-        if b1 {
+        if BUTTON1_PRESSED.swap(false, Ordering::Acquire) {
             // All work is now SAFE here in the main loop
-            esp_println::println!("Button 1 pressed!"); // Debug prints are safe here
+            // esp_println::println!("Button 1 pressed!"); // Debug prints are safe here
             critical_section::with(|cs| {
                 let state = UI_STATE.borrow(cs).get();
                 let new_state = state.next_menu();
@@ -249,14 +234,9 @@ fn main() -> ! {
         }
 
         // --- Handle Button 2 Press ---
-        let b2 = critical_section::with(|cs| {
-            let f = BUTTON2_FLAG.borrow(cs).get();
-            if f { BUTTON2_FLAG.borrow(cs).set(false); }
-            f
-        });
-        if b2 {
-                // All work is now SAFE here in the main loop
-             esp_println::println!("Button 2 pressed!"); // Debug prints are safe here
+        if BUTTON2_PRESSED.swap(false, Ordering::Acquire) {
+            // All work is now SAFE here in the main loop
+            //  esp_println::println!("Button 2 pressed!"); // Debug prints are safe here
             critical_section::with(|cs| {
                 let state = UI_STATE.borrow(cs).get();
                 let new_state = state.select();

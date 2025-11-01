@@ -21,14 +21,7 @@ use esp_backtrace as _;
 
 // Embedded-graphics
 use embedded_graphics::{
-    mono_font::{ascii::{FONT_10X20, FONT_6X10}, 
-    MonoTextStyle, MonoTextStyleBuilder}, 
-    pixelcolor::Rgb565, 
-    prelude::{Point, Primitive, RgbColor, Size, OriginDimensions}, 
-    primitives::{PrimitiveStyle, Rectangle, Circle, Triangle}, text::{Alignment, Baseline, Text}, 
-    Drawable,
-    draw_target::DrawTarget, 
-    image::{Image, ImageRaw},
+    Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::Rgb565, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
 };
 
 
@@ -297,7 +290,7 @@ fn draw_image(
         disp.clear(Rgb565::BLACK).ok();
     }
     // Create an ImageRaw object (assuming RGB565 format)
-    let raw = ImageRaw::<Rgb565>::new(image_data, width);
+    let raw = ImageRawBE::<Rgb565>::new(image_data, width);
 
     // Center the image
     let x = (RESOLUTION - width) as i32 / 2;
@@ -371,7 +364,7 @@ pub fn update_ui(
         //         OmnitrixState::Alien9  => ("Omnitrix: Alien 9", Rgb565::BLACK, Rgb565::WHITE),
         //         OmnitrixState::Alien10 => ("Omnitrix: Alien 10", Rgb565::BLACK, Rgb565::WHITE),
         //     };
-        //     draw_text(disp, msg, fg, bg, CENTER, CENTER);
+        //     draw_text(disp, msg, fg, bg, CENTER, CENTER, true);
         // }
         Page::Omnitrix(omnitrix_state) => {
             let (_msg, image) = match omnitrix_state {
@@ -391,7 +384,7 @@ pub fn update_ui(
             // draw_text(disp, msg, Rgb565::BLACK, Rgb565::WHITE, CENTER, 20);
         }
         Page::Info => {
-            // draw_text(disp, "Info Screen", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER);
+            // draw_text(disp, "Info Screen", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true);
             draw_image(disp, MY_IMAGE, 240, 240, false);
         }
     }

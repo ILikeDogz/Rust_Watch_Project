@@ -475,34 +475,37 @@ where
     {
         use embedded_graphics::{prelude::Point, Pixel};
 
-        // Collect unique 2×2 tile origins to flush
-        let mut dirty: heapless::Vec<(u16, u16), 128> = heapless::Vec::new();
+        const TILE_CAP: usize = 256;
+        let mut dirty: heapless::Vec<(u16, u16), TILE_CAP> = heapless::Vec::new();
 
         for Pixel(Point { x, y }, color) in pixels.into_iter() {
             if x < 0 || y < 0 { continue; }
-            let x = x as u16;
-            let y = y as u16;
+            let (x, y) = (x as u16, y as u16);
             if x >= self.w || y >= self.h { continue; }
 
-            // Update framebuffer
+            // Update FB
             self.fb[(y as usize) * (self.w as usize) + (x as usize)] = color.into_storage();
 
-            // 2×2 tile aligned to even coordinates, clamped near edges
+            // 2×2-aligned tile (clamp near edges)
             let mut tx = x & !1;
             let mut ty = y & !1;
-            if tx + 1 >= self.w {
-                if self.w >= 2 { tx = self.w - 2; } else { continue; }
-            }
-            if ty + 1 >= self.h {
-                if self.h >= 2 { ty = self.h - 2; } else { continue; }
-            }
+            if tx + 1 >= self.w && self.w >= 2 { tx = self.w - 2; }
+            if ty + 1 >= self.h && self.h >= 2 { ty = self.h - 2; }
 
-            if !dirty.iter().any(|&(dx, dy)| dx == tx && dy == ty) {
+            // Dedup
+            let already = dirty.iter().any(|&(dx, dy)| dx == tx && dy == ty);
+            if !already {
+                // If full, flush current batch, then push
+                if dirty.is_full() {
+                    for (fx, fy) in dirty.drain(..) {
+                        let _ = self.flush_tile2x2_from_fb(fx, fy);
+                    }
+                }
                 let _ = dirty.push((tx, ty));
             }
         }
 
-        // Flush each dirty tile from the framebuffer
+        // Flush remaining
         for (tx, ty) in dirty {
             let _ = self.flush_tile2x2_from_fb(tx, ty);
         }
@@ -511,7 +514,6 @@ where
     }
 
     fn clear(&mut self, color: embedded_graphics::pixelcolor::Rgb565) -> Result<(), Self::Error> {
-        // Keep FB and panel in sync
         let v = color.into_storage();
         for px in self.fb.iter_mut() { *px = v; }
         let _ = self.fill_rect_solid(0, 0, self.w, self.h, color);
