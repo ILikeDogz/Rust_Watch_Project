@@ -13,12 +13,12 @@ extern crate alloc;
 #[cfg(feature = "esp32s3-disp143Oled")]
 use alloc::vec::Vec;
 #[cfg(feature = "esp32s3-disp143Oled")]
-use core::{any::Any, cell::RefCell};
+use core::cell::{Cell, RefCell};
 #[cfg(feature = "esp32s3-disp143Oled")]
 use critical_section::Mutex;
 #[cfg(feature = "esp32s3-disp143Oled")]
-const CACHE_CAP: usize = 3;
 
+const CACHE_CAP: usize = 10; // max cached decompressed images
 
 use esp_backtrace as _;
 
@@ -35,7 +35,7 @@ use embedded_graphics::{
     Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::{Rgb565, raw::RawU16}, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
 };
 use miniz_oxide::inflate::decompress_to_vec_zlib;
-
+use core::any::Any;
 
 // Make a lightweight trait bound we’ll use for the factory’s return type.
 pub trait PanelRgb565: DrawTarget<Color = Rgb565> + OriginDimensions + Any {}
@@ -332,6 +332,7 @@ fn draw_text(
 
 
 // Draw from already-decompressed bytes (used by cache on OLED)
+#[cfg(feature = "esp32s3-disp143Oled")]
 fn draw_image_bytes(
     disp: &mut impl PanelRgb565,
     bytes: &[u8],
@@ -344,24 +345,39 @@ fn draw_image_bytes(
     let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
     let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
 
-    #[cfg(feature = "esp32s3-disp143Oled")]
     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::co5300::DisplayType<'static>>() {
         let _ = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes);
         return;
     }
-
-    // Generic fallback
-    let raw = ImageRawBE::<Rgb565>::new(bytes, w);
-    let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
 }
 
 
+// Full precache store (10 slots). Using Option so we can fill lazily or all at once.
 #[cfg(feature = "esp32s3-disp143Oled")]
-static IMAGE_CACHE: Mutex<RefCell<[Option<(OmnitrixState, Vec<u8>)>; CACHE_CAP]>> =
-    Mutex::new(RefCell::new([None, None, None]));
+static IMAGE_CACHE_ALL: Mutex<RefCell<[Option<Vec<u8>>; 10]>> =
+    Mutex::new(RefCell::new([None, None, None, None, None, None, None, None, None, None]));
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+static PRECACHE_IDX: Mutex<Cell<usize>> = Mutex::new(Cell::new(0));
 
 
-// Helper: select the compressed asset by state
+// Map OmnitrixState to a stable index 0..9
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn omni_index(s: OmnitrixState) -> usize {
+    match s {
+        OmnitrixState::Alien1  => 0,
+        OmnitrixState::Alien2  => 1,
+        OmnitrixState::Alien3  => 2,
+        OmnitrixState::Alien4  => 3,
+        OmnitrixState::Alien5  => 4,
+        OmnitrixState::Alien6  => 5,
+        OmnitrixState::Alien7  => 6,
+        OmnitrixState::Alien8  => 7,
+        OmnitrixState::Alien9  => 8,
+        OmnitrixState::Alien10 => 9,
+    }
+}
+
 #[cfg(feature = "esp32s3-disp143Oled")]
 fn asset_for(state: OmnitrixState) -> &'static [u8] {
     match state {
@@ -378,114 +394,147 @@ fn asset_for(state: OmnitrixState) -> &'static [u8] {
     }
 }
 
+// Decompress all images once (call this at boot or on first Omnitrix use)
 #[cfg(feature = "esp32s3-disp143Oled")]
-fn omni_next(s: OmnitrixState) -> OmnitrixState {
-    match s {
-        OmnitrixState::Alien1  => OmnitrixState::Alien2,
-        OmnitrixState::Alien2  => OmnitrixState::Alien3,
-        OmnitrixState::Alien3  => OmnitrixState::Alien4,
-        OmnitrixState::Alien4  => OmnitrixState::Alien5,
-        OmnitrixState::Alien5  => OmnitrixState::Alien6,
-        OmnitrixState::Alien6  => OmnitrixState::Alien7,
-        OmnitrixState::Alien7  => OmnitrixState::Alien8,
-        OmnitrixState::Alien8  => OmnitrixState::Alien9,
-        OmnitrixState::Alien9  => OmnitrixState::Alien10,
-        OmnitrixState::Alien10 => OmnitrixState::Alien1,
-    }
-}
-#[cfg(feature = "esp32s3-disp143Oled")]
-fn omni_prev(s: OmnitrixState) -> OmnitrixState {
-    match s {
-        OmnitrixState::Alien1  => OmnitrixState::Alien10,
-        OmnitrixState::Alien2  => OmnitrixState::Alien1,
-        OmnitrixState::Alien3  => OmnitrixState::Alien2,
-        OmnitrixState::Alien4  => OmnitrixState::Alien3,
-        OmnitrixState::Alien5  => OmnitrixState::Alien4,
-        OmnitrixState::Alien6  => OmnitrixState::Alien5,
-        OmnitrixState::Alien7  => OmnitrixState::Alien6,
-        OmnitrixState::Alien8  => OmnitrixState::Alien7,
-        OmnitrixState::Alien9  => OmnitrixState::Alien8,
-        OmnitrixState::Alien10 => OmnitrixState::Alien9,
-    }
-}
-
-// LRU helpers
-#[cfg(feature = "esp32s3-disp143Oled")]
-fn cache_take(state: OmnitrixState) -> Option<Vec<u8>> {
+pub fn precache_all_images() {
+    // Try to cache as many as fit; stop before OOM.
     critical_section::with(|cs| {
-        let mut arr = IMAGE_CACHE.borrow(cs).borrow_mut();
-        if let Some(idx) =
-            (0..CACHE_CAP).find(|&i| arr[i].as_ref().map(|(s, _)| *s) == Some(state))
-        {
-            let (_, buf) = arr[idx].take().unwrap();
-            // Shift newer entries forward (maintain recency)
-            for j in (0..idx).rev() {
-                arr[j + 1] = arr[j].take();
+        let mut slots = IMAGE_CACHE_ALL.borrow(cs).borrow_mut();
+        let img_bytes = (IMG_W * IMG_H * 2) as usize;
+
+        let states = [
+            OmnitrixState::Alien1, OmnitrixState::Alien2, OmnitrixState::Alien3, OmnitrixState::Alien4, OmnitrixState::Alien5,
+            OmnitrixState::Alien6, OmnitrixState::Alien7, OmnitrixState::Alien8, OmnitrixState::Alien9, OmnitrixState::Alien10,
+        ];
+
+        for (i, st) in states.iter().enumerate() {
+            if slots[i].is_some() {
+                continue;
             }
-            return Some(buf);
-        }
-        None
-    })
-}
 
-#[cfg(feature = "esp32s3-disp143Oled")]
-fn cache_put(state: OmnitrixState, buf: Vec<u8>) {
-    if buf.len() != (IMG_W * IMG_H * 2) as usize {
-        return;
-    }
-    critical_section::with(|cs| {
-        let mut arr = IMAGE_CACHE.borrow(cs).borrow_mut();
-        // Remove existing same key if present
-        if let Some(idx) =
-            (0..CACHE_CAP).find(|&i| arr[i].as_ref().map(|(s, _)| *s) == Some(state))
-        {
-            arr[idx] = None;
-        } else {
-            // Evict LRU (last)
-            arr[CACHE_CAP - 1] = None;
+            // Quick capacity probe for one image; if it fails, stop precaching.
+            let mut probe = Vec::<u8>::new();
+            if probe.try_reserve_exact(img_bytes).is_err() {
+                break;
+            }
+            drop(probe);
+
+            // Bounded zlib inflate: never allocate beyond expected size
+            let z = asset_for(*st);
+            let bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, img_bytes)
+                .unwrap_or_default();
+
+            if bytes.len() == img_bytes {
+                slots[i] = Some(bytes);
+            } else {
+                // size mismatch; skip this slot
+            }
         }
-        // Shift right and insert as MRU at index 0
-        for j in (0..CACHE_CAP - 1).rev() {
-            arr[j + 1] = arr[j].take();
-        }
-        arr[0] = Some((state, buf));
     });
 }
 
+// Optional: report how many are cached (for logging)
 #[cfg(feature = "esp32s3-disp143Oled")]
-fn cache_contains(state: OmnitrixState) -> bool {
+pub fn cached_count() -> usize {
     critical_section::with(|cs| {
-        IMAGE_CACHE
+        IMAGE_CACHE_ALL
             .borrow(cs)
             .borrow()
             .iter()
-            .any(|e| e.as_ref().map(|(s, _)| *s) == Some(state))
+            .filter(|e| e.is_some())
+            .count()
     })
 }
 
-// Prefetch up to two neighbors after drawing (amortizes cost)
+// Try to cache the next missing image; returns true if one image was cached.
 #[cfg(feature = "esp32s3-disp143Oled")]
-fn prefetch_neighbors(current: OmnitrixState) {
-    let n = omni_next(current);
-    let p = omni_prev(current);
+pub fn precache_step() -> bool {
+    let img_bytes = (IMG_W * IMG_H * 2) as usize;
 
-    // Prefetch next if missing
-    if !cache_contains(n) {
-        let z = asset_for(n);
-        let bytes = decompress_to_vec_zlib(z).unwrap_or_default();
-        if bytes.len() == (IMG_W * IMG_H * 2) as usize {
-            cache_put(n, bytes);
+    // Find next missing slot starting from rolling index
+    let (start_idx, slots_indices) = critical_section::with(|cs| {
+        let start = PRECACHE_IDX.borrow(cs).get();
+        let order = (start..10).chain(0..start).collect::<heapless::Vec<usize, 10>>();
+        (start, order)
+    });
+
+    for idx in slots_indices {
+        let need_cache = critical_section::with(|cs| IMAGE_CACHE_ALL.borrow(cs).borrow()[idx].is_none());
+        if !need_cache { continue; }
+
+        // Probe capacity for one image to avoid OOM
+        let mut probe = Vec::<u8>::new();
+        if probe.try_reserve_exact(img_bytes).is_err() {
+            // Not enough contiguous heap; stop trying this frame
+            return false;
         }
+        drop(probe);
+
+        // Decompress with limit to prevent runaway allocations
+        let state = match idx {
+            0 => OmnitrixState::Alien1,
+            1 => OmnitrixState::Alien2,
+            2 => OmnitrixState::Alien3,
+            3 => OmnitrixState::Alien4,
+            4 => OmnitrixState::Alien5,
+            5 => OmnitrixState::Alien6,
+            6 => OmnitrixState::Alien7,
+            7 => OmnitrixState::Alien8,
+            8 => OmnitrixState::Alien9,
+            _ => OmnitrixState::Alien10,
+        };
+        let z = asset_for(state);
+        let bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, img_bytes)
+            .unwrap_or_default();
+        if bytes.len() != img_bytes {
+            // Size mismatch; skip this slot
+            critical_section::with(|cs| PRECACHE_IDX.borrow(cs).set((idx + 1) % 10));
+            return false;
+        }
+
+        // Store and advance rolling index
+        critical_section::with(|cs| {
+            IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx] = Some(bytes);
+            PRECACHE_IDX.borrow(cs).set((idx + 1) % 10);
+        });
+        return true;
     }
-    // Prefetch prev if missing
-    if !cache_contains(p) {
-        let z = asset_for(p);
-        let bytes = decompress_to_vec_zlib(z).unwrap_or_default();
-        if bytes.len() == (IMG_W * IMG_H * 2) as usize {
-            cache_put(p, bytes);
-        }
+
+    // Nothing to cache
+    false
+}
+
+// Cache first N images at boot (best-effort, stops on low memory)
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub fn precache_first_n(n: usize) {
+    let mut done = 0;
+    while done < n {
+        if !precache_step() { break; }
+        done += 1;
     }
 }
+
+// Get/put remain the same
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn get_cached_bytes(state: OmnitrixState) -> Vec<u8> {
+    let idx = omni_index(state);
+    if let Some(bytes) = critical_section::with(|cs| {
+        IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx].take()
+    }) {
+        return bytes;
+    }
+    decompress_to_vec_zlib(asset_for(state)).unwrap_or_default()
+}
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn put_cached_bytes(state: OmnitrixState, buf: Vec<u8>) {
+    if buf.len() != (IMG_W * IMG_H * 2) as usize { return; }
+    let idx = omni_index(state);
+    critical_section::with(|cs| {
+        IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx] = Some(buf);
+    });
+}
+
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
@@ -566,20 +615,17 @@ pub fn update_ui(
             };
             #[cfg(feature = "esp32s3-disp143Oled")]
             {
-                // Take from cache or decompress once
-                let bytes = cache_take(omnitrix_state).unwrap_or_else(|| {
-                    let b = decompress_to_vec_zlib(image).unwrap_or_default();
-                    b
-                });
+                // Draw from cache (or decompress one if somehow missing)
+                let mut bytes = get_cached_bytes(omnitrix_state);
                 draw_image_bytes(disp, &bytes, IMG_W, IMG_H, false);
-                // Put back as most-recent
-                cache_put(omnitrix_state, bytes);
-                // Warm both neighbors
-                prefetch_neighbors(omnitrix_state);
+                put_cached_bytes(omnitrix_state, bytes);
             }
             #[cfg(feature = "devkit-esp32s3-disp128")]
             {
-                draw_image_runtime(disp, image, IMG_W, IMG_H, false);
+                // GC9A01 unchanged
+                let bytes = decompress_to_vec_zlib(image).unwrap_or_default();
+                let raw = ImageRawBE::<Rgb565>::new(&bytes, IMG_W);
+                let _ = Image::new(&raw, Point::new((RESOLUTION as i32 - IMG_W as i32) / 2, (RESOLUTION as i32 - IMG_H as i32) / 2)).draw(disp);
             }
         }
         

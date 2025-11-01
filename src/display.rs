@@ -16,7 +16,6 @@ use esp_hal::{
     Blocking,
 };
 
-use embedded_hal::delay::DelayNs;
 use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 
 use crate::wiring::DisplayPins;
@@ -114,6 +113,7 @@ mod gc9a01_backend {
 #[cfg(feature = "esp32s3-disp143Oled")]
 mod co5300_backend {
     use esp_hal::delay::Delay;
+    use embedded_hal::delay::DelayNs;
 
     use super::*;
 

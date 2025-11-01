@@ -38,7 +38,6 @@ use esp_hal::{
     handler,
     main,
     ram,
-    psram,
     Config,
     timer::systimer::{SystemTimer, Unit},
 };
@@ -51,23 +50,16 @@ use embedded_graphics::{
 };
 
 
-use esp_println::println; // already part of esp-hal projects
-use esp_hal::spi::master::{Spi, Config as SpiConfig};
-use esp_hal::spi::Mode;
-use esp_hal::time::Rate;
-use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
-use embedded_hal::{
-    delay::DelayNs,
-    digital::OutputPin,
-    spi::SpiDevice,
-};
 // use esp_hal::spi::FullDuplexMode;
 
+#[cfg(feature = "devkit-esp32s3-disp128")]
+#[ram]
+static mut DISPLAY_BUF: [u8; 1024] = [0; 1024];
 
-#[cfg(feature = "esp32s3-disp143Oled")]
+
 extern crate alloc;
-#[cfg(feature = "esp32s3-disp143Oled")]
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{boxed::Box, vec};
+use esp_hal::psram;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
@@ -100,10 +92,10 @@ static ROTARY: RotaryState<'static> = RotaryState {
 };
 
 
-// static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState { page: Page::Main(MainMenuState::Home), dialog: None }));
+static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState { page: Page::Main(MainMenuState::Home), dialog: None }));
 
-// for debug, start on Alien page
-static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien10), dialog: None }));
+// // for debug, start on Alien page
+// static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien10), dialog: None }));
 
 
 // Current debounce time (milliseconds)
@@ -142,10 +134,10 @@ fn main() -> ! {
     let mut last_detent: Option<i32> = None;
 
     // initial UI state
-    // let mut last_ui_state = UiState { page: Page::Main(MainMenuState::Home), dialog: None };
+    let mut last_ui_state = UiState { page: Page::Main(MainMenuState::Home), dialog: None };
 
-    // for debug, start on Alien page
-    let mut last_ui_state = UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien10), dialog: None };
+    // // for debug, start on Alien page
+    // let mut last_ui_state = UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien10), dialog: None };
 
     
     
@@ -153,7 +145,6 @@ fn main() -> ! {
     let peripherals = esp_hal::init(Config::default());
 
 
-    #[cfg(feature = "esp32s3-disp143Oled")]
     esp_alloc::psram_allocator!(&peripherals.PSRAM, psram);
 
     // one call gives you IO handler + all your role pins from wiring.rs
@@ -190,14 +181,12 @@ fn main() -> ! {
 
     io.set_interrupt_handler(handler);
 
-    #[cfg(feature = "devkit-esp32s3-disp128")]  
-    let mut display_buf = [0u8; 1024];
-        
     let mut my_display = {
-        #[cfg(feature = "devkit-esp32s3-disp128")]
-        {
-            setup_display(display_pins, &mut display_buf)
-        }
+         #[cfg(feature = "devkit-esp32s3-disp128")]
+         {
+            // Safe because DISPLAY_BUF is only used here
+            unsafe { setup_display(display_pins, &mut DISPLAY_BUF) }
+         }
 
         #[cfg(feature = "esp32s3-disp143Oled")]
         {
@@ -211,20 +200,36 @@ fn main() -> ! {
     #[cfg(feature = "esp32s3-disp143Oled")]
     my_display.set_align_even(true);
 
-    // // --- FIRST DRAW ----------------------------------------------------------
 
+    // #[cfg(feature = "esp32s3-disp143Oled")]
+    // {
+    //     // cache the first 3 images at boot
+    //     esp32s3_tests::ui::precache_first_n(1);
+    //     // esp_println::println!("precache: {} images cached", esp32s3_tests::ui::cached_count());
+    // }
+
+    // Clear display
     my_display.clear(Rgb565::BLACK).ok();
 
-     
+    // Initial UI draw
     update_ui(&mut my_display, last_ui_state);
 
-    // --- MAIN LOOP -----------------------------------------------------------
+    // Main loop
     loop {
 
         // Check for UI state changes
         let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
         if ui_state != last_ui_state {
             update_ui(&mut my_display, ui_state);
+            #[cfg(feature = "esp32s3-disp143Oled")]
+            {
+                // let cached_before = esp32s3_tests::ui::cached_count();
+                let _ = esp32s3_tests::ui::precache_step();
+                // let cached_after = esp32s3_tests::ui::cached_count();
+                // if cached_after != cached_before {
+                //     esp_println::println!("precache: {} images cached", cached_after);
+                // }
+            }
             // esp_println::println!("UI state changed: {:?}", ui_state);
             last_ui_state = ui_state;
         }
@@ -261,7 +266,7 @@ fn main() -> ! {
                 if step_delta > 0 {
                     // turned clockwise: go to next state
                     critical_section::with(|cs| {
-                        esp_println::println!("Rotary turned clockwise to detent {} pos {}", detent, pos);
+                        // esp_println::println!("Rotary turned clockwise to detent {} pos {}", detent, pos);
                         let state = UI_STATE.borrow(cs).get();
                         let new_state = state.next_item();
                         UI_STATE.borrow(cs).set(new_state);
@@ -269,7 +274,7 @@ fn main() -> ! {
                 } else if step_delta < 0 {
                     // turned counter-clockwise: go to previous state (optional)
                     critical_section::with(|cs| {
-                        esp_println::println!("Rotary turned counter-clockwise to detent {} pos {}", detent, pos);
+                        // esp_println::println!("Rotary turned counter-clockwise to detent {} pos {}", detent, pos);
                         let state = UI_STATE.borrow(cs).get();
                         let new_state = state.prev_item();
                         UI_STATE.borrow(cs).set(new_state);
