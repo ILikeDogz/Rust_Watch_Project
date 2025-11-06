@@ -26,7 +26,7 @@ use esp32s3_tests::wiring::BoardPins;
 
 use esp32s3_tests::input::{ButtonState, RotaryState, handle_button_generic, handle_encoder_generic};
 
-use esp32s3_tests::ui::{UiState, update_ui};
+use esp32s3_tests::ui::{UiState, update_ui, cache_hourglass_logo};
 
 
 use esp_backtrace as _;
@@ -56,6 +56,9 @@ use embedded_graphics::{
 #[ram]
 static mut DISPLAY_BUF: [u8; 1024] = [0; 1024];
 
+#[cfg(feature = "esp32s3-disp143Oled")]
+static PRELOAD_TARGET_SLOTS: Mutex<Cell<usize>> = Mutex::new(Cell::new(0));
+
 
 extern crate alloc;
 use alloc::{boxed::Box, vec};
@@ -64,10 +67,6 @@ use esp_hal::psram;
 use core::sync::atomic::{AtomicBool, Ordering};
 static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
 static BUTTON2_PRESSED: AtomicBool = AtomicBool::new(false);
-
-#[cfg(feature = "esp32s3-disp143Oled")]
-static NEXT_CACHE_IDX: Mutex<Cell<usize>> = Mutex::new(Cell::new(0));
-
 
 // Shared resources for Button
 static BUTTON1: ButtonState<'static> = ButtonState {
@@ -200,33 +199,119 @@ fn main() -> ! {
             setup_display(display_pins, fb)
         }
     };
-    
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    my_display.set_align_even(true);
-
-
-    // #[cfg(feature = "esp32s3-disp143Oled")]
-    // {
-    //     // cache the first 3 images at boot
-    //     esp32s3_tests::ui::precache_first_n(1);
-    //     // esp_println::println!("precache: {} images cached", esp32s3_tests::ui::cached_count());
-    // }
 
     // Clear display
     my_display.clear(Rgb565::BLACK).ok();
 
     #[cfg(feature = "esp32s3-disp143Oled")]
     {
-        // Allocate one contiguous arena for all 10 images if possible; otherwise as many as fit.
-        let _slots = esp32s3_tests::ui::init_image_arena(10);
-        // Optionally, fill just the current and neighbors at boot to avoid spikes:
-        // let cur = OmnitrixState::Alien1; // or your real initial state
-        // let _ = esp32s3_tests::ui::cache_slot(esp32s3_tests::ui::omni_index(cur));
+        // Pre-cache hourglass logo
+        let lime = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
+        cache_hourglass_logo(lime, Rgb565::BLACK);
     }
 
     // Initial UI draw
     update_ui(&mut my_display, last_ui_state);
 
+    // Preload all images into cache (for 143-OLED, speeds up future access)
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    {
+        // Allocate one contiguous arena; it will back off if 10 doesn’t fit.
+        let slots = esp32s3_tests::ui::init_image_arena(10);
+
+        // Block here and fill each slot once (may take a few seconds)
+        for idx in 0..slots {
+            let _ = esp32s3_tests::ui::cache_slot(idx);
+        }
+
+        // Disable the background preloader
+        critical_section::with(|cs| {
+            PRELOAD_TARGET_SLOTS.borrow(cs).set(0);
+        });
+    }
+    
+    // Demo for debugging UI without user input
+    // enum DemoState {
+    // Home,
+    // Omnitrix,
+    // Rotating { idx: usize, last_ms: u64 },
+    // BackToHome { last_ms: u64 },
+    // Done,
+    // }
+
+    // let mut demo_state = DemoState::Home;
+
+    // loop {
+    //     let now_ms = {
+    //         let t = SystemTimer::unit_value(Unit::Unit0);
+    //         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    //     };
+
+    //     match demo_state {
+    //         DemoState::Home => {
+    //             // Wait 1 second, then switch to Omnitrix page
+    //             if now_ms > 1000 {
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1), dialog: None });
+    //                 });
+    //                 demo_state = DemoState::Omnitrix;
+    //             }
+    //         }
+    //         DemoState::Omnitrix => {
+    //             // Wait 0.5s, then start rotating through aliens
+    //             if now_ms > 1500 {
+    //                 demo_state = DemoState::Rotating { idx: 1, last_ms: now_ms };
+    //             }
+    //         }
+    //         DemoState::Rotating { idx, last_ms } => {
+    //             // Rotate every 3s
+    //             if now_ms > last_ms + 2000 {
+    //                 let next_state = match idx {
+    //                     1 => esp32s3_tests::ui::OmnitrixState::Alien2,
+    //                     2 => esp32s3_tests::ui::OmnitrixState::Alien3,
+    //                     3 => esp32s3_tests::ui::OmnitrixState::Alien4,
+    //                     4 => esp32s3_tests::ui::OmnitrixState::Alien5,
+    //                     5 => esp32s3_tests::ui::OmnitrixState::Alien6,
+    //                     6 => esp32s3_tests::ui::OmnitrixState::Alien7,
+    //                     7 => esp32s3_tests::ui::OmnitrixState::Alien8,
+    //                     8 => esp32s3_tests::ui::OmnitrixState::Alien9,
+    //                     9 => esp32s3_tests::ui::OmnitrixState::Alien10,
+    //                     _ => esp32s3_tests::ui::OmnitrixState::Alien1,
+    //                 };
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(next_state), dialog: None });
+    //                 });
+    //                 if idx < 9 {
+    //                     demo_state = DemoState::Rotating { idx: idx + 1, last_ms: now_ms };
+    //                 } else {
+    //                     demo_state = DemoState::BackToHome { last_ms: now_ms };
+    //                 }
+    //             }
+    //         }
+    //         DemoState::BackToHome { last_ms } => {
+    //             // Wait 1s, then go back to Home
+    //             if now_ms > last_ms + 1500 {
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Main(MainMenuState::Home), dialog: None });
+    //                 });
+    //                 demo_state = DemoState::Done;
+    //             }
+    //         }
+    //         DemoState::Done => {
+    //             // Optionally, stop or restart demo
+    //         }
+    //     }
+
+    //     // Usual UI update logic
+    //     let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
+    //     if ui_state != last_ui_state {
+    //         update_ui(&mut my_display, ui_state);
+    //         last_ui_state = ui_state;
+    //     }
+
+    //     // Small delay to reduce CPU usage
+    //     for _ in 0..10000 { core::hint::spin_loop(); }
+    // }
 
     // Main loop
     loop {
@@ -235,19 +320,11 @@ fn main() -> ! {
         let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
         if ui_state != last_ui_state {
             update_ui(&mut my_display, ui_state);
-            #[cfg(feature = "esp32s3-disp143Oled")]
-            {
-                critical_section::with(|cs| {
-                    let i = NEXT_CACHE_IDX.borrow(cs).get();
-                    if esp32s3_tests::ui::cache_slot(i) {
-                        NEXT_CACHE_IDX.borrow(cs).set((i + 1) % 10);
-                    }
-                });
-            }
             // esp_println::println!("UI state changed: {:?}", ui_state);
             last_ui_state = ui_state;
         }
 
+        // Button 1 handling
         if BUTTON1_PRESSED.swap(false, Ordering::Acquire) {
             // All work is now SAFE here in the main loop
             // esp_println::println!("Button 1 pressed!"); // Debug prints are safe here
@@ -258,7 +335,7 @@ fn main() -> ! {
             });
         }
 
-        // --- Handle Button 2 Press ---
+        // Button 2 handling
         if BUTTON2_PRESSED.swap(false, Ordering::Acquire) {
             // All work is now SAFE here in the main loop
             //  esp_println::println!("Button 2 pressed!"); // Debug prints are safe here

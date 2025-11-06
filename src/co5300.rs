@@ -314,45 +314,46 @@ where
     }
 
 
-    pub fn write_2x2(
-        &mut self,
-        x: u16,
-        y: u16,
-        color_1: Rgb565,
-        color_2: Rgb565,
-        color_3: Rgb565,
-        color_4: Rgb565,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        if x >= self.w || y >= self.h || x + 1 >= self.w || y + 1 >= self.h {
-            return Err(Co5300Error::OutOfBounds);
-        }
-        // Align to even x (panel quirk-friendly)
-        let x0 = x & !1;
+    // temporary for prototyping
+    // pub fn write_2x2(
+    //     &mut self,
+    //     x: u16,
+    //     y: u16,
+    //     color_1: Rgb565,
+    //     color_2: Rgb565,
+    //     color_3: Rgb565,
+    //     color_4: Rgb565,
+    // ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+    //     if x >= self.w || y >= self.h || x + 1 >= self.w || y + 1 >= self.h {
+    //         return Err(Co5300Error::OutOfBounds);
+    //     }
+    //     // Align to even x (panel quirk-friendly)
+    //     let x0 = x & !1;
 
-        self.set_window(x0, y, x0 + 1, y + 1)?;
+    //     self.set_window(x0, y, x0 + 1, y + 1)?;
 
-        let a = color_1.into_storage().to_be_bytes();
-        let b = color_2.into_storage().to_be_bytes();
-        let c = color_3.into_storage().to_be_bytes();
-        let d = color_4.into_storage().to_be_bytes();
+    //     let a = color_1.into_storage().to_be_bytes();
+    //     let b = color_2.into_storage().to_be_bytes();
+    //     let c = color_3.into_storage().to_be_bytes();
+    //     let d = color_4.into_storage().to_be_bytes();
 
-        let row0 = [a[0], a[1], b[0], b[1]];
-        let row1 = [c[0], c[1], d[0], d[1]];
+    //     let row0 = [a[0], a[1], b[0], b[1]];
+    //     let row1 = [c[0], c[1], d[0], d[1]];
 
-        let rows: [&[u8]; 2] = [&row0, &row1];
-        self.write_pixels_rows(&rows)
-    }
+    //     let rows: [&[u8]; 2] = [&row0, &row1];
+    //     self.write_pixels_rows(&rows)
+    // }
 
 
-    /// Convenience: 2x2 solid color tile.
-    pub fn write_2x2_solid(
-        &mut self,
-        x: u16,
-        y: u16,
-        color: Rgb565,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        self.write_2x2(x, y, color, color, color, color)
-    }
+    // /// Convenience: 2x2 solid color tile.
+    // pub fn write_2x2_solid(
+    //     &mut self,
+    //     x: u16,
+    //     y: u16,
+    //     color: Rgb565,
+    // ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+    //     self.write_2x2(x, y, color, color, color, color)
+    // }
 
     /// Convenience: fill a rectangle with a solid color (fast path).
     pub fn fill_rect_solid(&mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565)

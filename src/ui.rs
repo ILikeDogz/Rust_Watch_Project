@@ -11,15 +11,15 @@
 #[cfg(feature = "esp32s3-disp143Oled")]
 extern crate alloc;
 #[cfg(feature = "esp32s3-disp143Oled")]
+use alloc::boxed::Box;
+#[cfg(feature = "esp32s3-disp143Oled")]
 use alloc::vec::Vec;
 #[cfg(feature = "esp32s3-disp143Oled")]
-use core::{cell::{Cell, RefCell}, ops::Range};
+use core::cell::RefCell;
 #[cfg(feature = "esp32s3-disp143Oled")]
 use critical_section::Mutex;
 #[cfg(feature = "esp32s3-disp143Oled")]
 use core::slice;
-
-const CACHE_CAP: usize = 10; // max cached decompressed images
 
 use esp_backtrace as _;
 
@@ -30,12 +30,16 @@ use esp_backtrace as _;
 //     Blocking,
 // };
 
-
 // Embedded-graphics
 use embedded_graphics::{
-    Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::{Rgb565, raw::RawU16}, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
+    Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::Rgb565, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size, IntoStorage}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
 };
-use miniz_oxide::inflate::decompress_to_vec_zlib;
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
+#[cfg(feature = "devkit-esp32s3-disp128")]
+use miniz_oxide::decompress_to_vec_zlib;
+
 use core::any::Any;
 
 // Make a lightweight trait bound we’ll use for the factory’s return type.
@@ -83,6 +87,9 @@ static ALIEN7_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien7_",  res!(), 
 static ALIEN8_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien8_",  res!(), "_rgb565_be.raw.zlib"));
 static ALIEN9_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien9_",  res!(), "_rgb565_be.raw.zlib"));
 static ALIEN10_IMAGE: &[u8] = include_bytes!(concat!("assets/alien10_", res!(), "_rgb565_be.raw.zlib"));
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+static HOURGLASS_BUF: Mutex<RefCell<Option<Box<[u8]>>>> = Mutex::new(RefCell::new(None));
 
 // UI State representation
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -294,45 +301,6 @@ fn draw_text(
     .ok();
 }
 
-// // apart of debug to try and speed up display
-// fn draw_image_runtime(
-//     disp: &mut impl PanelRgb565,
-//     data_zlib: &'static [u8],
-//     w: u32,
-//     h: u32,
-//     clear: bool,
-// ) {
-//     if clear { let _ = disp.clear(Rgb565::BLACK); }
-
-//     let bytes = decompress_to_vec_zlib(data_zlib).unwrap_or_default();
-//     if bytes.len() != (w * h * 2) as usize { return; }
-
-//     let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
-//     let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
-
-//     // OLED fast path: one window + one RAMWR, zero extra copies
-//     #[cfg(feature = "esp32s3-disp143Oled")]
-//     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::co5300::DisplayType<'static>>() {
-//         let _ = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, &bytes);
-//         return;
-//     }
-
-//     // Fallbacks
-//     #[cfg(feature = "devkit-esp32s3-disp128")]
-//     {
-//         let raw = ImageRawBE::<Rgb565>::new(&bytes, w);
-//         let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
-//         return;
-//     }
-//     let area = Rectangle::new(Point::new(x, y), Size::new(w, h));
-//     let colors = bytes.chunks_exact(2).map(|b| {
-//         let v = u16::from_be_bytes([b[0], b[1]]);
-//         Rgb565::from(RawU16::new(v))
-//     });
-//     let _ = disp.fill_contiguous(&area, colors);
-// }
-
-
 // Draw from already-decompressed bytes (used by cache on OLED)
 #[cfg(feature = "esp32s3-disp143Oled")]
 fn draw_image_bytes(
@@ -348,19 +316,14 @@ fn draw_image_bytes(
     let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
 
     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::co5300::DisplayType<'static>>() {
+        // Temporarily enable even-alignment for the controller's fast blit
+        co.set_align_even(true);
         let _ = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes);
+        co.set_align_even(false);
         return;
     }
 }
 
-
-// Full precache store (10 slots). Using Option so we can fill lazily or all at once.
-#[cfg(feature = "esp32s3-disp143Oled")]
-static IMAGE_CACHE_ALL: Mutex<RefCell<[Option<Vec<u8>>; 10]>> =
-    Mutex::new(RefCell::new([None, None, None, None, None, None, None, None, None, None]));
-
-#[cfg(feature = "esp32s3-disp143Oled")]
-static PRECACHE_IDX: Mutex<Cell<usize>> = Mutex::new(Cell::new(0));
 
 // Size of one image in bytes
 #[cfg(feature = "esp32s3-disp143Oled")]
@@ -374,13 +337,6 @@ static mut IMAGE_ARENA_LEN: usize = 0;
 #[cfg(feature = "esp32s3-disp143Oled")]
 static ARENA_FILLED: Mutex<RefCell<[bool; 10]>> =
     Mutex::new(RefCell::new([false; 10]));
-
-// Compute slot byte range inside the arena (idx 0..10)
-#[cfg(feature = "esp32s3-disp143Oled")]
-fn slot_range(idx: usize) -> Range<usize> {
-    let start = idx * SLOT_BYTES;
-    start..start + SLOT_BYTES
-}
 
 // Allocate one big contiguous arena for up to `count` images.
 // Returns how many slots actually fit (<= count).
@@ -446,7 +402,7 @@ pub fn cache_slot(idx: usize) -> bool {
         _ => OmnitrixState::Alien10,
     };
     let z = asset_for(state);
-    let tmp = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
+    let tmp = decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
         .unwrap_or_default();
     if tmp.len() != SLOT_BYTES { return false; }
     write_slot(idx, &tmp)
@@ -483,6 +439,7 @@ fn omni_index(s: OmnitrixState) -> usize {
     }
 }
 
+// Get the compressed asset bytes for a given OmnitrixState
 #[cfg(feature = "esp32s3-disp143Oled")]
 fn asset_for(state: OmnitrixState) -> &'static [u8] {
     match state {
@@ -499,147 +456,106 @@ fn asset_for(state: OmnitrixState) -> &'static [u8] {
     }
 }
 
-// // Decompress all images once (call this at boot or on first Omnitrix use)
-// #[cfg(feature = "esp32s3-disp143Oled")]
-// pub fn precache_all_images() {
-//     // Try to cache as many as fit; stop before OOM.
-//     critical_section::with(|cs| {
-//         let mut slots = IMAGE_CACHE_ALL.borrow(cs).borrow_mut();
-//         let img_bytes = (IMG_W * IMG_H * 2) as usize;
+// Cache a full-frame Omnitrix-style hourglass into a static buffer.
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub fn cache_hourglass_logo(color: Rgb565, bg: Rgb565) {
+    let size = RESOLUTION as usize;
+    let center = size / 2;
 
-//         let states = [
-//             OmnitrixState::Alien1, OmnitrixState::Alien2, OmnitrixState::Alien3, OmnitrixState::Alien4, OmnitrixState::Alien5,
-//             OmnitrixState::Alien6, OmnitrixState::Alien7, OmnitrixState::Alien8, OmnitrixState::Alien9, OmnitrixState::Alien10,
-//         ];
+    // This is a magic number, calculated from the original image this drawing is based on
+    let waist = 148;
+    let drop = (size - waist) as f32;
 
-//         for (i, st) in states.iter().enumerate() {
-//             if slots[i].is_some() {
-//                 continue;
-//             }
+    // Prepare buffer: RGB565 big-endian, size*size*2 bytes
+    let mut buf = alloc::vec![0u8; size * size * 2];
+    let fg = color.into_storage().to_be_bytes();
+    let bgc = bg.into_storage().to_be_bytes();
 
-//             // Quick capacity probe for one image; if it fails, stop precaching.
-//             let mut probe = Vec::<u8>::new();
-//             if probe.try_reserve_exact(img_bytes).is_err() {
-//                 break;
-//             }
-//             drop(probe);
+    // Draw hourglass into buffer
+    for y in 0..size {
 
-//             // Bounded zlib inflate: never allocate beyond expected size
-//             let z = asset_for(*st);
-//             let bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, img_bytes)
-//                 .unwrap_or_default();
+        // Compute width at this y (float math for smooth edges)
+        let width = if y < center {
+            size as f32 - drop * (y as f32 / center as f32)
+        } else {
+            waist as f32 + drop * ((y - center) as f32 / center as f32)
+        };
 
-//             if bytes.len() == img_bytes {
-//                 slots[i] = Some(bytes);
-//             } else {
-//                 // size mismatch; skip this slot
-//             }
-//         }
-//     });
-// }
+        // Compute width at this y (float math for smooth edges)
+        let width = (width + 0.5) as usize;
+        let left = ((size - width) / 2).max(0);
+        let right = (left + width).min(size);
 
-// // Optional: report how many are cached (for logging)
-// #[cfg(feature = "esp32s3-disp143Oled")]
-// pub fn cached_count() -> usize {
-//     critical_section::with(|cs| {
-//         IMAGE_CACHE_ALL
-//             .borrow(cs)
-//             .borrow()
-//             .iter()
-//             .filter(|e| e.is_some())
-//             .count()
-//     })
-// }
+        // Fill pixels
+        for x in 0..size {
+            let off = (y * size + x) * 2;
+            let px = if x >= left && x < right { fg } else { bgc };
+            buf[off] = px[0];
+            buf[off + 1] = px[1];
+        }
+    }
 
-// // Try to cache the next missing image; returns true if one image was cached.
-// #[cfg(feature = "esp32s3-disp143Oled")]
-// pub fn precache_step() -> bool {
-//     let img_bytes = (IMG_W * IMG_H * 2) as usize;
+    // Store boxed slice in static mutex
+    let boxed = buf.into_boxed_slice();
+    critical_section::with(|cs| {
+        *HOURGLASS_BUF.borrow(cs).borrow_mut() = Some(boxed);
+    });
+}
 
-//     // Find next missing slot starting from rolling index
-//     let (_start_idx, slots_indices) = critical_section::with(|cs| {
-//         let start = PRECACHE_IDX.borrow(cs).get();
-//         let order = (start..10).chain(0..start).collect::<heapless::Vec<usize, 10>>();
-//         (start, order)
-//     });
+// Retrieve the cached hourglass logo buffer, if available.
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn get_hourglass_logo() -> Option<Box<[u8]>> {
+    critical_section::with(|cs| {
+        HOURGLASS_BUF.borrow(cs).borrow().as_ref().map(|b| b.clone())
+    })
+}
 
-//     for idx in slots_indices {
-//         let need_cache = critical_section::with(|cs| IMAGE_CACHE_ALL.borrow(cs).borrow()[idx].is_none());
-//         if !need_cache { continue; }
+// Draw a full-frame Omnitrix-style hourglass.
+#[cfg(feature = "devkit-esp32s3-disp128")]
+pub fn draw_hourglass_logo(
+    disp: &mut impl PanelRgb565,
+    color: Rgb565,
+    bg: Rgb565,
+    clear: bool,
+) {
+    let size = RESOLUTION as usize;
+    let center = size / 2;
+    // This is a magic number, calculated from the original image this drawing is based on
+    let waist = 80;
+    let drop = (size - waist) as f32;
 
-//         // Probe capacity for one image to avoid OOM
-//         let mut probe = Vec::<u8>::new();
-//         if probe.try_reserve_exact(img_bytes).is_err() {
-//             // Not enough contiguous heap; stop trying this frame
-//             return false;
-//         }
-//         drop(probe);
+    // Prepare buffer: RGB565 big-endian, size*size*2 bytes
+    let mut buf = vec![0u8; size * size * 2];
 
-//         // Decompress with limit to prevent runaway allocations
-//         let state = match idx {
-//             0 => OmnitrixState::Alien1,
-//             1 => OmnitrixState::Alien2,
-//             2 => OmnitrixState::Alien3,
-//             3 => OmnitrixState::Alien4,
-//             4 => OmnitrixState::Alien5,
-//             5 => OmnitrixState::Alien6,
-//             6 => OmnitrixState::Alien7,
-//             7 => OmnitrixState::Alien8,
-//             8 => OmnitrixState::Alien9,
-//             _ => OmnitrixState::Alien10,
-//         };
-//         let z = asset_for(state);
-//         let bytes = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, img_bytes)
-//             .unwrap_or_default();
-//         if bytes.len() != img_bytes {
-//             // Size mismatch; skip this slot
-//             critical_section::with(|cs| PRECACHE_IDX.borrow(cs).set((idx + 1) % 10));
-//             return false;
-//         }
+    // Precompute color bytes
+    let fg = color.into_storage().to_be_bytes();
+    let bgc = bg.into_storage().to_be_bytes();
 
-//         // Store and advance rolling index
-//         critical_section::with(|cs| {
-//             IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx] = Some(bytes);
-//             PRECACHE_IDX.borrow(cs).set((idx + 1) % 10);
-//         });
-//         return true;
-//     }
+    for y in 0..size {
+        // Compute width at this y (float math for smooth edges)
+        let width = if y < center {
+            size as f32 - drop * (y as f32 / center as f32)
+        } else {
+            waist as f32 + drop * ((y - center) as f32 / center as f32)
+        };
 
-//     // Nothing to cache
-//     false
-// }
+        // Compute width at this y (float math for smooth edges)
+        let width = (width + 0.5) as usize;
+        let left = ((size - width) / 2).max(0);
+        let right = (left + width).min(size);
 
-// // Cache first N images at boot (best-effort, stops on low memory)
-// #[cfg(feature = "esp32s3-disp143Oled")]
-// pub fn precache_first_n(n: usize) {
-//     let mut done = 0;
-//     while done < n {
-//         if !precache_step() { break; }
-//         done += 1;
-//     }
-// }
+        // Fill pixels
+        for x in 0..size {
+            let off = (y * size + x) * 2;
+            let px = if x >= left && x < right { fg } else { bgc };
+            buf[off] = px[0];
+            buf[off + 1] = px[1];
+        }
+    }
 
-// // Get/put remain the same
-// #[cfg(feature = "esp32s3-disp143Oled")]
-// fn get_cached_bytes(state: OmnitrixState) -> Vec<u8> {
-//     let idx = omni_index(state);
-//     if let Some(bytes) = critical_section::with(|cs| {
-//         IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx].take()
-//     }) {
-//         return bytes;
-//     }
-//     decompress_to_vec_zlib(asset_for(state)).unwrap_or_default()
-// }
-
-// #[cfg(feature = "esp32s3-disp143Oled")]
-// fn put_cached_bytes(state: OmnitrixState, buf: Vec<u8>) {
-//     if buf.len() != (IMG_W * IMG_H * 2) as usize { return; }
-//     let idx = omni_index(state);
-//     critical_section::with(|cs| {
-//         IMAGE_CACHE_ALL.borrow(cs).borrow_mut()[idx] = Some(buf);
-//     });
-// }
-
+    let raw = ImageRawBE::<Rgb565>::new(&buf, size as u32);
+    let _ = Image::new(&raw, Point::new(0, 0)).draw(disp);
+}
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
@@ -662,12 +578,7 @@ pub fn update_ui(
             Dialog::AboutPage =>
                 draw_text(disp, "About Page (TEMP)", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true),
             Dialog::TransformPage => {
-                let style = PrimitiveStyle::with_fill(Rgb565::GREEN);
-                let diameter: u32 = RESOLUTION / 2;
-                Circle::new(Point::new(CENTER - diameter as i32 / 2, CENTER - diameter as i32 / 2), diameter)
-                    .into_styled(style)
-                    .draw(disp)
-                    .ok();
+                disp.clear(Rgb565::GREEN).ok();
             }
         }
         return;
@@ -675,12 +586,25 @@ pub fn update_ui(
 
     match state.page {
         Page::Main(menu_state) => {
-            let (msg, fg, bg) = match menu_state {
-                MainMenuState::Home  => ("Main: Home", Rgb565::WHITE, Rgb565::GREEN),
-                MainMenuState::Start => ("Main: Start", Rgb565::WHITE, Rgb565::GREEN),
-                MainMenuState::About => ("Main: About", Rgb565::WHITE, Rgb565::GREEN),
-            };
-            draw_text(disp, msg, fg, bg, CENTER, CENTER, true);
+            match menu_state {
+                MainMenuState::Home => {
+                    #[cfg(feature = "esp32s3-disp143Oled")]
+                    if let Some(buf) = get_hourglass_logo() {
+                        draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
+                    }
+                    #[cfg(feature = "devkit-esp32s3-disp128")]
+                    {
+                        let lime = Rgb565::new(0x11, 0x38, 0x01);
+                        draw_hourglass_logo(disp, lime, Rgb565::BLACK, false);
+                    }
+                }
+                MainMenuState::Start => {
+                    draw_text(disp, "Main: Start", Rgb565::WHITE, Rgb565::GREEN, CENTER, CENTER, true);
+                }
+                MainMenuState::About => {
+                    draw_text(disp, "Main: About", Rgb565::WHITE, Rgb565::GREEN, CENTER, CENTER, true);
+                }
+            }
         }
         Page::Settings(settings_state) => {
             let (msg, fg, bg) = match settings_state {
@@ -723,9 +647,11 @@ pub fn update_ui(
                 if let Some(bytes) = get_cached_slice(omnitrix_state) {
                     draw_image_bytes(disp, bytes, IMG_W, IMG_H, false);
                 } else {
+                    // Fallback if precache failed
                     let z = asset_for(omnitrix_state);
-                    let tmp = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
+                    let tmp = decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
                         .unwrap_or_default();
+                    // Draw if valid
                     if tmp.len() == SLOT_BYTES {
                         draw_image_bytes(disp, &tmp, IMG_W, IMG_H, false);
                         // Store into arena (copy) to avoid re-decompress
@@ -744,6 +670,8 @@ pub fn update_ui(
         
         Page::Info => {
             draw_text(disp, "Info Screen", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true);
+            // let lime = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
+            // draw_hourglass_logo(disp, lime, Rgb565::BLACK, true);
             // draw_image(disp, MY_IMAGE, IMG_W, IMG_H, false);
         }
     }
