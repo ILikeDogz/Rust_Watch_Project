@@ -8,17 +8,11 @@
 //! Designed for use with embedded-graphics, mipidsi, and ESP-HAL display drivers.
 //! All drawing is centered on a 240x240 display, but can be adapted for other sizes.
 
-#[cfg(feature = "esp32s3-disp143Oled")]
 extern crate alloc;
-#[cfg(feature = "esp32s3-disp143Oled")]
 use alloc::boxed::Box;
-#[cfg(feature = "esp32s3-disp143Oled")]
 use alloc::vec::Vec;
-#[cfg(feature = "esp32s3-disp143Oled")]
 use core::cell::RefCell;
-#[cfg(feature = "esp32s3-disp143Oled")]
 use critical_section::Mutex;
-#[cfg(feature = "esp32s3-disp143Oled")]
 use core::slice;
 
 use esp_backtrace as _;
@@ -35,10 +29,7 @@ use embedded_graphics::{
     Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::Rgb565, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size, IntoStorage}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
 };
 
-#[cfg(feature = "esp32s3-disp143Oled")]
 use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
-#[cfg(feature = "devkit-esp32s3-disp128")]
-use miniz_oxide::decompress_to_vec_zlib;
 
 use core::any::Any;
 
@@ -48,32 +39,21 @@ impl<T> PanelRgb565 for T where T: DrawTarget<Color = Rgb565> + OriginDimensions
 
 
 // Display configuration, (0,0) is top-left corner
-#[cfg(feature = "devkit-esp32s3-disp128")]
-pub const RESOLUTION: u32 = 240;
 
-#[cfg(feature = "esp32s3-disp143Oled")]
 pub const RESOLUTION: u32 = 466;
 
 pub const CENTER: i32 = (RESOLUTION / 2) as i32;
 
 // Feature-selected image dimensions (adjust OLED to 466 if you have 466×466 assets)
-#[cfg(feature = "devkit-esp32s3-disp128")]
-pub const IMG_W: u32 = 240;
-#[cfg(feature = "devkit-esp32s3-disp128")]
-pub const IMG_H: u32 = 240;
 
-#[cfg(feature = "esp32s3-disp143Oled")]
 pub const IMG_W: u32 = 466; // change to 466 if you add 466×466 assets
-#[cfg(feature = "esp32s3-disp143Oled")]
 pub const IMG_H: u32 = 466; // change to 466 if you add 466×466 assets
 
 
 // Compile-time suffix for asset filenames
-#[cfg(feature = "devkit-esp32s3-disp128")]
-macro_rules! res { () => { "240x240" } }
-
-#[cfg(feature = "esp32s3-disp143Oled")]
 macro_rules! res { () => { "466x466" } } // set to "466x466" when you have OLED-sized assets
+
+const OMNI_LIME: Rgb565 = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
 
 // Feature-picked assets
 // static MY_IMAGE: &[u8]    = include_bytes!(concat!("assets/omnitrix_logo_", res!(), "_rgb565_be.raw"));
@@ -88,7 +68,7 @@ static ALIEN8_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien8_",  res!(), 
 static ALIEN9_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien9_",  res!(), "_rgb565_be.raw.zlib"));
 static ALIEN10_IMAGE: &[u8] = include_bytes!(concat!("assets/alien10_", res!(), "_rgb565_be.raw.zlib"));
 
-#[cfg(feature = "esp32s3-disp143Oled")]
+// Hourglass buffer for decompression
 static HOURGLASS_BUF: Mutex<RefCell<Option<Box<[u8]>>>> = Mutex::new(RefCell::new(None));
 
 // UI State representation
@@ -302,7 +282,6 @@ fn draw_text(
 }
 
 // Draw from already-decompressed bytes (used by cache on OLED)
-#[cfg(feature = "esp32s3-disp143Oled")]
 fn draw_image_bytes(
     disp: &mut impl PanelRgb565,
     bytes: &[u8],
@@ -324,23 +303,17 @@ fn draw_image_bytes(
     }
 }
 
-
 // Size of one image in bytes
-#[cfg(feature = "esp32s3-disp143Oled")]
 const SLOT_BYTES: usize = (IMG_W as usize) * (IMG_H as usize) * 2;
 // Global arena: use raw pointer + len to avoid RefCell borrow lifetime issues
-#[cfg(feature = "esp32s3-disp143Oled")]
 static mut IMAGE_ARENA_PTR: *mut u8 = core::ptr::null_mut();
-#[cfg(feature = "esp32s3-disp143Oled")]
 static mut IMAGE_ARENA_LEN: usize = 0;
 
-#[cfg(feature = "esp32s3-disp143Oled")]
 static ARENA_FILLED: Mutex<RefCell<[bool; 10]>> =
     Mutex::new(RefCell::new([false; 10]));
 
 // Allocate one big contiguous arena for up to `count` images.
 // Returns how many slots actually fit (<= count).
-#[cfg(feature = "esp32s3-disp143Oled")]
 pub fn init_image_arena(count: usize) -> usize {
     let want = count.min(10);
     // Try to reserve total bytes without panicking
@@ -367,17 +340,14 @@ pub fn init_image_arena(count: usize) -> usize {
 }
 
 // Mark/Check a slot as filled
-#[cfg(feature = "esp32s3-disp143Oled")]
 fn set_filled(idx: usize) {
     critical_section::with(|cs| ARENA_FILLED.borrow(cs).borrow_mut()[idx] = true);
 }
-#[cfg(feature = "esp32s3-disp143Oled")]
 fn is_filled(idx: usize) -> bool {
     critical_section::with(|cs| ARENA_FILLED.borrow(cs).borrow()[idx])
 }
 
 // Write bytes into a slot (copy). Returns false if arena not ready.
-#[cfg(feature = "esp32s3-disp143Oled")]
 fn write_slot(idx: usize, src: &[u8]) -> bool {
     if src.len() != SLOT_BYTES { return false; }
     let start = idx * SLOT_BYTES;
@@ -392,7 +362,6 @@ fn write_slot(idx: usize, src: &[u8]) -> bool {
 }
 
 // Decompress one image into its arena slot (bounded). Returns true on success.
-#[cfg(feature = "esp32s3-disp143Oled")]
 pub fn cache_slot(idx: usize) -> bool {
     if idx >= 10 || is_filled(idx) { return true; }
     let state = match idx {
@@ -409,7 +378,6 @@ pub fn cache_slot(idx: usize) -> bool {
 }
 
 // Get a read-only slice for a cached image; None if not cached
-#[cfg(feature = "esp32s3-disp143Oled")]
 fn get_cached_slice(state: OmnitrixState) -> Option<&'static [u8]> {
     let idx = omni_index(state);
     if !is_filled(idx) { return None; }
@@ -423,7 +391,6 @@ fn get_cached_slice(state: OmnitrixState) -> Option<&'static [u8]> {
 }
 
 // Map OmnitrixState to a stable index 0..9
-#[cfg(feature = "esp32s3-disp143Oled")]
 fn omni_index(s: OmnitrixState) -> usize {
     match s {
         OmnitrixState::Alien1  => 0,
@@ -440,7 +407,6 @@ fn omni_index(s: OmnitrixState) -> usize {
 }
 
 // Get the compressed asset bytes for a given OmnitrixState
-#[cfg(feature = "esp32s3-disp143Oled")]
 fn asset_for(state: OmnitrixState) -> &'static [u8] {
     match state {
         OmnitrixState::Alien1  => ALIEN1_IMAGE,
@@ -457,7 +423,6 @@ fn asset_for(state: OmnitrixState) -> &'static [u8] {
 }
 
 // Cache a full-frame Omnitrix-style hourglass into a static buffer.
-#[cfg(feature = "esp32s3-disp143Oled")]
 pub fn cache_hourglass_logo(color: Rgb565, bg: Rgb565) {
     let size = RESOLUTION as usize;
     let center = size / 2;
@@ -503,59 +468,32 @@ pub fn cache_hourglass_logo(color: Rgb565, bg: Rgb565) {
 }
 
 // Retrieve the cached hourglass logo buffer, if available.
-#[cfg(feature = "esp32s3-disp143Oled")]
 fn get_hourglass_logo() -> Option<Box<[u8]>> {
     critical_section::with(|cs| {
         HOURGLASS_BUF.borrow(cs).borrow().as_ref().map(|b| b.clone())
     })
 }
 
-// Draw a full-frame Omnitrix-style hourglass.
-#[cfg(feature = "devkit-esp32s3-disp128")]
-pub fn draw_hourglass_logo(
-    disp: &mut impl PanelRgb565,
-    color: Rgb565,
-    bg: Rgb565,
-    clear: bool,
-) {
-    let size = RESOLUTION as usize;
-    let center = size / 2;
-    // This is a magic number, calculated from the original image this drawing is based on
-    let waist = 80;
-    let drop = (size - waist) as f32;
+fn draw_diamond_bg(disp: &mut impl PanelRgb565, color: Rgb565, clear_bg: bool) {
+    if clear_bg { let _ = disp.clear(Rgb565::BLACK); }
+    let size = RESOLUTION as i32;
+    let cy = size / 2;
 
-    // Prepare buffer: RGB565 big-endian, size*size*2 bytes
-    let mut buf = vec![0u8; size * size * 2];
-
-    // Precompute color bytes
-    let fg = color.into_storage().to_be_bytes();
-    let bgc = bg.into_storage().to_be_bytes();
-
+    // Draw diamond with scanline spans: width grows to center, then shrinks.
     for y in 0..size {
-        // Compute width at this y (float math for smooth edges)
-        let width = if y < center {
-            size as f32 - drop * (y as f32 / center as f32)
-        } else {
-            waist as f32 + drop * ((y - center) as f32 / center as f32)
-        };
-
-        // Compute width at this y (float math for smooth edges)
-        let width = (width + 0.5) as usize;
+        let up = if y <= cy { y } else { size - 1 - y };
+        let width = (up * 2 + 1).clamp(1, size); // odd widths look centered
         let left = ((size - width) / 2).max(0);
-        let right = (left + width).min(size);
-
-        // Fill pixels
-        for x in 0..size {
-            let off = (y * size + x) * 2;
-            let px = if x >= left && x < right { fg } else { bgc };
-            buf[off] = px[0];
-            buf[off + 1] = px[1];
-        }
+        let _ = Rectangle::new(
+            Point::new(left, y),
+            Size::new(width as u32, 1),
+        )
+        .into_styled(embedded_graphics::primitives::PrimitiveStyle::with_fill(color))
+        .draw(disp);
     }
-
-    let raw = ImageRawBE::<Rgb565>::new(&buf, size as u32);
-    let _ = Image::new(&raw, Point::new(0, 0)).draw(disp);
 }
+
+
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
@@ -578,7 +516,7 @@ pub fn update_ui(
             Dialog::AboutPage =>
                 draw_text(disp, "About Page (TEMP)", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true),
             Dialog::TransformPage => {
-                disp.clear(Rgb565::GREEN).ok();
+                disp.clear(OMNI_LIME).ok();
             }
         }
         return;
@@ -588,14 +526,14 @@ pub fn update_ui(
         Page::Main(menu_state) => {
             match menu_state {
                 MainMenuState::Home => {
-                    #[cfg(feature = "esp32s3-disp143Oled")]
                     if let Some(buf) = get_hourglass_logo() {
                         draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
-                    }
-                    #[cfg(feature = "devkit-esp32s3-disp128")]
-                    {
-                        let lime = Rgb565::new(0x11, 0x38, 0x01);
-                        draw_hourglass_logo(disp, lime, Rgb565::BLACK, false);
+                    } else {
+                        // Fallback if not cached
+                        cache_hourglass_logo(OMNI_LIME, Rgb565::BLACK);
+                        if let Some(buf) = get_hourglass_logo() {
+                            draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
+                        }
                     }
                 }
                 MainMenuState::Start => {
@@ -642,29 +580,19 @@ pub fn update_ui(
                 OmnitrixState::Alien9  => ("Omnitrix: Alien 9", ALIEN9_IMAGE),
                 OmnitrixState::Alien10 => ("Omnitrix: Alien 10", ALIEN10_IMAGE),
             };
-            #[cfg(feature = "esp32s3-disp143Oled")]
-            {
-                if let Some(bytes) = get_cached_slice(omnitrix_state) {
-                    draw_image_bytes(disp, bytes, IMG_W, IMG_H, false);
-                } else {
-                    // Fallback if precache failed
-                    let z = asset_for(omnitrix_state);
-                    let tmp = decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
-                        .unwrap_or_default();
-                    // Draw if valid
-                    if tmp.len() == SLOT_BYTES {
-                        draw_image_bytes(disp, &tmp, IMG_W, IMG_H, false);
-                        // Store into arena (copy) to avoid re-decompress
-                        let _ = write_slot(omni_index(omnitrix_state), &tmp);
-                    }
+            if let Some(bytes) = get_cached_slice(omnitrix_state) {
+                draw_image_bytes(disp, bytes, IMG_W, IMG_H, false);
+            } else {
+                // Fallback if precache failed
+                let z = asset_for(omnitrix_state);
+                let tmp = decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
+                    .unwrap_or_default();
+                // Draw if valid
+                if tmp.len() == SLOT_BYTES {
+                    draw_image_bytes(disp, &tmp, IMG_W, IMG_H, false);
+                    // Store into arena (copy) to avoid re-decompress
+                    let _ = write_slot(omni_index(omnitrix_state), &tmp);
                 }
-            }
-            #[cfg(feature = "devkit-esp32s3-disp128")]
-            {
-                // GC9A01 unchanged
-                let bytes = decompress_to_vec_zlib(image).unwrap_or_default();
-                let raw = ImageRawBE::<Rgb565>::new(&bytes, IMG_W);
-                let _ = Image::new(&raw, Point::new((RESOLUTION as i32 - IMG_W as i32) / 2, (RESOLUTION as i32 - IMG_H as i32) / 2)).draw(disp);
             }
         }
         
