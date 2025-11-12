@@ -1,5 +1,3 @@
-// #![allow(dead_code)]
-// #![allow(unused_imports)]
 
 // Minimal CO5300 panel driver (Standard SPI mode, no D/C pin).
 // Works with esp-hal (no_std) and embedded-graphics.

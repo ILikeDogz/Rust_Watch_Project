@@ -9,8 +9,11 @@
 //! All drawing is centered on a 240x240 display, but can be adapted for other sizes.
 
 extern crate alloc;
-use alloc::boxed::Box;
-use alloc::vec::Vec;
+use alloc::{
+    boxed::Box,
+    vec::Vec,
+    vec,
+};
 use core::cell::RefCell;
 use critical_section::Mutex;
 use core::slice;
@@ -473,6 +476,56 @@ fn get_hourglass_logo() -> Option<Box<[u8]>> {
         HOURGLASS_BUF.borrow(cs).borrow().as_ref().map(|b| b.clone())
     })
 }
+
+pub fn draw_hourglass_logo(
+    disp: &mut impl PanelRgb565,
+    color: Rgb565,
+    bg: Rgb565,
+    clear: bool,
+) {
+    if clear {
+        // Clear the display with background color
+        let _ = disp.clear(Rgb565::BLACK);
+    }
+    let size = RESOLUTION as usize;
+    let center = size / 2;
+    // This is a magic number, calculated from the original image this drawing is based on
+    let waist = 80;
+    let drop = (size - waist) as f32;
+
+    // Prepare buffer: RGB565 big-endian, size*size*2 bytes
+    let mut buf = vec![0u8; size * size * 2];
+
+    // Precompute color bytes
+    let fg = color.into_storage().to_be_bytes();
+    let bgc = bg.into_storage().to_be_bytes();
+
+    for y in 0..size {
+        // Compute width at this y (float math for smooth edges)
+        let width = if y < center {
+            size as f32 - drop * (y as f32 / center as f32)
+        } else {
+            waist as f32 + drop * ((y - center) as f32 / center as f32)
+        };
+
+        // Compute width at this y (float math for smooth edges)
+        let width = (width + 0.5) as usize;
+        let left = ((size - width) / 2).max(0);
+        let right = (left + width).min(size);
+
+        // Fill pixels
+        for x in 0..size {
+            let off = (y * size + x) * 2;
+            let px = if x >= left && x < right { fg } else { bgc };
+            buf[off] = px[0];
+            buf[off + 1] = px[1];
+        }
+    }
+
+    let raw = ImageRawBE::<Rgb565>::new(&buf, size as u32);
+    let _ = Image::new(&raw, Point::new(0, 0)).draw(disp);
+}
+
 
 fn draw_diamond_bg(disp: &mut impl PanelRgb565, color: Rgb565, clear_bg: bool) {
     if clear_bg { let _ = disp.clear(Rgb565::BLACK); }
