@@ -521,7 +521,13 @@ pub fn draw_hourglass_logo(
             buf[off + 1] = px[1];
         }
     }
-
+    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::co5300::DisplayType<'static>>() {
+        // Temporarily enable even-alignment for the controller's fast blit
+        // co.set_align_even(true);
+        let _ = co.blit_rect_be_fast(0, 0, RESOLUTION as u16, RESOLUTION as u16, &buf);
+        // co.set_align_even(false);
+        return;
+    }
     let raw = ImageRawBE::<Rgb565>::new(&buf, size as u32);
     let _ = Image::new(&raw, Point::new(0, 0)).draw(disp);
 }
@@ -579,15 +585,16 @@ pub fn update_ui(
         Page::Main(menu_state) => {
             match menu_state {
                 MainMenuState::Home => {
-                    if let Some(buf) = get_hourglass_logo() {
-                        draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
-                    } else {
-                        // Fallback if not cached
-                        cache_hourglass_logo(OMNI_LIME, Rgb565::BLACK);
-                        if let Some(buf) = get_hourglass_logo() {
-                            draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
-                        }
-                    }
+                    // if let Some(buf) = get_hourglass_logo() {
+                    //     draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
+                    // } else {
+                    //     // Fallback if not cached
+                    //     cache_hourglass_logo(OMNI_LIME, Rgb565::BLACK);
+                    //     if let Some(buf) = get_hourglass_logo() {
+                    //         draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
+                    //     }
+                    // }
+                    draw_hourglass_logo(disp, OMNI_LIME, Rgb565::BLACK, false);
                 }
                 MainMenuState::Start => {
                     draw_text(disp, "Main: Start", Rgb565::WHITE, Rgb565::GREEN, CENTER, CENTER, true);

@@ -152,7 +152,7 @@ mod co5300_backend {
         en.set_high(); delay.delay_ms(50);
 
         let spi_cfg = SpiConfig::default()
-                .with_frequency(Rate::from_hz(40_000_000))  // CO5300 known works up to 40 MHz, to be tested others
+                .with_frequency(Rate::from_hz(80_000_000))  // CO5300 known works up to 40 MHz, to be tested others
                 .with_mode(Mode::_0);                        // keep Mode0
 
         let spi = Spi::new(spi2, spi_cfg).unwrap()

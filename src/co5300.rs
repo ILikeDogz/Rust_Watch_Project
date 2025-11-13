@@ -16,6 +16,7 @@
 // Geometry: panel is 466 x 466 logical pixels (square).
 
 use core::fmt;
+use core::mem;
 
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::{
@@ -54,18 +55,8 @@ pub fn ramwr_stream<SD: SpiDevice<u8>>(
 
     let hdr: [u8; 4] = [0x02, 0x00, RAMWR_OPCODE, 0x00];
 
-    if chunks.len() == 1 {
-        if let Some(&data) = chunks.first() {
-            let mut ops: heapless::Vec<Operation<'_, u8>, 2> = heapless::Vec::new();
-            ops.push(Operation::Write(&hdr)).ok();
-            ops.push(Operation::Write(data)).ok();
-            return spi.transaction(&mut ops);
-        }
-        return Ok(());
-    }
-
-    // Increase capacity so we can write whole images (<= 2 ops per row + 1 hdr)
-    let mut ops: heapless::Vec<Operation<'_, u8>, 1024> = heapless::Vec::new();
+    // Enough capacity for header + up to 466 row chunks
+    let mut ops: heapless::Vec<Operation<'_, u8>, 512> = heapless::Vec::new();
     ops.push(Operation::Write(&hdr)).ok();
 
     for &c in chunks {
@@ -99,6 +90,7 @@ pub struct Co5300Display<'fb,SPI, RST> {
     y_off: u16,
     align_even: bool,
     fb: &'fb mut [u16], // framebuffer storage
+    scratch: Vec<u8>,        
 }
 
 
@@ -126,6 +118,7 @@ where
         width: u16,
         height: u16,
         fb: &'fb mut [u16],
+        scratch: Vec<u8>,
     ) -> Result<Self, Co5300Error<SPI::Error, RST::Error>> {
 
         // Validate FB size matches WxH (RGB565)
@@ -144,6 +137,7 @@ where
             y_off: 0x0000,
             align_even: false,
             fb,
+            scratch,
         };
 
         // Hard reset sequence
@@ -330,6 +324,7 @@ where
     pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
+
         ramwr_stream(&mut self.spi, rows).map_err(Co5300Error::Spi)
     }
 
@@ -519,20 +514,32 @@ where
         let eh = ay1 - ay0 + 1;
 
         // Build one contiguous BE buffer (single RAMWR)
-        let mut buf: Vec<u8> = Vec::with_capacity((ew as usize) * (eh as usize) * 2);
         let fbw = self.w as usize;
+        let needed = (ew as usize) * (eh as usize) * 2;
+        self.scratch.clear();
+        if self.scratch.capacity() < needed {
+            self.scratch.reserve(needed);
+        }
+
 
         for y in ay0..=ay1 {
             let row_base = (y as usize) * fbw + (ax0 as usize);
             for x in 0..(ew as usize) {
                 let v = self.fb[row_base + x].to_be_bytes();
-                buf.push(v[0]);
-                buf.push(v[1]);
+                self.scratch.push(v[0]);
+                self.scratch.push(v[1]);
             }
         }
 
+        // Move the filled Vec out of self so the slice doesn't alias &mut self.
+        let mut buf = mem::take(&mut self.scratch);
+
         self.set_window_raw(ax0, ay0, ax1, ay1)?;
-        self.write_pixels_rows(&[&buf])?;
+        self.write_pixels_rows(&[buf.as_slice()])?;
+
+        // Put it back so we reuse the allocation next time.
+        self.scratch = buf;
+
         Ok(())
     }
     
@@ -552,8 +559,8 @@ where
     {
         if w == 0 || h == 0 { return Ok(()); }
         let x1 = x + w - 1;
-        let y1 = y + h - 1;
-        self.set_window(x, y, x1, y1)?;
+        let y1: u16 = y + h - 1;
+        self.set_window_raw(x, y, x1, y1)?;
 
         // Prepare one row of the solid color
         let c = color.into_storage().to_be_bytes();
@@ -584,7 +591,6 @@ where
     fn cmd(&mut self, cmd: u8, data: &[u8])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
-        // let hdr = [0x02, cmd];
         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
         if data.is_empty() {
             self.spi.write(&hdr).map_err(|e| {
@@ -602,89 +608,83 @@ where
         }
     }
 
+    // // Fast path for streaming a full-frame BE RGB565 image (w*h*2 bytes).
+    // // Sends one RAMWR with a single chunk; then updates the local FB.
+    // pub fn blit_full_frame_be(&mut self, data: &[u8])
+    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    // {
+    //     let w = self.w as usize;
+    //     let h = self.h as usize;
+    //     let needed = w * h * 2;
+    //     if data.len() != needed {
+    //         return Err(Co5300Error::OutOfBounds);
+    //     }
+
+    //     // Program full window without even expansion or padding.
+    //     self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
+
+    //     // Single-transaction stream: [HDR][data]
+    //     self.write_pixels_rows(&[data])?;
+
+    //     // Update FB from BE bytes (tight loop, avoids per-pixel overhead).
+    //     // SAFETY: 2 bytes per pixel, length checked above.
+    //     let mut i = 0usize;
+    //     let mut j = 0usize;
+    //     while i < needed {
+    //         let hi = data[i];
+    //         let lo = data[i + 1];
+    //         self.fb[j] = u16::from_be_bytes([hi, lo]);
+    //         i += 2;
+    //         j += 1;
+    //     }
+
+    //     Ok(())
+    // }
+
     // Fast path: stream a BE RGB565 rectangle at (x0,y0).
     // `data` is w*h*2 bytes, row-major, big-endian.
     pub fn blit_rect_be_fast(
         &mut self,
         x0: u16,
         y0: u16,
-        w:  u16,
-        h:  u16,
+        w: u16,
+        h: u16,
         data: &[u8],
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        if w == 0 || h == 0 { return Ok(()); }
-        if x0 >= self.w || y0 >= self.h { return Ok(()); }
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
+        let x1 = x0.saturating_add(w).saturating_sub(1);
+        let y1 = y0.saturating_add(h).saturating_sub(1);
+        if x1 >= self.w || y1 >= self.h {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        let expected = (w as usize) * (h as usize) * 2;
+        if data.len() != expected {
+            return Err(Co5300Error::OutOfBounds);
+        }
 
-        // Clip input to panel
-        let w = w.min(self.w.saturating_sub(x0));
-        let h = h.min(self.h.saturating_sub(y0));
-        if w == 0 || h == 0 { return Ok(()); }
-        if data.len() != (w as usize) * (h as usize) * 2 { return Ok(()); }
+        self.set_window_raw(x0, y0, x1, y1)?;
 
-        // Align start to even (left/top pad) and expand end to even (right/bottom pad)
-        let ax0 = x0 & !1;
-        let ay0 = y0 & !1;
-        let ax1 = (x0 + w - 1) | 1;
-        let ay1 = (y0 + h - 1) | 1;
+        // Single RAMWR burst with the whole rect
+        let _ = ramwr_stream(&mut self.spi, &[data])?;
 
-        let ax1 = ax1.min(self.w - 1);
-        let ay1 = ay1.min(self.h - 1);
-
-        // Build one contiguous BE buffer covering [ax0..ax1] x [ay0..ay1]
-        let ew = (ax1 - ax0 + 1) as usize;
-        let eh = (ay1 - ay0 + 1) as usize;
-
+        // Update local FB (convert BE bytes to host u16)
         let fbw = self.w as usize;
-
-        let mut buf: Vec<u8> = Vec::with_capacity(ew * eh * 2);
-
-        // Source row stride in input data
-        let src_stride = (w as usize) * 2;
-
-        for ry in 0..eh {
-            let y = ay0 + (ry as u16);
-
-            // Are we inside the source rect vertically?
-            let in_src_y = y >= y0 && y < y0 + h;
-            let src_row_off = if in_src_y {
-                ((y - y0) as usize) * src_stride
-            } else {
-                0 // unused if not in_src_y
-            };
-
-            for rx in 0..ew {
-                let x = ax0 + (rx as u16);
-
-                let in_src_x = x >= x0 && x < x0 + w;
-
-                if in_src_x && in_src_y {
-                    // Take from source image
-                    let sx = (x - x0) as usize;
-                    let off = src_row_off + sx * 2;
-                    let hi = data[off];
-                    let lo = data[off + 1];
-                    buf.push(hi);
-                    buf.push(lo);
-
-                    // Update FB for source pixels
-                    self.fb[(y as usize) * fbw + (x as usize)] = u16::from_be_bytes([hi, lo]);
-                } else {
-                    // Padding region: preserve current framebuffer pixel
-                    let v = self.fb[(y as usize) * fbw + (x as usize)].to_be_bytes();
-                    buf.push(v[0]);
-                    buf.push(v[1]);
-                    // FB remains unchanged
-                }
+        let mut src = 0usize;
+        for ry in 0..(h as usize) {
+            let base = (y0 as usize + ry) * fbw + (x0 as usize);
+            let row = &mut self.fb[base..base + (w as usize)];
+            for px in row.iter_mut() {
+                let hi = data[src];
+                let lo = data[src + 1];
+                *px = u16::from_be_bytes([hi, lo]);
+                src += 2;
             }
         }
 
-        // Program raw window and stream once
-        self.set_window_raw(ax0, ay0, ax1, ay1)?;
-        self.write_pixels_rows(&[&buf])?;
         Ok(())
     }
-
- 
 }
 
 
@@ -811,36 +811,40 @@ where
         let area_w = area.size.width as usize;
         let area_h = area.size.height as usize;
 
+        // Intersection coords
         let x0 = inter.top_left.x as u16;
         let y0 = inter.top_left.y as u16;
         let take = inter.size.width as usize;
         let inter_h = inter.size.height as usize;
 
+        // Skips
         let left_skip = (inter.top_left.x - area.top_left.x).max(0) as usize;
         let right_skip = area_w.saturating_sub(left_skip + take);
         let top_skip = (inter.top_left.y - area.top_left.y).max(0) as usize;
 
-        // Collect visible span into a PSRAM buffer (W*H*2 bytes, BE RGB565)
-        let mut buf: Vec<u8> = Vec::with_capacity(take * inter_h * 2);
+        // Consume iterator once, write directly into FB for visible rectangle
+        let fbw = self.w as usize;
         let mut it = colors.into_iter();
 
-        // Skip full rows above intersection
+        // Skip rows above intersection
         for _ in 0..top_skip {
             for _ in 0..area_w { let _ = it.next(); }
         }
 
-        // Collect intersecting rows
-        for _r in 0..inter_h {
+        // Rows in intersection
+        for ry in 0..inter_h {
             // Skip left columns
             for _ in 0..left_skip { let _ = it.next(); }
-            // Take visible span
-            for _ in 0..take {
+
+            // Write visible span into FB
+            let dst_row = (y0 as usize + ry) * fbw;
+            let dst_off = dst_row + (x0 as usize);
+            for cx in 0..take {
                 if let Some(c) = it.next() {
-                    let b = c.into_storage().to_be_bytes();
-                    buf.push(b[0]);
-                    buf.push(b[1]);
+                    self.fb[dst_off + cx] = c.into_storage();
                 }
             }
+
             // Skip right columns
             for _ in 0..right_skip { let _ = it.next(); }
         }
@@ -851,8 +855,11 @@ where
             for _ in 0..area_w { let _ = it.next(); }
         }
 
-        // One-window, one-RAMWR fast path
-        let _ = self.blit_rect_be_fast(x0, y0, take as u16, inter_h as u16, &buf);
+        // One flush from FB (handles even-alignment + single RAMWR)
+        let x1 = x0 + (take as u16) - 1;
+        let y1 = y0 + (inter_h as u16) - 1;
+        let _ = self.flush_fb_rect_even(x0, y0, x1, y1);
+
         Ok(())
     }
 
@@ -865,8 +872,8 @@ where
 
 }
 
-/// Convenience builder that picks common defaults and returns the concrete type.
-/// Returning the concrete type lets display.rs use `impl Trait` to erase it later.
+// Convenience builder that picks common defaults and returns the concrete type.
+// Returning the concrete type lets display.rs use `impl Trait` to erase it later.
 pub fn new_with_defaults<'fb, SPI, RST>(
     spi: SPI,
     rst: Option<RST>,
@@ -877,8 +884,8 @@ where
     SPI: embedded_hal::spi::SpiDevice<u8>,
     RST: embedded_hal::digital::OutputPin,
 {
-    let mut display = Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT, fb)?;
-    display.set_window(0, 0, CO5300_WIDTH - 1, CO5300_HEIGHT - 1)?;
+    let mut display = Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT, fb, Vec::new())?;
+    display.set_window_raw(0, 0, CO5300_WIDTH - 1, CO5300_HEIGHT - 1)?;
     Ok(display)
 }
 
