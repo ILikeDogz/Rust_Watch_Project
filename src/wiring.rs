@@ -48,9 +48,8 @@ use esp_hal::{
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 use esp_hal::{
-    peripherals::{GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO47, GPIO48},
+    peripherals::{GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO47, GPIO48, DMA_CH0},
 };
-
 
 pub struct BoardPins<'a> {
     // Leds
@@ -100,6 +99,7 @@ pub struct DisplayPins<'a> {
     pub en:  Output<'a>,    // GPIO42
     pub tp_sda: GPIO47<'a>, // (unused here)
     pub tp_scl: GPIO48<'a>, // (unused here)
+    pub dma_ch0: DMA_CH0<'a>,   // <- DMA channel for SPI2
 }
 
 // Default profile
@@ -196,6 +196,9 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let tp_sda = p.GPIO47;
     let tp_scl = p.GPIO48;
 
+    // DMA peripheral
+    let dma_ch0 = p.DMA_CH0;
+
     // Return IO handler and all pins
     (
         io,
@@ -215,6 +218,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
                 en,
                 tp_sda,
                 tp_scl,
+                dma_ch0,
             },
         },
     )

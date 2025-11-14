@@ -43,24 +43,43 @@ use alloc::vec::Vec;
 pub const CO5300_WIDTH: u16 = 466;
 pub const CO5300_HEIGHT: u16 = 466;
 const RAMWR_OPCODE: u8 = 0x2C;
+const RAMWRC_OPCODE: u8 = 0x3C;
+
+// 32736 = 32 * 1023
+pub const DMA_CHUNK: usize = 32 * 1023; // 32736
+const TX_DMA_CAP: usize = 65_536;
+const MAX_DMA_PAYLOAD: usize = TX_DMA_CAP - 4;
+
+#[repr(align(32))]
+struct AlignedBounce([u8; DMA_CHUNK]);
+
+#[link_section = ".dram0.bss"]
+static mut DMA_BOUNCE: AlignedBounce = AlignedBounce([0u8; DMA_CHUNK]);
 
 use embedded_graphics::prelude::IntoStorage;
 
 /// Low-level command send helper (basically holds this entire thing together)
+#[esp_hal::ram] // run from IRAM
 pub fn ramwr_stream<SD: SpiDevice<u8>>(
     spi: &mut SD,
     chunks: &[&[u8]],
 ) -> Result<(), SD::Error> {
     use embedded_hal::spi::Operation;
 
+    if chunks.is_empty() {
+        return Ok(());
+    }
+
     let hdr: [u8; 4] = [0x02, 0x00, RAMWR_OPCODE, 0x00];
 
-    // Enough capacity for header + up to 466 row chunks
+    // Header + many data chunks in one CS-asserted transaction
     let mut ops: heapless::Vec<Operation<'_, u8>, 512> = heapless::Vec::new();
     ops.push(Operation::Write(&hdr)).ok();
 
     for &c in chunks {
-        ops.push(Operation::Write(c)).ok();
+        if !c.is_empty() {
+            ops.push(Operation::Write(c)).ok();
+        }
     }
 
     spi.transaction(&mut ops)
@@ -84,6 +103,7 @@ impl<SpiE: fmt::Debug, GpioE: fmt::Debug> From<SpiE> for Co5300Error<SpiE, GpioE
 pub struct Co5300Display<'fb,SPI, RST> {
     pub spi: SPI,
     rst: Option<RST>,
+    cs: Option<Output<'fb>>,             // manual CS when using DMA
     w: u16,
     h: u16,
     x_off: u16,
@@ -131,6 +151,7 @@ where
         let mut this = Self {
             spi,
             rst,
+            cs: None,
             w: width,
             h: height,
             x_off: 0x0006,
@@ -197,6 +218,9 @@ where
         this.fb.fill(0); // clear FB
         Ok(this)
     }
+
+    // Allow setting CS after construction (DMA setup path)
+    pub fn set_cs(&mut self, cs: Output<'fb>) { self.cs = Some(cs); }
 
     // Panel width in pixels.
     #[inline]
@@ -324,7 +348,6 @@ where
     pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
-
         ramwr_stream(&mut self.spi, rows).map_err(Co5300Error::Spi)
     }
 
@@ -510,35 +533,50 @@ where
         ax1 = ax1.min(self.w - 1);
         ay1 = ay1.min(self.h - 1);
 
-        let ew = ax1 - ax0 + 1;
-        let eh = ay1 - ay0 + 1;
+        let ew = (ax1 - ax0 + 1) as usize;
+        let eh = (ay1 - ay0 + 1) as usize;
 
-        // Build one contiguous BE buffer (single RAMWR)
+        // Program window once
+        self.set_window_raw(ax0, ay0, ax1, ay1)?;
+
+        // Stream FB contents through DRAM bounce buffer
         let fbw = self.w as usize;
-        let needed = (ew as usize) * (eh as usize) * 2;
-        self.scratch.clear();
-        if self.scratch.capacity() < needed {
-            self.scratch.reserve(needed);
-        }
+        let mut first = true;
+        let mut filled = 0usize;
 
+        // Helper to flush current bounce contents
+        let mut flush = |this: &mut Self, first_flag: &mut bool, count: usize| -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+            if count == 0 { return Ok(()); }
+            let cmd = if *first_flag { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+            *first_flag = false;
+            let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+            let chunk = unsafe { &DMA_BOUNCE.0[..count] };
+            this.spi.transaction(&mut [
+                Operation::Write(&hdr),
+                Operation::Write(chunk),
+            ]).map_err(Co5300Error::Spi)?;
+            Ok(())
+        };
 
         for y in ay0..=ay1 {
             let row_base = (y as usize) * fbw + (ax0 as usize);
-            for x in 0..(ew as usize) {
-                let v = self.fb[row_base + x].to_be_bytes();
-                self.scratch.push(v[0]);
-                self.scratch.push(v[1]);
+            for x in 0..ew {
+                let be = self.fb[row_base + x].to_be_bytes();
+                // Push 2 bytes into bounce
+                unsafe {
+                    DMA_BOUNCE.0[filled] = be[0];
+                    DMA_BOUNCE.0[filled + 1] = be[1];
+                }
+                filled += 2;
+
+                if filled >= unsafe { DMA_BOUNCE.0.len() } {
+                    flush(self, &mut first, filled)?;
+                    filled = 0;
+                }
             }
         }
-
-        // Move the filled Vec out of self so the slice doesn't alias &mut self.
-        let mut buf = mem::take(&mut self.scratch);
-
-        self.set_window_raw(ax0, ay0, ax1, ay1)?;
-        self.write_pixels_rows(&[buf.as_slice()])?;
-
-        // Put it back so we reuse the allocation next time.
-        self.scratch = buf;
+        // Flush remaining tail
+        flush(self, &mut first, filled)?;
 
         Ok(())
     }
@@ -641,8 +679,46 @@ where
     //     Ok(())
     // }
 
-    // Fast path: stream a BE RGB565 rectangle at (x0,y0).
-    // `data` is w*h*2 bytes, row-major, big-endian.
+    // // Chunked frame blit (replaces previous single-write version)
+    // pub fn blit_full_frame_be(&mut self, data: &[u8])
+    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    // {
+    //     let needed = (self.w as usize) * (self.h as usize) * 2;
+    //     if data.len() != needed { return Err(Co5300Error::OutOfBounds); }
+
+    //     self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
+
+    //     let mut off = 0usize;
+    //     let mut first = true;
+
+    //     while off < data.len() {
+    //         let take = core::cmp::min(MAX_DMA_PAYLOAD, data.len() - off);
+    //         let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+    //         first = false;
+
+    //         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+    //         let slice = &data[off..off + take];
+
+    //         // Single transaction: header + payload chunk
+    //         self.spi.transaction(&mut [
+    //             Operation::Write(&hdr),
+    //             Operation::Write(slice),
+    //         ]).map_err(Co5300Error::Spi)?;
+
+    //         off += take;
+    //     }
+
+    //     // Update local FB
+    //     let mut si = 0usize;
+    //     for px in self.fb.iter_mut() {
+    //         let hi = data[si]; let lo = data[si + 1];
+    //         *px = u16::from_be_bytes([hi, lo]);
+    //         si += 2;
+    //     }
+    //     Ok(())
+    // }
+
+    // Chunked rect blit (same logic, preserves local FB)
     pub fn blit_rect_be_fast(
         &mut self,
         x0: u16,
@@ -651,42 +727,97 @@ where
         h: u16,
         data: &[u8],
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        if w == 0 || h == 0 {
-            return Ok(());
-        }
-        let x1 = x0.saturating_add(w).saturating_sub(1);
-        let y1 = y0.saturating_add(h).saturating_sub(1);
-        if x1 >= self.w || y1 >= self.h {
-            return Err(Co5300Error::OutOfBounds);
-        }
-        let expected = (w as usize) * (h as usize) * 2;
-        if data.len() != expected {
-            return Err(Co5300Error::OutOfBounds);
-        }
+        if w == 0 || h == 0 { return Ok(()); }
+        let x1 = x0 + w - 1;
+        let y1 = y0 + h - 1;
+        if x1 >= self.w || y1 >= self.h { return Err(Co5300Error::OutOfBounds); }
 
+        let expected = (w as usize) * (h as usize) * 2;
+        if data.len() != expected { return Err(Co5300Error::OutOfBounds); }
+
+        // Program rect window once
         self.set_window_raw(x0, y0, x1, y1)?;
 
-        // Single RAMWR burst with the whole rect
-        let _ = ramwr_stream(&mut self.spi, &[data])?;
+        // Stream via DRAM bounce buffer
+        let mut off = 0usize;
+        let mut first = true;
+        while off < data.len() {
+            let take = core::cmp::min(unsafe { DMA_BOUNCE.0.len() }, data.len() - off);
+            unsafe { DMA_BOUNCE.0[..take].copy_from_slice(&data[off..off + take]); }
+            off += take;
 
-        // Update local FB (convert BE bytes to host u16)
+            let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+            first = false;
+
+            let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+            let chunk = unsafe { &DMA_BOUNCE.0[..take] };
+            self.spi.transaction(&mut [
+                Operation::Write(&hdr),
+                Operation::Write(chunk),
+            ]).map_err(Co5300Error::Spi)?;
+        }
+
+        // FB update (only touched rect) remains the same
         let fbw = self.w as usize;
-        let mut src = 0usize;
+        let mut si = 0usize;
         for ry in 0..(h as usize) {
             let base = (y0 as usize + ry) * fbw + (x0 as usize);
             let row = &mut self.fb[base..base + (w as usize)];
             for px in row.iter_mut() {
-                let hi = data[src];
-                let lo = data[src + 1];
+                let hi = data[si]; let lo = data[si + 1];
                 *px = u16::from_be_bytes([hi, lo]);
-                src += 2;
+                si += 2;
             }
         }
+        Ok(())
+    }
 
+    pub fn blit_full_frame_be_bounced(&mut self, data: &[u8])
+        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    {
+        let needed = (self.w as usize) * (self.h as usize) * 2;
+        if data.len() != needed { return Err(Co5300Error::OutOfBounds); }
+
+        // Program full window once
+        self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
+
+        // Stream in chunks:
+        //  - First chunk: RAMWR (0x2C)
+        //  - Subsequent chunks: RAMWRC (0x3C) to continue at the current GRAM address
+        let mut off = 0usize;
+        let mut first = true;
+
+        while off < data.len() {
+            // length
+            let take = core::cmp::min(unsafe { DMA_BOUNCE.0.len() }, data.len() - off);
+
+            // slice
+            unsafe { DMA_BOUNCE.0[..take].copy_from_slice(&data[off..off + take]); }
+
+            off += take;
+
+            let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+            first = false;
+
+            let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+
+            let mut ops: heapless::Vec<embedded_hal::spi::Operation<'_, u8>, 3> = heapless::Vec::new();
+            ops.push(embedded_hal::spi::Operation::Write(&hdr)).ok();
+            let chunk = unsafe { &DMA_BOUNCE.0[..take] };
+            ops.push(embedded_hal::spi::Operation::Write(chunk)).ok();
+            self.spi.transaction(&mut ops).map_err(Co5300Error::Spi)?;
+        }
+
+        // Update FB from BE bytes
+        let mut si = 0usize;
+        for px in self.fb.iter_mut() {
+            let hi = data[si]; let lo = data[si + 1];
+            *px = u16::from_be_bytes([hi, lo]);
+            si += 2;
+        }
         Ok(())
     }
 }
-
 
 // -------------------- embedded-graphics integration --------------------
 impl<'fb, SPI, RST> OriginDimensions for Co5300Display<'fb, SPI, RST>

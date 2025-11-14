@@ -355,132 +355,97 @@ fn main() -> ! {
     // my_display.draw_iter(it).ok();
 
 
-    // use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
-    // use embedded_graphics::image::{ImageRawBE, Image};
-    // use embedded_graphics::prelude::*;
-    // use esp_hal::timer::systimer::{SystemTimer, Unit};
+    use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
+    use embedded_graphics::image::{ImageRawBE, Image};
+    use embedded_graphics::prelude::*;
+    use esp_hal::timer::systimer::{SystemTimer, Unit};
 
     
-    // // Helper: ticks -> microseconds
-    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
-    // let to_us = |t0: u64, t1: u64| -> u64 {
-    //     let dt = t1.saturating_sub(t0);
-    //     (dt.saturating_mul(1_000_000)) / ticks_per_s
-    // };
+    // Helper: ticks -> microseconds
+    let ticks_per_s = SystemTimer::ticks_per_second() as u64;
+    let to_us = |t0: u64, t1: u64| -> u64 {
+        let dt = t1.saturating_sub(t0);
+        (dt.saturating_mul(1_000_000)) / ticks_per_s
+    };
 
-    // let tb0 = SystemTimer::unit_value(Unit::Unit0);
-    // my_display.clear(Rgb565::BLACK).ok();
-    // let tb1 = SystemTimer::unit_value(Unit::Unit0);
-    // esp_println::println!("Clear: {} us", to_us(tb0, tb1));
-
-
-    // const W: u32 = 466;
-    // const H: u32 = 466;
-
-    // // --- Image 1 ---
-    // let t0 = SystemTimer::unit_value(Unit::Unit0);
-
-    // let z1: &[u8] = include_bytes!("../assets/alien2_466x466_rgb565_be.raw.zlib");
-    // let raw1 = decompress_to_vec_zlib_with_limit(z1, (W * H * 2) as usize).unwrap_or_default();
-
-    // let t1 = SystemTimer::unit_value(Unit::Unit0);
-
-    // if raw1.len() == (W * H * 2) as usize {
-    //     // Draw (embedded-graphics will prefer fill_contiguous)
-    //     let raw_img: ImageRawBE<Rgb565> = ImageRawBE::new(&raw1, W);
-    //     let _ = Image::new(&raw_img, Point::new(0, 0)).draw(&mut my_display);
-    //     // // Direct one-shot blit without building a scratch Vec or using e-g.
-    // }
-
-    // let t2 = SystemTimer::unit_value(Unit::Unit0);
-
-    // let decomp_us1 = to_us(t0, t1);
-    // let draw_us1   = to_us(t1, t2);
-    // let bytes1: u64 = (W as u64) * (H as u64) * 2;
-    // let kbps1 = (bytes1.saturating_mul(1_000_000) / draw_us1) / 1024;
-
-    // esp_println::println!(
-    //     "Image1 decompress: {} us, draw: {} us ({} KiB/s)",
-    //     decomp_us1, draw_us1, kbps1
-    // );
-
-    // // --- Image 2 (back-to-back timing) ---
-    // let t3 = SystemTimer::unit_value(Unit::Unit0);
-
-    // let z2: &[u8] = include_bytes!("../assets/alien3_466x466_rgb565_be.raw.zlib");
-    // let raw2 = decompress_to_vec_zlib_with_limit(z2, (W * H * 2) as usize).unwrap_or_default();
-
-    // let t4 = SystemTimer::unit_value(Unit::Unit0);
-
-    // if raw2.len() == (W * H * 2) as usize {
-    //     // let raw_img: ImageRawBE<Rgb565> = ImageRawBE::new(&raw2, W);
-    //     // let _ = Image::new(&raw_img, Point::new(0, 0)).draw(&mut my_display);
-    //     // Direct one-shot blit without building a scratch Vec or using e-g.
-    //     let _ = my_display.blit_rect_be_fast(0, 0, W as u16, H as u16, &raw2);
-    // }
-
-    // let t5 = SystemTimer::unit_value(Unit::Unit0);
-
-    // let decomp_us2 = to_us(t3, t4);
-    // let draw_us2   = to_us(t4, t5);
-    // let kbps2 = (bytes1.saturating_mul(1_000_000) / draw_us2) / 1024;
-
-    // esp_println::println!(
-    //     "Image2 decompress: {} us, draw: {} us (~{} KiB/s)",
-    //     decomp_us2, draw_us2, kbps2
-    // );
-
-    // // --- Image 3: blit_rect_be_fast (alien4) ---
-    // let t6 = SystemTimer::unit_value(Unit::Unit0);
-
-    // let z3: &[u8] = include_bytes!("../assets/alien4_466x466_rgb565_be.raw.zlib");
-    // let raw3 = decompress_to_vec_zlib_with_limit(z3, (W * H * 2) as usize).unwrap_or_default();
-
-    // let t7 = SystemTimer::unit_value(Unit::Unit0);
-
-    // if raw3.len() == (W * H * 2) as usize {
-    //     // Full-screen rect at (0,0). Change x,y,w,h to test sub-rect throughput.
-    //     let _ = my_display.blit_rect_be_fast(0, 0, W as u16, H as u16, &raw3);
-    // }
-
-    // let t8 = SystemTimer::unit_value(Unit::Unit0);
-
-    // let decomp_us3 = to_us(t6, t7);
-    // let draw_us3   = to_us(t7, t8);
-    // let kbps3 = (bytes1.saturating_mul(1_000_000) / draw_us3) / 1024;
-
-    // esp_println::println!(
-    //     "Image3 (rect) decompress: {} us, draw: {} us (~{} KiB/s)",
-    //     decomp_us3, draw_us3, kbps3
-    // );
-
-    // // Draw a white border rectangle and time it too
-    // let w: u32 = 200;
-    // let h: u32 = 200;
-    // let w2: u32 = w/2;
-    // let h2: u32 = h/2;
-    // let border_style = PrimitiveStyle::with_stroke(Rgb565::WHITE, 1);
-    // let tb0 = SystemTimer::unit_value(Unit::Unit0);
-
-    // Rectangle::new(Point::new((233 - (w/2)) as i32, (233 - (h/2)) as i32), Size::new(w, h))
-    //     .into_styled(border_style)
-    //     .draw(&mut my_display)
-    //     .ok();
-    // Rectangle::new(Point::new((233 - (w/2)) as i32, (233 - (h/2)) as i32), Size::new(w2, h2))
-    //     .into_styled(border_style)
-    //     .draw(&mut my_display)
-    //     .ok();
-
-    // let tb1 = SystemTimer::unit_value(Unit::Unit0);
-    // let tb2 = SystemTimer::unit_value(Unit::Unit0);
-
-    // esp_println::println!(
-    //     "Border draw: {} us, upload: {} us",
-    //     to_us(tb0, tb1),
-    //     to_us(tb1, tb2)
-    // );
+    let tb0 = SystemTimer::unit_value(Unit::Unit0);
+    my_display.clear(Rgb565::WHITE).ok();
+    let tb1 = SystemTimer::unit_value(Unit::Unit0);
+    esp_println::println!("Clear: {} us", to_us(tb0, tb1));
 
 
+    const W: u32 = 466;
+    const H: u32 = 466;
+
+    // --- Image 1 ---
+    let t0 = SystemTimer::unit_value(Unit::Unit0);
+
+    let z1: &[u8] = include_bytes!("../assets/alien2_466x466_rgb565_be.raw.zlib");
+    let raw1 = decompress_to_vec_zlib_with_limit(z1, (W * H * 2) as usize).unwrap_or_default();
+
+    let t1 = SystemTimer::unit_value(Unit::Unit0);
+
+    if raw1.len() == (W * H * 2) as usize {
+        // Draw (embedded-graphics will prefer fill_contiguous)
+        let raw_img: ImageRawBE<Rgb565> = ImageRawBE::new(&raw1, W);
+        let _ = Image::new(&raw_img, Point::new(0, 0)).draw(&mut my_display);
+        // // Direct one-shot blit without building a scratch Vec or using e-g.
+    }
+
+    let t2 = SystemTimer::unit_value(Unit::Unit0);
+
+    let decomp_us1 = to_us(t0, t1);
+    let draw_us1   = to_us(t1, t2);
+    let bytes1: u64 = (W as u64) * (H as u64) * 2;
+    let kbps1 = (bytes1.saturating_mul(1_000_000) / draw_us1) / 1024;
+
+    esp_println::println!(
+        "Image1 (ImageRawBE) decompress: {} us, draw: {} us ({} KiB/s)",
+        decomp_us1, draw_us1, kbps1
+    );
+
+
+    // --- Image 3: blit_rect_be_fast (alien4) ---
+    let t6 = SystemTimer::unit_value(Unit::Unit0);
+
+    let z3: &[u8] = include_bytes!("../assets/alien4_466x466_rgb565_be.raw.zlib");
+    let raw3 = decompress_to_vec_zlib_with_limit(z3, (W * H * 2) as usize).unwrap_or_default();
+
+    let t7 = SystemTimer::unit_value(Unit::Unit0);
+
+    if raw3.len() == (W * H * 2) as usize {
+        // Full-screen rect at (0,0). Change x,y,w,h to test sub-rect throughput.
+        let _ = my_display.blit_rect_be_fast(0, 0, W as u16, H as u16, &raw3);
+    }
+
+    let t8 = SystemTimer::unit_value(Unit::Unit0);
+
+    let decomp_us3 = to_us(t6, t7);
+    let draw_us3   = to_us(t7, t8);
+    let kbps3 = (bytes1.saturating_mul(1_000_000) / draw_us3) / 1024;
+
+    esp_println::println!(
+        "Image3 (blit_rect_be_fast) decompress: {} us, draw: {} us ({} KiB/s)",
+        decomp_us3, draw_us3, kbps3
+    );
+
+    // --- Image 4: blit_full_frame_be_bounced (alien5) ---
+    let t9 = SystemTimer::unit_value(Unit::Unit0);  
+    let z4: &[u8] = include_bytes!("../assets/alien5_466x466_rgb565_be.raw.zlib");
+    let raw4 = decompress_to_vec_zlib_with_limit(z4, (W * H * 2) as usize).unwrap_or_default();
+    let t10 = SystemTimer::unit_value(Unit::Unit0);
+    if raw4.len() == (W * H * 2) as usize {
+        // Full-screen rect at (0,0). Change x,y,w,h to test sub-rect throughput.
+        let _ = my_display.blit_full_frame_be_bounced(&raw4);
+    }
+    let t11 = SystemTimer::unit_value(Unit::Unit0);
+    let decomp_us4 = to_us(t9, t10);
+    let draw_us4   = to_us(t10, t11);
+    let kbps4 = (bytes1.saturating_mul(1_000_000) / draw_us4) / 1024;
+    esp_println::println!(
+        "Image4 (bounced) decompress: {} us, draw: {} us ({} KiB/s)",
+        decomp_us4, draw_us4, kbps4
+    );
 
     // const OMNI_LIME: Rgb565 = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
 
@@ -490,6 +455,85 @@ fn main() -> ! {
 
     // let tb1: u64 = SystemTimer::unit_value(Unit::Unit0);
     // esp_println::println!("Hourglass draw: {} us", to_us(tb0, tb1));
+    
+    // Draw a white border rectangle and time it too
+    let w: u32 = 200;
+    let h: u32 = 200;
+    let w2: u32 = w/2;
+    let h2: u32 = h/2;
+    let border_style = PrimitiveStyle::with_stroke(Rgb565::RED, 1);
+    let tb0 = SystemTimer::unit_value(Unit::Unit0);
+
+    Rectangle::new(Point::new((233 - (w/2)) as i32, (233 - (h/2)) as i32), Size::new(w, h))
+        .into_styled(border_style)
+        .draw(&mut my_display)
+        .ok();
+    let tb1 = SystemTimer::unit_value(Unit::Unit0);
+    Rectangle::new(Point::new((233 - (w/2)) as i32, (233 - (h/2)) as i32), Size::new(w2, h2))
+        .into_styled(border_style)
+        .draw(&mut my_display)
+        .ok();
+
+    let tb2 = SystemTimer::unit_value(Unit::Unit0);
+
+    esp_println::println!(
+        "Border draw: {} us, upload: {} us",
+        to_us(tb0, tb1),
+        to_us(tb1, tb2)
+    );
+
+    use embedded_graphics::mono_font::ascii::FONT_10X20;
+    use embedded_graphics::mono_font::MonoTextStyleBuilder;
+    use embedded_graphics::text::Text;
+    use embedded_graphics::text::Alignment;
+
+    let style = MonoTextStyleBuilder::new()
+        .font(&FONT_10X20)
+        .text_color(Rgb565::WHITE)
+        .background_color(Rgb565::BLACK)
+        .build();
+
+    // Circle params
+    let cx: i32 = 233;
+    let cy: i32 = 233;
+    let radius: i32 = 233;
+    let margin: i32 = 20; // inward padding from edge
+    // Diagonal offset (≈ 45°) staying inside circle
+    let diag: i32 = (((radius - margin) as f32) * 0.7071) as i32;
+
+    // Cardinal + diagonal positions (all inside circle)
+    let samples = [
+        ("CENTER", cx, cy),
+        ("TOP",    cx, cy - (radius - margin)),
+        ("BOTTOM", cx, cy + (radius - margin)),
+        ("LEFT",   cx - (radius - margin), cy),
+        ("RIGHT",  cx + (radius - margin), cy),
+        ("NW",     cx - diag, cy - diag),
+        ("NE",     cx + diag, cy - diag),
+        ("SW",     cx - diag, cy + diag),
+        ("SE",     cx + diag, cy + diag),
+    ];
+
+    // Optional: draw circle outline for reference
+    // use embedded_graphics::primitives::{Circle, PrimitiveStyle};
+    // let _ = Circle::new(Point::new(cx, cy), (radius as u32) * 2)
+    //     .into_styled(PrimitiveStyle::with_stroke(Rgb565::BLUE, 1))
+    //     .draw(&mut my_display);
+
+    for (label, x, y) in samples {
+        // Skip if outside square bounds (defensive)
+        if x < 0 || y < 0 || x >= 466 || y >= 466 { continue; }
+
+        // Center alignment keeps label centered on (x,y)
+        let t0 = SystemTimer::unit_value(Unit::Unit0);
+        let _ = Text::with_alignment(label, Point::new(x, y), style, Alignment::Center)
+            .draw(&mut my_display);
+        let t1 = SystemTimer::unit_value(Unit::Unit0);
+        esp_println::println!("Text '{}' draw: {} us @ ({},{})", label, to_us(t0, t1), x, y);
+    }
+
+
+
     // // // Test 2x2 block write
     // let x: u16 = 200;
     // let y: u16 = 100;
@@ -546,131 +590,128 @@ fn main() -> ! {
     // let _ = my_display.draw_iter(it);
 
     // Helper: ticks -> microseconds
-    let ticks_per_s = SystemTimer::ticks_per_second() as u64;
-    let to_us = |t0: u64, t1: u64| -> u64 {
-        let dt = t1.saturating_sub(t0);
-        dt.saturating_mul(1_000_000) / ticks_per_s
-    };
+    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
+    // let to_us = |t0: u64, t1: u64| -> u64 {
+    //     let dt = t1.saturating_sub(t0);
+    //     dt.saturating_mul(1_000_000) / ticks_per_s
+    // };
 
-    my_display.clear(Rgb565::BLACK).ok();
+    // my_display.clear(Rgb565::BLACK).ok();
 
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    {
-        // Pre-cache hourglass logo
-        let lime = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
-        cache_hourglass_logo(lime, Rgb565::BLACK);
-    }
+    // #[cfg(feature = "esp32s3-disp143Oled")]
+    // {
+    //     // Pre-cache hourglass logo
+    //     let lime = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
+    //     cache_hourglass_logo(lime, Rgb565::BLACK);
+    // }
 
-    // Initial UI draw (timed)
-    {
-        let t0 = SystemTimer::unit_value(Unit::Unit0);
-        update_ui(&mut my_display, last_ui_state);
-        let t1 = SystemTimer::unit_value(Unit::Unit0);
-        esp_println::println!("Initial UI draw: {} us", to_us(t0, t1));
-    }
+    // // Initial UI draw (timed)
+    // {
+    //     let t0 = SystemTimer::unit_value(Unit::Unit0);
+    //     update_ui(&mut my_display, last_ui_state);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Initial UI draw: {} us", to_us(t0, t1));
+    // }
 
-    // Preload all images into cache (for 143-OLED, speeds up future access)
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    {
-        // Allocate one contiguous arena; it will back off if 10 doesn’t fit.
-        let slots = esp32s3_tests::ui::init_image_arena(10);
+    // // Preload all images into cache (for 143-OLED, speeds up future access)
+    // #[cfg(feature = "esp32s3-disp143Oled")]
+    // {
+    //     // Allocate one contiguous arena; it will back off if 10 doesn’t fit.
+    //     let slots = esp32s3_tests::ui::init_image_arena(10);
 
-        // Block here and fill each slot once (may take a few seconds)
-        for idx in 0..slots {
-            let _ = esp32s3_tests::ui::cache_slot(idx);
-        }
+    //     // Block here and fill each slot once (may take a few seconds)
+    //     for idx in 0..slots {
+    //         let _ = esp32s3_tests::ui::cache_slot(idx);
+    //     }
 
-        // Disable the background preloader
-        critical_section::with(|cs| {
-            PRELOAD_TARGET_SLOTS.borrow(cs).set(0);
-        });
-    }
+    //     // Disable the background preloader
+    //     critical_section::with(|cs| {
+    //         PRELOAD_TARGET_SLOTS.borrow(cs).set(0);
+    //     });
+    // }
     
+    // let demo_start_ms = {
+    //     let t = SystemTimer::unit_value(Unit::Unit0);
+    //     t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    // };
 
-    // Demo for debugging UI without user input
-    enum DemoState {
-    Home,
-    Omnitrix,
-    Rotating { idx: usize, last_ms: u64 },
-    BackToHome { last_ms: u64 },
-    Done,
-    }
+    // enum DemoState {
+    //     Home,
+    //     Omnitrix,
+    //     Rotating { idx: usize, last_ms: u64 },
+    //     BackToHome { last_ms: u64 },
+    //     Done,
+    // }
 
-    let mut demo_state = DemoState::Home;
+    // let mut demo_state = DemoState::Home;
 
     loop {
-        let now_ms = {
-            let t = SystemTimer::unit_value(Unit::Unit0);
-            t.saturating_mul(1000) / SystemTimer::ticks_per_second()
-        };
+    //     let now_ms = {
+    //         let t = SystemTimer::unit_value(Unit::Unit0);
+    //         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    //     };
+    //     let rel = now_ms - demo_start_ms; // relative elapsed
 
-        match demo_state {
-            DemoState::Home => {
-                // Wait 1 second, then switch to Omnitrix page
-                if now_ms > 1000 {
-                    critical_section::with(|cs| {
-                        UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1), dialog: None });
-                    });
-                    demo_state = DemoState::Omnitrix;
-                }
-            }
-            DemoState::Omnitrix => {
-                // Wait 0.5s, then start rotating through aliens
-                if now_ms > 1500 {
-                    demo_state = DemoState::Rotating { idx: 1, last_ms: now_ms };
-                }
-            }
-            DemoState::Rotating { idx, last_ms } => {
-                // Rotate every 3s
-                if now_ms > last_ms + 2000 {
-                    let next_state = match idx {
-                        1 => esp32s3_tests::ui::OmnitrixState::Alien2,
-                        2 => esp32s3_tests::ui::OmnitrixState::Alien3,
-                        3 => esp32s3_tests::ui::OmnitrixState::Alien4,
-                        4 => esp32s3_tests::ui::OmnitrixState::Alien5,
-                        5 => esp32s3_tests::ui::OmnitrixState::Alien6,
-                        6 => esp32s3_tests::ui::OmnitrixState::Alien7,
-                        7 => esp32s3_tests::ui::OmnitrixState::Alien8,
-                        8 => esp32s3_tests::ui::OmnitrixState::Alien9,
-                        9 => esp32s3_tests::ui::OmnitrixState::Alien10,
-                        _ => esp32s3_tests::ui::OmnitrixState::Alien1,
-                    };
-                    critical_section::with(|cs| {
-                        UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(next_state), dialog: None });
-                    });
-                    if idx < 9 {
-                        demo_state = DemoState::Rotating { idx: idx + 1, last_ms: now_ms };
-                    } else {
-                        demo_state = DemoState::BackToHome { last_ms: now_ms };
-                    }
-                }
-            }
-            DemoState::BackToHome { last_ms } => {
-                // Wait 1s, then go back to Home
-                if now_ms > last_ms + 1500 {
-                    critical_section::with(|cs| {
-                        UI_STATE.borrow(cs).set(UiState { page: Page::Main(MainMenuState::Home), dialog: None });
-                    });
-                    demo_state = DemoState::Done;
-                }
-            }
-            DemoState::Done => {
-                // Optionally, stop or restart demo
-            }
-        }
+    //     match demo_state {
+    //         DemoState::Home => {
+    //             if rel > 1000 {
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1), dialog: None });
+    //                 });
+    //                 demo_state = DemoState::Omnitrix;
+    //             }
+    //         }
+    //         DemoState::Omnitrix => {
+    //             if rel > 1500 {
+    //                 demo_state = DemoState::Rotating { idx: 1, last_ms: rel };
+    //             }
+    //         }
+    //         DemoState::Rotating { idx, last_ms } => {
+    //             // Rotate every 3000 ms (comment and code agree now)
+    //             if rel > last_ms + 3000 {
+    //                 let next_state = match idx {
+    //                     1 => esp32s3_tests::ui::OmnitrixState::Alien2,
+    //                     2 => esp32s3_tests::ui::OmnitrixState::Alien3,
+    //                     3 => esp32s3_tests::ui::OmnitrixState::Alien4,
+    //                     4 => esp32s3_tests::ui::OmnitrixState::Alien5,
+    //                     5 => esp32s3_tests::ui::OmnitrixState::Alien6,
+    //                     6 => esp32s3_tests::ui::OmnitrixState::Alien7,
+    //                     7 => esp32s3_tests::ui::OmnitrixState::Alien8,
+    //                     8 => esp32s3_tests::ui::OmnitrixState::Alien9,
+    //                     9 => esp32s3_tests::ui::OmnitrixState::Alien10,
+    //                     _ => esp32s3_tests::ui::OmnitrixState::Alien1,
+    //                 };
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(next_state), dialog: None });
+    //                 });
+    //                 if idx < 9 {
+    //                     demo_state = DemoState::Rotating { idx: idx + 1, last_ms: rel };
+    //                 } else {
+    //                     demo_state = DemoState::BackToHome { last_ms: rel };
+    //                 }
+    //             }
+    //         }
+    //         DemoState::BackToHome { last_ms } => {
+    //             if rel > last_ms + 1500 {
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Main(MainMenuState::Home), dialog: None });
+    //                 });
+    //                 demo_state = DemoState::Done;
+    //             }
+    //         }
+    //         DemoState::Done => { /* stop or loop again */ }
+    //     }
 
-        // Usual UI update logic (timed)
-        let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
-        if ui_state != last_ui_state {
-            let t0 = SystemTimer::unit_value(Unit::Unit0);
-            update_ui(&mut my_display, ui_state);
-            let t1 = SystemTimer::unit_value(Unit::Unit0);
-            esp_println::println!("UI update: {} us", to_us(t0, t1));
-            last_ui_state = ui_state;
-        }
+    //     let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
+    //     if ui_state != last_ui_state {
+    //         let t0 = SystemTimer::unit_value(Unit::Unit0);
+    //         update_ui(&mut my_display, ui_state);
+    //         let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //         esp_println::println!("UI update: {} us", to_us(t0, t1));
+    //         last_ui_state = ui_state;
+    //     }
 
-        // Small delay to reduce CPU usage
-        for _ in 0..10000 { core::hint::spin_loop(); }
+    //     for _ in 0..10000 { core::hint::spin_loop(); }
     }
 
     // // Main loop

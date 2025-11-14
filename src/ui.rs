@@ -297,12 +297,14 @@ fn draw_image_bytes(
     let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
     let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
 
-    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::co5300::DisplayType<'static>>() {
-        // Temporarily enable even-alignment for the controller's fast blit
-        co.set_align_even(true);
+    // Try fast raw blit if this really is the CO5300 driver (DMA or non-DMA alias).
+    // The display backend re-exports its concrete type as display::DisplayType.
+    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
         let _ = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes);
-        co.set_align_even(false);
-        return;
+    } else {
+        // Fallback: embedded-graphics path (still uses fill_contiguous in driver)
+        let raw = ImageRawBE::<Rgb565>::new(bytes, w);
+        let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
     }
 }
 
@@ -585,16 +587,16 @@ pub fn update_ui(
         Page::Main(menu_state) => {
             match menu_state {
                 MainMenuState::Home => {
-                    // if let Some(buf) = get_hourglass_logo() {
-                    //     draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
-                    // } else {
-                    //     // Fallback if not cached
-                    //     cache_hourglass_logo(OMNI_LIME, Rgb565::BLACK);
-                    //     if let Some(buf) = get_hourglass_logo() {
-                    //         draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
-                    //     }
-                    // }
-                    draw_hourglass_logo(disp, OMNI_LIME, Rgb565::BLACK, false);
+                    if let Some(buf) = get_hourglass_logo() {
+                        draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
+                    } else {
+                        // Fallback if not cached
+                        cache_hourglass_logo(OMNI_LIME, Rgb565::BLACK);
+                        if let Some(buf) = get_hourglass_logo() {
+                            draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
+                        }
+                    }
+                    // draw_hourglass_logo(disp, OMNI_LIME, Rgb565::BLACK, false);
                 }
                 MainMenuState::Start => {
                     draw_text(disp, "Main: Start", Rgb565::WHITE, Rgb565::GREEN, CENTER, CENTER, true);

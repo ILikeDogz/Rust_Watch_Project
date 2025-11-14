@@ -21,9 +21,9 @@ use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use crate::wiring::DisplayPins;
 
 // A tiny busy-wait delay that satisfies embedded-hal 1.0 DelayNs.
-#[cfg(feature = "devkit-esp32s3-disp128")]
+// #[cfg(feature = "devkit-esp32s3-disp128")]
 struct SpinDelay;
-#[cfg(feature = "devkit-esp32s3-disp128")]
+// #[cfg(feature = "devkit-esp32s3-disp128")]
 impl embedded_hal::delay::DelayNs for SpinDelay {
     #[inline]
     fn delay_ns(&mut self, ns: u32) {
@@ -112,63 +112,130 @@ mod gc9a01_backend {
 // ==================================================================
 #[cfg(feature = "esp32s3-disp143Oled")]
 mod co5300_backend {
-    use esp_hal::delay::Delay;
-    use embedded_hal::delay::DelayNs;
-
     use super::*;
+    use embedded_hal::delay::DelayNs;
+    use esp_hal::dma::{DmaRxBuf, DmaRxTxBuf, DmaTxBuf};
+    use esp_hal::dma_buffers;
+    use esp_hal::spi::master::{Spi, SpiDmaBus, Config};
+    use crate::co5300::{self, Co5300Display, DMA_CHUNK};
 
-    // Your no_std CO5300 driver
-    use crate::co5300::{self, Co5300Display};
-
-    // Concrete type we return for this backend:
+    // Bus is now `SpiDmaBus`, not `SpiDma`
     pub type DisplayType<'a> =
-        Co5300Display<'a,ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>, Output<'a>>;
+        Co5300Display<
+            'a,
+            ExclusiveDevice<SpiDmaBus<'a, Blocking>, Output<'a>, NoDelay>,
+            Output<'a>,
+        >;
 
-    /// OLED setup:
-    /// - `spi2`: the SPI2 peripheral (pass `peripherals.SPI2` from main)
-    /// - `display_pins`: your new QSPI-style pin bundle
     pub fn setup_display<'a>(
         display_pins: DisplayPins<'a>,
-        display_buf: &'a mut [u16],            // required framebuffer
+        fb: &'a mut [u16],
     ) -> DisplayType<'a> {
-        // Destructure the pins as defined in your new wiring
         let DisplayPins {
             spi2,
             cs,
             clk,
-            do0,   // used as MOSI in Standard SPI mode
-            do1,   // used as MISO in Standard SPI mode
+            do0,
+            do1,
             do2: _,
             do3: _,
             rst,
             mut en,
             tp_sda: _,
             tp_scl: _,
+            dma_ch0,
         } = display_pins;
 
-        // Power / enable: keep AMOLED "EN" high (some boards gate panel power here)
-        let mut delay = Delay::new();
+        let mut delay = SpinDelay;
 
-        en.set_high(); delay.delay_ms(50);
+        // Power up panel
+        en.set_high();
+        delay.delay_us(50_000);
 
-        let spi_cfg = SpiConfig::default()
-                .with_frequency(Rate::from_hz(80_000_000))  // CO5300 known works up to 40 MHz, to be tested others
-                .with_mode(Mode::_0);                        // keep Mode0
+        // SPI @ 40–80 MHz, Mode 0 (try 80 if stable)
+        let spi = Spi::new(
+            spi2,
+            SpiConfig::default()
+                .with_frequency(Rate::from_hz(40_000_000))
+                .with_mode(Mode::_0),
+        )
+        .unwrap()
+        .with_sck(clk)
+        .with_mosi(do0)
+        .with_miso(do1)
+        .with_dma(dma_ch0);
 
-        let spi = Spi::new(spi2, spi_cfg).unwrap()
-                .with_sck(clk)    // GPIO 10
-                .with_mosi(do0)   // GPIO 11
-                .with_miso(do1);  // GPIO 12 (for reading)
+        let (rx_buf, rx_desc, tx_buf, tx_desc) = dma_buffers!(4096, 65536);
+        let rx = DmaRxBuf::new(rx_desc, rx_buf).unwrap();
+        let tx = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
 
-        let spi_dev = ExclusiveDevice::new(spi, cs, NoDelay).unwrap();
+        let spi_bus: SpiDmaBus<'_, Blocking> = spi.with_buffers(rx, tx);
+        let spi_dev = ExclusiveDevice::new(spi_bus, cs, NoDelay).unwrap();
 
-        let display = co5300::new_with_defaults(spi_dev, Some(rst), &mut delay, display_buf)
-            .expect("CO5300 init failed");
-
-        display
+        co5300::new_with_defaults(spi_dev, Some(rst), &mut delay, fb)
+            .expect("CO5300 init failed")
     }
 }
 
+
+// #[cfg(feature = "esp32s3-disp143Oled")]
+// mod co5300_backend {
+//     use esp_hal::delay::Delay;
+//     use embedded_hal::delay::DelayNs;
+
+//     use super::*;
+
+//     // Your no_std CO5300 driver
+//     use crate::co5300::{self, Co5300Display};
+
+//     // Concrete type we return for this backend:
+//     pub type DisplayType<'a> =
+//         Co5300Display<'a,ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>, Output<'a>>;
+
+//     /// OLED setup:
+//     /// - `spi2`: the SPI2 peripheral (pass `peripherals.SPI2` from main)
+//     /// - `display_pins`: your new QSPI-style pin bundle
+//     pub fn setup_display<'a>(
+//         display_pins: DisplayPins<'a>,
+//         display_buf: &'a mut [u16],            // required framebuffer
+//     ) -> DisplayType<'a> {
+//         // Destructure the pins as defined in your new wiring
+//         let DisplayPins {
+//             spi2,
+//             cs,
+//             clk,
+//             do0,   // used as MOSI in Standard SPI mode
+//             do1,   // used as MISO in Standard SPI mode
+//             do2: _,
+//             do3: _,
+//             rst,
+//             mut en,
+//             tp_sda: _,
+//             tp_scl: _,
+//         } = display_pins;
+
+//         // Power / enable: keep AMOLED "EN" high (some boards gate panel power here)
+//         let mut delay = Delay::new();
+
+//         en.set_high(); delay.delay_ms(50);
+
+//         let spi_cfg = SpiConfig::default()
+//                 .with_frequency(Rate::from_hz(80_000_000))  // CO5300 known works up to 40 MHz, to be tested others
+//                 .with_mode(Mode::_0);                        // keep Mode0
+
+//         let spi = Spi::new(spi2, spi_cfg).unwrap()
+//                 .with_sck(clk)    // GPIO 10
+//                 .with_mosi(do0)   // GPIO 11
+//                 .with_miso(do1);  // GPIO 12 (for reading)
+
+//         let spi_dev = ExclusiveDevice::new(spi, cs, NoDelay).unwrap();
+
+//         let display = co5300::new_with_defaults(spi_dev, Some(rst), &mut delay, display_buf)
+//             .expect("CO5300 init failed");
+
+//         display
+//     }
+// }
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
 pub use gc9a01_backend::{setup_display, DisplayType};
