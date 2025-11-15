@@ -15,7 +15,7 @@
 //            [0x02, 0x3A, 0x55] -> Pixel Format = 16bpp (RGB565)
 // Geometry: panel is 466 x 466 logical pixels (square).
 
-use core::fmt;
+use core::{fmt, mem};
 
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::{
@@ -45,6 +45,9 @@ pub const CO5300_HEIGHT: u16 = 466;
 const RAMWR_OPCODE: u8 = 0x2C;
 const RAMWRC_OPCODE: u8 = 0x3C;
 
+// Use a small CPU staging buffer per call (HAL will copy it into DMA TX buffer)
+const STAGE_BYTES: usize = 2048; // safe on stack; adjust if needed
+
 // 32736 = 32 * 1023
 pub const DMA_CHUNK: usize = 32 * 1023; 
 #[repr(align(32))]
@@ -56,7 +59,7 @@ static mut DMA_BOUNCE: AlignedBounce = AlignedBounce([0u8; DMA_CHUNK]);
 use embedded_graphics::prelude::IntoStorage;
 
 /// Low-level command send helper, for debugging
-#[esp_hal::ram] // run from IRAM
+// #[esp_hal::ram] // run from IRAM
 pub fn ramwr_stream<SD: SpiDevice<u8>>(
     spi: &mut SD,
     chunks: &[&[u8]],
@@ -105,6 +108,7 @@ pub struct Co5300Display<'fb,SPI, RST> {
     x_off: u16,
     y_off: u16,
     fb: &'fb mut [u16], // framebuffer storage
+    stage: alloc::boxed::Box<[u8]>, // staging buffer for writes
 }
 
 
@@ -144,6 +148,7 @@ where
             x_off: 0x0006,
             y_off: 0x0000,
             fb,
+            stage: alloc::vec![0u8; STAGE_BYTES].into_boxed_slice(),
         };
 
         // Hard reset sequence
@@ -216,7 +221,7 @@ where
     pub fn size(&self) -> (u16, u16) { (self.w, self.h) }
 
     // Raw window set (no even expansion, still applies panel offsets)
-    #[esp_hal::ram] // run from IRAM
+    // #[esp_hal::ram] // run from IRAM
     fn set_window_raw(
         &mut self,
         x0: u16, y0: u16,
@@ -305,7 +310,7 @@ where
 
 
     // Write a list of pixel rows (each row is &[u8]) in one RAMWR transaction.
-    #[esp_hal::ram] // run from IRAM
+    // #[esp_hal::ram] // run from IRAM
     pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
@@ -349,15 +354,29 @@ where
         self.write_pixels_rows(&rows)
     }
 
+    #[inline(always)]
+    fn write_ram_chunk(
+        &mut self,
+        first_flag: &mut bool,
+        chunk: &[u8],
+    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+        let cmd = if *first_flag { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+        *first_flag = false;
+        let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+        self.spi
+            .transaction(&mut [
+                Operation::Write(&hdr),
+                Operation::Write(chunk),
+            ])
+            .map_err(Co5300Error::Spi)
+    }
+
 
     // Flush an FB rectangle, forcing even start/end (2x2 tiles), using raw window.
-    #[esp_hal::ram]
+    // #[esp_hal::ram]
     fn flush_fb_rect_even(
         &mut self,
-        x0: u16,
-        y0: u16,
-        x1: u16,
-        y1: u16,
+        x0: u16, y0: u16, x1: u16, y1: u16,
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
         if x0 > x1 || y0 > y1 || x0 >= self.w || y0 >= self.h {
             return Ok(());
@@ -367,56 +386,39 @@ where
         let ay0 = y0 & !1;
         let ax1 = (x1 | 1).min(self.w - 1);
         let ay1 = (y1 | 1).min(self.h - 1);
-
         let ew = (ax1 - ax0 + 1) as usize;
 
         self.set_window_raw(ax0, ay0, ax1, ay1)?;
 
         let fbw = self.w as usize;
         let mut first = true;
+
+        // Move stage out, use it locally, then restore to self at end
+        let mut stage = mem::replace(&mut self.stage, alloc::vec![].into_boxed_slice());
         let mut filled = 0usize;
-
-        let flush = |this: &mut Self, first_flag: &mut bool, count: usize| -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-            if count == 0 { return Ok(()); }
-            let cmd = if *first_flag { RAMWR_OPCODE } else { RAMWRC_OPCODE };
-            *first_flag = false;
-            let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-            let chunk = unsafe { &DMA_BOUNCE.0[..count] };
-            this.spi.transaction(&mut [
-                Operation::Write(&hdr),
-                Operation::Write(chunk),
-            ]).map_err(Co5300Error::Spi)?;
-            Ok(())
-        };
-
-        let cap = unsafe { DMA_BOUNCE.0.len() };
 
         for y in ay0..=ay1 {
             let row_base = (y as usize) * fbw + (ax0 as usize);
             for x in 0..ew {
-                // Pre-flush if not enough room for next 2 bytes
-                if filled + 2 > cap {
-                    compiler_fence(Ordering::Release);
-                    flush(self, &mut first, filled)?;
-                    compiler_fence(Ordering::Acquire);
+                if filled + 2 > stage.len() {
+                    self.write_ram_chunk(&mut first, &stage[..filled])?;
                     filled = 0;
                 }
                 let be = self.fb[row_base + x].to_be_bytes();
-                unsafe {
-                    DMA_BOUNCE.0[filled] = be[0];
-                    DMA_BOUNCE.0[filled + 1] = be[1];
-                }
+                stage[filled] = be[0];
+                stage[filled + 1] = be[1];
                 filled += 2;
             }
         }
-        compiler_fence(Ordering::Release);
-        flush(self, &mut first, filled)?;
-        compiler_fence(Ordering::Acquire);
+        self.write_ram_chunk(&mut first, &stage[..filled])?;
+
+        // Restore stage buffer to self
+        self.stage = stage;
         Ok(())
     }
     
-    // Convenience: fill a rectangle with a solid color (fast path).
-    #[esp_hal::ram]
+    // Convenience: fill a rectangle with a solid color, using staging buffer.
+    // #[esp_hal::ram]
     pub fn fill_rect_solid(
         &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565,
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
@@ -434,48 +436,33 @@ where
 
         self.set_window_raw(x, y, x1, y1)?;
 
-        let total_bytes = (w as usize) * (h as usize) * 2;
-        let c = color.into_storage().to_be_bytes();
+        // Move stage out, fill pattern, send in chunks, then restore
+        let mut stage = mem::replace(&mut self.stage, alloc::vec![].into_boxed_slice());
 
-        unsafe {
-            let buf = &mut DMA_BOUNCE.0;
-            let pattern32_le: u32 = u32::from_le_bytes([c[0], c[1], c[0], c[1]]);
-            let mut i = 0;
-            let len = buf.len() & !3;
-            while i < len {
-                core::ptr::write_unaligned(buf.as_mut_ptr().add(i) as *mut u32, pattern32_le);
-                i += 4;
-            }
-            let mut j = len;
-            while j + 2 <= buf.len() {
-                buf[j] = c[0];
-                buf[j + 1] = c[1];
-                j += 2;
-            }
+        // Prepare BE pattern once
+        let c = color.into_storage().to_be_bytes();
+        for i in (0..stage.len()).step_by(2) {
+            stage[i] = c[0];
+            if i + 1 < stage.len() { stage[i + 1] = c[1]; }
         }
 
-        // Make sure DMA sees the bytes we just wrote
-        compiler_fence(Ordering::Release);
-
-        let mut remaining = total_bytes;
+        let mut remaining = (w as usize) * (h as usize) * 2;
         let mut first = true;
         while remaining > 0 {
-            let take = core::cmp::min(unsafe { DMA_BOUNCE.0.len() }, remaining);
-            let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+            let take = core::cmp::min(stage.len(), remaining);
+            let hdr: [u8; 4] = [0x02, 0x00, if first { RAMWR_OPCODE } else { RAMWRC_OPCODE }, 0x00];
             first = false;
-            let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-            let chunk = unsafe { &DMA_BOUNCE.0[..take] };
             self.spi.transaction(&mut [
                 Operation::Write(&hdr),
-                Operation::Write(chunk),
+                Operation::Write(&stage[..take]),
             ]).map_err(Co5300Error::Spi)?;
             remaining -= take;
         }
 
-        // Ensure CPU sees any DMA side effects before touching FB
-        compiler_fence(Ordering::Acquire);
+        // Restore stage buffer
+        self.stage = stage;
 
-        // FB update
+        // Mirror into FB
         let fbw = self.w as usize;
         let row_w = w as usize;
         let col_start = x as usize;
@@ -489,8 +476,8 @@ where
         Ok(())
     }
 
-    // Chunked rect blit (same logic, preserves local FB)
-    #[esp_hal::ram]
+    // Chunked rect blit from BE bytes; send slices directly (HAL copies to its DMA buffer).
+    // #[esp_hal::ram]
     pub fn blit_rect_be_fast(
         &mut self, x0: u16, y0: u16, w: u16, h: u16, data: &[u8],
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
@@ -514,26 +501,19 @@ where
         let mut off = 0usize;
         let mut first = true;
         while off < data.len() {
-            let take = core::cmp::min(unsafe { DMA_BOUNCE.0.len() }, data.len() - off);
-            unsafe { DMA_BOUNCE.0[..take].copy_from_slice(&data[off..off + take]); }
-            off += take;
-
-            // Ensure DMA sees freshly copied bytes
-            compiler_fence(Ordering::Release);
-
+            let take = core::cmp::min(STAGE_BYTES, data.len() - off);
             let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
             first = false;
             let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-            let chunk = unsafe { &DMA_BOUNCE.0[..take] };
+            let chunk = &data[off..off + take];
             self.spi.transaction(&mut [
                 Operation::Write(&hdr),
                 Operation::Write(chunk),
             ]).map_err(Co5300Error::Spi)?;
-
-            compiler_fence(Ordering::Acquire);
+            off += take;
         }
 
-        // FB update
+        // Update FB (convert BE bytes to native u16)
         let fbw = self.w as usize;
         let mut si = 0usize;
         for ry in 0..(h as usize) {
@@ -548,46 +528,33 @@ where
         Ok(())
     }
 
-    // Full-frame blit from BE bytes with bounce buffer streaming.
-    #[esp_hal::ram] // run from IRAM
+
+    // Full-frame blit from BE bytes, using direct slices.
+    // #[esp_hal::ram]
     pub fn blit_full_frame_be_bounced(&mut self, data: &[u8])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
-        // Data size check
         let needed = (self.w as usize) * (self.h as usize) * 2;
         if data.len() != needed { return Err(Co5300Error::OutOfBounds); }
 
-        // Program full window once
         self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
 
-        // Stream in chunks:
-        //  - First chunk: RAMWR (0x2C)
-        //  - Subsequent chunks: RAMWRC (0x3C) to continue at the current GRAM address
         let mut off = 0usize;
         let mut first = true;
-
         while off < data.len() {
-            // length
-            let take = core::cmp::min(unsafe { DMA_BOUNCE.0.len() }, data.len() - off);
-
-            // slice
-            unsafe { DMA_BOUNCE.0[..take].copy_from_slice(&data[off..off + take]); }
-
-            off += take;
-
+            let take = core::cmp::min(STAGE_BYTES, data.len() - off);
             let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
             first = false;
-
             let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-
-            let mut ops: heapless::Vec<embedded_hal::spi::Operation<'_, u8>, 3> = heapless::Vec::new();
-            ops.push(embedded_hal::spi::Operation::Write(&hdr)).ok();
-            let chunk = unsafe { &DMA_BOUNCE.0[..take] };
-            ops.push(embedded_hal::spi::Operation::Write(chunk)).ok();
-            self.spi.transaction(&mut ops).map_err(Co5300Error::Spi)?;
+            let chunk = &data[off..off + take];
+            self.spi.transaction(&mut [
+                Operation::Write(&hdr),
+                Operation::Write(chunk),
+            ]).map_err(Co5300Error::Spi)?;
+            off += take;
         }
 
-        // Update FB from BE bytes
+        // Update FB
         let mut si = 0usize;
         for px in self.fb.iter_mut() {
             let hi = data[si]; let lo = data[si + 1];
@@ -600,7 +567,7 @@ where
     // ---- Low-level helpers ----
 
     // #[inline(always)]
-    #[esp_hal::ram] // run from IRAM
+    // #[esp_hal::ram] // run from IRAM
     fn cmd(&mut self, cmd: u8, data: &[u8])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {

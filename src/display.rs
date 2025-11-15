@@ -160,7 +160,7 @@ mod co5300_backend {
         let spi = Spi::new(
             spi2,
             Config::default()
-                .with_frequency(Rate::from_hz(60_000_000))
+                .with_frequency(Rate::from_hz(80_000_000))
                 .with_mode(Mode::_0),
         )
         .unwrap()
