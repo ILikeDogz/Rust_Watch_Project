@@ -1,35 +1,7 @@
 // This module handles board-specific pin mappings and initialization.
 // Different profiles can be selected via Cargo features.
-// Default profile uses GPIO1 for LED1, GPIO15 for Button1, etc.
 // Alternate profiles can be defined for different boards by enabling
 // features like "devkit" or "alt" in Cargo.toml.
-//! The following default wiring is assumed:
-//! - LED => GPIO1
-//! - LED2 => GPIO19
-//! - BUTTON => GPIO15
-//! - BUTTON2 => GPIO21
-//! - Rotary encoder CLK => GPIO18
-//! - Rotary encoder DT  => GPIO17
-//! - Rotary encoder SW  => GPIO16 (not used in this example)
-//! - GND => GND
-//! - 3.3V => 3.3V
-//! - SPI2 SCK => GPIO10 (hardware SPI clock)
-//! - SPI2 MOSI => GPIO11 (hardware SPI MOSI)
-//! - LCD CS  => GPIO9
-//! - LCD DC  => GPIO8
-//! - LCD RST => GPIO14
-//! - LCD BL  => GPIO2
-//! Make sure the button is connected to GND when pressed (it has a pull-up).
-//! The rotary encoder should have no internal pull-ups using external 10k resistors, 
-//! and be connected to GND on the other side
-//! (we use interrupt on both edges to detect rotation).
-//! The LCD pins can be connected directly to the ESP32-S3 GPIOs
-//! as they are 3.3V logic level compatible.
-//! Ground and 3.3V pins are available on the board.
-//! The SPI2 pins (SCK, MOSI) are fixed and cannot be changed.
-//! SCK is GPIO10 and MOSI is GPIO11 on the ESP32-S3.
-//! The MISO pin is not used in this example but could be mapped to GPIO12 if needed.
-
 
 use esp_backtrace as _;
 
@@ -48,7 +20,7 @@ use esp_hal::{
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 use esp_hal::{
-    peripherals::{GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO47, GPIO48, DMA_CH0},
+    peripherals::{GPIO10, GPIO11, GPIO47, GPIO48, DMA_CH0},
 };
 
 pub struct BoardPins<'a> {
@@ -59,6 +31,7 @@ pub struct BoardPins<'a> {
     // Buttons
     pub btn1: Input<'a>,
     pub btn2: Input<'a>,
+    pub btn3: Input<'a>,
 
     // Rotary encoder pins
     pub enc_clk: Input<'a>,
@@ -88,13 +61,15 @@ pub struct DisplayPins<'a> {
 #[cfg(any(feature = "esp32s3-disp143Oled"))]
 pub struct DisplayPins<'a> {
     // CS=GPIO9, CLK=GPIO10, dO0=GPIO11, dO1=GPIO12, dO2=GPIO13, dO3=GPIO14, RST=GPIO21, EN=GPIO42, TP_SDA=GPIO47, TP_SCL=GPIO48
-    pub spi2: SPI2<'a>,     // <-- new: the SPI2 peripheral handle
+    pub spi2: SPI2<'a>,     // the SPI2 peripheral handle
     pub cs:  Output<'a>,    // GPIO9
-    pub clk: Output<'a>,
-    pub do0: Output<'a>, 
-    // pub do1: GPIO12<'a>,     // GPIO12 if you plan reads later
-    pub do2: GPIO13<'a>,    // (unused here)
-    pub do3: GPIO14<'a>,    // (unused here)
+    // pub clk: Output<'a>,
+    // pub do0: Output<'a>, 
+    pub clk: GPIO10<'a>,    // GPIO10
+    pub do0: GPIO11<'a>,    // GPIO11
+    // pub do1: GPIO12<'a>,     // GPIO12
+    // pub do2: GPIO13<'a>,    // GPIO13
+    // pub do3: GPIO14<'a>,    // GPIO14
     pub rst: Output<'a>,    // GPIO21
     pub en:  Output<'a>,    // GPIO42
     pub tp_sda: GPIO47<'a>, // (unused here)
@@ -116,8 +91,10 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     // buttons
     let mut btn1 = Input::new(p.GPIO15, InputConfig::default().with_pull(Pull::Up));
     let mut btn2 = Input::new(p.GPIO21, InputConfig::default().with_pull(Pull::Up));
+    let mut btn3 = Input::new(p.GPIO45, InputConfig::default().with_pull(Pull::Up));
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
+    btn3.listen(Event::AnyEdge);
 
     // rotary encoder pins
     let mut enc_clk = Input::new(p.GPIO18, InputConfig::default().with_pull(Pull::None));
@@ -141,7 +118,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
         io,
         BoardPins {
             // led1, led2, 
-            btn1, btn2,
+            btn1, btn2, btn3,
             enc_clk, enc_dt,
             display_pins: DisplayPins {
                 spi2,
@@ -157,7 +134,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 // OLED profile
 #[cfg(feature = "esp32s3-disp143Oled")]
 pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
-    use esp_hal::gpio::DriveStrength;
+    // use esp_hal::gpio::DriveStrength;
 
     let io = Io::new(p.IO_MUX);
 
@@ -169,9 +146,11 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 
     // buttons
     let mut btn1 = Input::new(p.GPIO45, InputConfig::default().with_pull(Pull::Up));
-    let mut btn2 = Input::new(p.GPIO41, InputConfig::default().with_pull(Pull::Up));
+    let mut btn2 = Input::new(p.GPIO46, InputConfig::default().with_pull(Pull::Up));
+    let mut btn3 = Input::new(p.GPIO1, InputConfig::default().with_pull(Pull::Up));
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
+    btn3.listen(Event::AnyEdge);
 
     // // rotary encoder pins
     let mut enc_clk = Input::new(p.GPIO2, InputConfig::default().with_pull(Pull::None));
@@ -186,22 +165,23 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 
     // SPI2 peripheral and pins
     let spi2 = p.SPI2;
-    let clk = Output::new(
-        p.GPIO10,
-        Level::Low,
-        OutputConfig::default().with_drive_strength(DriveStrength::_20mA),
-    );
+    // let clk = Output::new(
+    //     p.GPIO10,
+    //     Level::Low,
+    //     OutputConfig::default().with_drive_strength(DriveStrength::_20mA),
+    // );
 
-    let do0 = Output::new(
-        p.GPIO11,
-        Level::Low,
-        OutputConfig::default().with_drive_strength(DriveStrength::_20mA),
-    );
+    // let do0 = Output::new(
+    //     p.GPIO11,
+    //     Level::Low,
+    //     OutputConfig::default().with_drive_strength(DriveStrength::_20mA),
+    // );
 
-
-    let do1 = p.GPIO12;
-    let do2 = p.GPIO13; // GPIO13 
-    let do3 = p.GPIO14; // GPIO14 
+    let clk = p.GPIO10; // GPIO10
+    let do0 = p.GPIO11; // GPIO11
+    // let do1 = p.GPIO12; // GPIO12
+    // let do2 = p.GPIO13; // GPIO13 
+    // let do3 = p.GPIO14; // GPIO14 
 
     // Touch controller pins
     let tp_sda = p.GPIO47;
@@ -216,7 +196,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
         io,
         BoardPins {
             // led1, led2, 
-            btn1, btn2,
+            btn1, btn2, btn3,
             enc_clk, enc_dt,
             display_pins: DisplayPins {
                 spi2,
@@ -224,8 +204,8 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
                 clk,
                 do0,
                 // do1,
-                do2,
-                do3,
+                // do2,
+                // do3,
                 rst,
                 en,
                 tp_sda,

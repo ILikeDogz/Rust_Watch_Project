@@ -37,6 +37,7 @@ pub struct RotaryState<'a> {
 }
 
 // Handle button press events
+#[esp_hal::ram]
 pub fn handle_button_generic(btn: &ButtonState, now_ms: u64, debounce_ms: u64, on_press: impl Fn()) {
     // Access button state within critical section
     critical_section::with(|cs| {
@@ -69,7 +70,7 @@ pub fn handle_button_generic(btn: &ButtonState, now_ms: u64, debounce_ms: u64, o
     });
 }
 
-#[inline(always)]
+#[esp_hal::ram]
 pub fn handle_encoder_generic(encoder: &RotaryState) {
     // Access encoder state within critical section
     critical_section::with(|cs| {

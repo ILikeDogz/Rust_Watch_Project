@@ -17,8 +17,8 @@
 
 use core::{fmt, mem};
 
-use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::{
+    primitives::Rectangle,
     pixelcolor::Rgb565,
     prelude::*,
 };
@@ -28,11 +28,15 @@ use embedded_hal::{
 };
 
 use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
-use esp_hal::gpio::Output;
-use esp_hal::spi::master::Spi;
-use esp_hal::Blocking;
+
+use esp_hal::{
+    Blocking,
+    gpio::Output,
+    spi::master::Spi,
+};
 
 use embedded_hal::spi::Operation;
+use embedded_graphics::prelude::IntoStorage;
 
 extern crate alloc;
 
@@ -45,8 +49,6 @@ const RAMWRC_OPCODE: u8 = 0x3C;
 // Use a small CPU staging buffer per call (HAL will copy it into DMA TX buffer)
 const STAGE_BYTES: usize = 2048; // safe on stack; adjust if needed
 const DMA_CHUNK_SIZE: usize = 32*1023; // 32*1023=32768 minus some overhead
-
-use embedded_graphics::prelude::IntoStorage;
 
 /// Low-level command send helper, for debugging
 // #[esp_hal::ram] // run from IRAM
@@ -570,15 +572,13 @@ where
     }
 
     // ---- Low-level helpers ----
-
-    // #[inline(always)]
+    #[inline(always)]
     fn cmd(&mut self, cmd: u8, data: &[u8])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
         if data.is_empty() {
             self.spi.write(&hdr).map_err(|e| {
-                // println!("spi.write(CMD sh) err: {:?}", e);
                 Co5300Error::Spi(e)
             })
         } else {
@@ -586,7 +586,6 @@ where
                 Operation::Write(&hdr),
                 Operation::Write(data),
             ]).map_err(|e| {
-                // println!("spi.tx(CMD sh+data) err: {:?}", e);
                 Co5300Error::Spi(e)
             })
         }

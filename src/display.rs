@@ -14,16 +14,15 @@ use esp_hal::{
     spi::Mode,
     time::Rate,
     Blocking,
+    timer::systimer::{SystemTimer, Unit},
 };
 
-use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
+use embedded_hal_bus::spi::ExclusiveDevice;
 
 use crate::wiring::DisplayPins;
 
-use esp_hal::timer::systimer::{SystemTimer, Unit};
 
 // A delay provider that uses the ESP32-S3's high-resolution SystemTimer.
-// This is the correct way to implement blocking delays in esp-hal 1.0.
 pub struct TimerDelay;
 
 impl embedded_hal::delay::DelayNs for TimerDelay {
@@ -120,7 +119,7 @@ mod gc9a01_backend {
         // SPI device + DisplayInterface (needs D/C and a buffer)
         let spi_dev = ExclusiveDevice::new(spi, lcd_cs, NoDelay).unwrap();
         let di = SpiInterface::new(spi_dev, lcd_dc, display_buf);
-        let mut delay = SpinDelay;
+        let mut delay = TimerDelay;
 
         // Build GC9A01
         DisplayBuilder::new(GC9A01, di)
@@ -141,12 +140,12 @@ mod gc9a01_backend {
 #[cfg(feature = "esp32s3-disp143Oled")]
 mod co5300_backend {
     use super::*;
-    use embedded_graphics::pixelcolor::Rgb565;
-    use embedded_graphics::prelude::RgbColor;
     use embedded_hal::delay::DelayNs;
-    use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
-    use esp_hal::dma_buffers;
-    use esp_hal::spi::master::{Spi, SpiDmaBus};
+    use esp_hal::{
+        dma::{DmaRxBuf, DmaTxBuf},
+        dma_buffers,
+        spi::master::{Spi, SpiDmaBus},
+    };
     use crate::co5300::{self, Co5300Display};
 
     // Bus is now `SpiDmaBus`, not `SpiDma`
@@ -167,8 +166,8 @@ mod co5300_backend {
             clk,
             do0,
             // do1,
-            do2: _,
-            do3: _,
+            // do2: _,
+            // do3: _,
             rst,
             mut en,
             tp_sda: _,

@@ -29,7 +29,15 @@ use esp_backtrace as _;
 
 // Embedded-graphics
 use embedded_graphics::{
-    Drawable, draw_target::DrawTarget, image::{Image, ImageRaw, ImageRawBE}, mono_font::{MonoTextStyle, MonoTextStyleBuilder, ascii::{FONT_6X10, FONT_10X20}}, pixelcolor::Rgb565, prelude::{OriginDimensions, Point, Primitive, RgbColor, Size, IntoStorage}, primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, text::{Alignment, Baseline, Text}
+    Drawable, 
+    draw_target::DrawTarget, 
+    image::{Image, ImageRaw, ImageRawBE}, 
+    mono_font::{MonoTextStyle, MonoTextStyleBuilder, 
+    ascii::{FONT_6X10, FONT_10X20}}, 
+    pixelcolor::Rgb565, 
+    prelude::{OriginDimensions, Point, Primitive, RgbColor, Size, IntoStorage}, 
+    primitives::{Circle, PrimitiveStyle, Rectangle, Triangle}, 
+    text::{Alignment, Baseline, Text}
 };
 
 use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
@@ -276,14 +284,13 @@ impl UiState {
         Self { page: Page::Main(MainMenuState::Home), dialog: None }
     }
 
-    // Select/enter (Button 2)
+    // Select/enter (Button 2) 
     pub fn select(self) -> Self {
         if let Some(_) = self.dialog {
             return Self { page: self.page, dialog: None };
         }
         match self.page {
             Page::Main(state) => {
-                // Enter a subpage from the top-level: remember current main selection
                 nav_push(Page::Main(state));
                 let page = match state {
                     MainMenuState::Home        => Page::Omnitrix(OmnitrixState::Alien1),
@@ -292,13 +299,22 @@ impl UiState {
                 };
                 Self { page, dialog: None }
             }
-            // Inside Settings: treat select as no-op (or open a dialog if you add one)
             Page::Settings(_) => Self { page: self.page, dialog: None },
-            // Inside Omnitrix: select opens Transform dialog; do not push page history
-            Page::Omnitrix(_) => Self { page: self.page, dialog: Some(Dialog::TransformPage) },
+            Page::Omnitrix(_) => Self { page: self.page, dialog: None }, // changed
             Page::Info => Self { page: self.page, dialog: None },
         }
     }
+
+    // Omnitrix transform (Button 3)
+    pub fn transform(self) -> Self {
+        // Only if on Omnitrix and no dialog already
+        if matches!(self.page, Page::Omnitrix(_)) && self.dialog.is_none() {
+            Self { page: self.page, dialog: Some(Dialog::TransformPage) }
+        } else {
+            self
+        }
+    }
+
 }
 
 // helper function to draw centered text

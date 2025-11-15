@@ -18,16 +18,12 @@
 // The macro automatically fills in the fields. 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-use esp32s3_tests::display::setup_display;
-use esp32s3_tests::ui::MainMenuState;
-use esp32s3_tests::ui::Page;
-use esp32s3_tests::wiring::init_board_pins;
-use esp32s3_tests::wiring::BoardPins;
-
-use esp32s3_tests::input::{ButtonState, RotaryState, handle_button_generic, handle_encoder_generic};
-
-use esp32s3_tests::ui::{UiState, update_ui, cache_hourglass_logo};
-
+use esp32s3_tests::{
+    display::setup_display,
+    wiring::{init_board_pins, BoardPins},
+    input::{ButtonState, RotaryState, handle_button_generic, handle_encoder_generic},
+    ui::{MainMenuState, Page, UiState, update_ui, cache_hourglass_logo},
+};
 
 use esp_backtrace as _;
 use core::cell::{Cell, RefCell};
@@ -40,7 +36,11 @@ use esp_hal::{
     ram,
     Config,
     timer::systimer::{SystemTimer, Unit},
+    psram,
 };
+
+extern crate alloc;
+use alloc::{boxed::Box, vec};
 
 // Embedded-graphics
 use embedded_graphics::{
@@ -50,19 +50,14 @@ use embedded_graphics::{
 };
 
 
-// use esp_hal::spi::FullDuplexMode;
-
 #[cfg(feature = "devkit-esp32s3-disp128")]
 #[ram]
 static mut DISPLAY_BUF: [u8; 1024] = [0; 1024];
 
-extern crate alloc;
-use alloc::{boxed::Box, vec};
-use esp_hal::psram;
-
 use core::sync::atomic::{AtomicBool, Ordering};
 static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
 static BUTTON2_PRESSED: AtomicBool = AtomicBool::new(false);
+static BUTTON3_PRESSED: AtomicBool = AtomicBool::new(false);
 
 // Shared resources for Button
 static BUTTON1: ButtonState<'static> = ButtonState {
@@ -79,6 +74,14 @@ static BUTTON2: ButtonState<'static> = ButtonState {
     last_level: Mutex::new(Cell::new(true)),
     last_interrupt: Mutex::new(Cell::new(0)),
     name: "Button2",
+};
+
+static BUTTON3: ButtonState<'static> = ButtonState {
+    input: Mutex::new(RefCell::new(None)),
+    // led: Mutex::new(RefCell::new(None)),
+    last_level: Mutex::new(Cell::new(true)),
+    last_interrupt: Mutex::new(Cell::new(0)),
+    name: "Button3",
 };
 
 // Shared resources for rotary encoder
@@ -120,6 +123,11 @@ fn handler() {
         BUTTON2_PRESSED.store(true, Ordering::Relaxed);
     });
 
+    // Button 3: JUST SET THE FLAG
+    handle_button_generic(&BUTTON3, now_ms, DEBOUNCE_MS, || {
+        BUTTON3_PRESSED.store(true, Ordering::Relaxed);
+    });
+
     // Encoder logic is fine, it's just math
     handle_encoder_generic(&ROTARY);
 }
@@ -150,7 +158,7 @@ fn main() -> ! {
 
     // Destructure pins for easier access
     let BoardPins {
-        btn1, btn2,
+        btn1, btn2, btn3,
         enc_clk, enc_dt,
         display_pins,
     } = pins;
@@ -169,6 +177,9 @@ fn main() -> ! {
 
         BUTTON2.input.borrow_ref_mut(cs).replace(btn2);
         BUTTON2.last_level.borrow(cs).set(true);
+
+        BUTTON3.input.borrow_ref_mut(cs).replace(btn3);
+        BUTTON3.last_level.borrow(cs).set(true);
 
         ROTARY.clk.borrow_ref_mut(cs).replace(enc_clk);
         ROTARY.dt.borrow_ref_mut(cs).replace(enc_dt);
@@ -195,8 +206,7 @@ fn main() -> ! {
         }
     };
 
-
-
+    // -------------------- UI Init --------------------
     my_display.clear(Rgb565::BLACK).ok();
 
     #[cfg(feature = "esp32s3-disp143Oled")]
@@ -222,7 +232,10 @@ fn main() -> ! {
         let _n = precache_all();
         // esp_println::println!("Precached {} Omnitrix images", n);
     }
+
+
     
+    // // -------------------- Demo Sequence --------------------
     // // Demo sequence timing
     // let demo_start_ms = {
     //     let t = SystemTimer::unit_value(Unit::Unit0);
@@ -248,74 +261,75 @@ fn main() -> ! {
     // let mut demo_state = DemoState::Home;
 
     // loop {
-    //     let now_ms = {
-    //         let t = SystemTimer::unit_value(Unit::Unit0);
-    //         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
-    //     };
-    //     let rel = now_ms - demo_start_ms; // relative elapsed
+        // let now_ms = {
+        //     let t = SystemTimer::unit_value(Unit::Unit0);
+        //     t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+        // };
+        // let rel = now_ms - demo_start_ms; // relative elapsed
 
-    //     match demo_state {
-    //         DemoState::Home => {
-    //             if rel > 1000 {
-    //                 critical_section::with(|cs| {
-    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1), dialog: None });
-    //                 });
-    //                 demo_state = DemoState::Omnitrix;
-    //             }
-    //         }
-    //         DemoState::Omnitrix => {
-    //             if rel > 1500 {
-    //                 demo_state = DemoState::Rotating { idx: 1, last_ms: rel };
-    //             }
-    //         }
-    //         DemoState::Rotating { idx, last_ms } => {
-    //             // Rotate every 3000 ms (comment and code agree now)
-    //             if rel > last_ms + 3000 {
-    //                 let next_state = match idx {
-    //                     1 => esp32s3_tests::ui::OmnitrixState::Alien2,
-    //                     2 => esp32s3_tests::ui::OmnitrixState::Alien3,
-    //                     3 => esp32s3_tests::ui::OmnitrixState::Alien4,
-    //                     4 => esp32s3_tests::ui::OmnitrixState::Alien5,
-    //                     5 => esp32s3_tests::ui::OmnitrixState::Alien6,
-    //                     6 => esp32s3_tests::ui::OmnitrixState::Alien7,
-    //                     7 => esp32s3_tests::ui::OmnitrixState::Alien8,
-    //                     8 => esp32s3_tests::ui::OmnitrixState::Alien9,
-    //                     9 => esp32s3_tests::ui::OmnitrixState::Alien10,
-    //                     _ => esp32s3_tests::ui::OmnitrixState::Alien1,
-    //                 };
-    //                 critical_section::with(|cs| {
-    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(next_state), dialog: None });
-    //                 });
-    //                 if idx < 9 {
-    //                     demo_state = DemoState::Rotating { idx: idx + 1, last_ms: rel };
-    //                 } else {
-    //                     demo_state = DemoState::BackToHome { last_ms: rel };
-    //                 }
-    //             }
-    //         }
-    //         DemoState::BackToHome { last_ms } => {
-    //             if rel > last_ms + 1500 {
-    //                 critical_section::with(|cs| {
-    //                     UI_STATE.borrow(cs).set(UiState { page: Page::Main(MainMenuState::Home), dialog: None });
-    //                 });
-    //                 demo_state = DemoState::Done;
-    //             }
-    //         }
-    //         DemoState::Done => { /* stop or loop again */ }
-    //     }
+        // match demo_state {
+        //     DemoState::Home => {
+        //         if rel > 1000 {
+        //             critical_section::with(|cs| {
+        //                 UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1), dialog: None });
+        //             });
+        //             demo_state = DemoState::Omnitrix;
+        //         }
+        //     }
+        //     DemoState::Omnitrix => {
+        //         if rel > 1500 {
+        //             demo_state = DemoState::Rotating { idx: 1, last_ms: rel };
+        //         }
+        //     }
+        //     DemoState::Rotating { idx, last_ms } => {
+        //         // Rotate every 3000 ms (comment and code agree now)
+        //         if rel > last_ms + 3000 {
+        //             let next_state = match idx {
+        //                 1 => esp32s3_tests::ui::OmnitrixState::Alien2,
+        //                 2 => esp32s3_tests::ui::OmnitrixState::Alien3,
+        //                 3 => esp32s3_tests::ui::OmnitrixState::Alien4,
+        //                 4 => esp32s3_tests::ui::OmnitrixState::Alien5,
+        //                 5 => esp32s3_tests::ui::OmnitrixState::Alien6,
+        //                 6 => esp32s3_tests::ui::OmnitrixState::Alien7,
+        //                 7 => esp32s3_tests::ui::OmnitrixState::Alien8,
+        //                 8 => esp32s3_tests::ui::OmnitrixState::Alien9,
+        //                 9 => esp32s3_tests::ui::OmnitrixState::Alien10,
+        //                 _ => esp32s3_tests::ui::OmnitrixState::Alien1,
+        //             };
+        //             critical_section::with(|cs| {
+        //                 UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(next_state), dialog: None });
+        //             });
+        //             if idx < 9 {
+        //                 demo_state = DemoState::Rotating { idx: idx + 1, last_ms: rel };
+        //             } else {
+        //                 demo_state = DemoState::BackToHome { last_ms: rel };
+        //             }
+        //         }
+        //     }
+        //     DemoState::BackToHome { last_ms } => {
+        //         if rel > last_ms + 1500 {
+        //             critical_section::with(|cs| {
+        //                 UI_STATE.borrow(cs).set(UiState { page: Page::Main(MainMenuState::Home), dialog: None });
+        //             });
+        //             demo_state = DemoState::Done;
+        //         }
+        //     }
+        //     DemoState::Done => { /* stop or loop again */ }
+        // }
 
-    //     let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
-    //     if ui_state != last_ui_state {
-    //         let t0 = SystemTimer::unit_value(Unit::Unit0);
-    //         update_ui(&mut my_display, ui_state);
-    //         let t1 = SystemTimer::unit_value(Unit::Unit0);
-    //         esp_println::println!("UI update: {} us", to_us(t0, t1));
-    //         last_ui_state = ui_state;
-    //     }
+        // let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
+        // if ui_state != last_ui_state {
+        //     let t0 = SystemTimer::unit_value(Unit::Unit0);
+        //     update_ui(&mut my_display, ui_state);
+        //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+        //     esp_println::println!("UI update: {} us", to_us(t0, t1));
+        //     last_ui_state = ui_state;
+        // }
 
-    //     for _ in 0..10000 { core::hint::spin_loop(); }
+        // for _ in 0..10000 { core::hint::spin_loop(); }
     // }
 
+    // -------------------- Main Sequence --------------------
     // Main loop
     loop {
 
@@ -341,6 +355,15 @@ fn main() -> ! {
             critical_section::with(|cs| {
                 let state = UI_STATE.borrow(cs).get();
                 let new_state = state.select();
+                UI_STATE.borrow(cs).set(new_state);
+            });
+        }
+
+        // Button 3 = Transform (exclusive)
+        if BUTTON3_PRESSED.swap(false, Ordering::Acquire) {
+            critical_section::with(|cs| {
+                let state = UI_STATE.borrow(cs).get();
+                let new_state = state.transform(); // use Omnitrix-only dialog
                 UI_STATE.borrow(cs).set(new_state);
             });
         }
