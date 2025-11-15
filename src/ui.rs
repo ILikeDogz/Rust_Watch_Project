@@ -49,30 +49,63 @@ pub const CENTER: i32 = (RESOLUTION / 2) as i32;
 
 // Feature-selected image dimensions (adjust OLED to 466 if you have 466×466 assets)
 
-pub const IMG_W: u32 = 466; // change to 466 if you add 466×466 assets
-pub const IMG_H: u32 = 466; // change to 466 if you add 466×466 assets
+pub const MAX_IMG_W: u32 = 466; 
+pub const MAX_IMG_H: u32 = 466;
+
+pub const IMG_W: u32 = 308;
+pub const IMG_H: u32 = 374;
 
 
 // Compile-time suffix for asset filenames
-macro_rules! res { () => { "466x466" } } // set to "466x466" when you have OLED-sized assets
+macro_rules! res { () => { "308x374" } } // set to "308x374" when you have OLED-sized assets
 
 const OMNI_LIME: Rgb565 = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
 
 // Feature-picked assets
-// static MY_IMAGE: &[u8]    = include_bytes!(concat!("assets/omnitrix_logo_", res!(), "_rgb565_be.raw"));
-static ALIEN1_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien1_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN2_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien2_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN3_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien3_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN4_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien4_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN5_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien5_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN6_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien6_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN7_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien7_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN8_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien8_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN9_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien9_",  res!(), "_rgb565_be.raw.zlib"));
-static ALIEN10_IMAGE: &[u8] = include_bytes!(concat!("assets/alien10_", res!(), "_rgb565_be.raw.zlib"));
+static ALIEN1_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien1_",  res!(), "_rgb565_be.raw"));
+static ALIEN2_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien2_",  res!(), "_rgb565_be.raw"));
+static ALIEN3_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien3_",  res!(), "_rgb565_be.raw"));
+static ALIEN4_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien4_",  res!(), "_rgb565_be.raw"));
+static ALIEN5_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien5_",  res!(), "_rgb565_be.raw"));
+static ALIEN6_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien6_",  res!(), "_rgb565_be.raw"));
+static ALIEN7_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien7_",  res!(), "_rgb565_be.raw"));
+static ALIEN8_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien8_",  res!(), "_rgb565_be.raw"));
+static ALIEN9_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien9_",  res!(), "_rgb565_be.raw"));
+static ALIEN10_IMAGE: &[u8] = include_bytes!(concat!("assets/alien10_", res!(), "_rgb565_be.raw"));
+
+// compressed assets
+// static ALIEN1_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien1_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN2_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien2_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN3_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien3_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN4_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien4_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN5_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien5_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN6_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien6_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN7_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien7_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN8_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien8_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN9_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien9_",  res!(), "_rgb565_be.raw.zlib"));
+// static ALIEN10_IMAGE: &[u8] = include_bytes!(concat!("assets/alien10_", res!(), "_rgb565_be.raw.zlib"));
 
 // Hourglass buffer for decompression
 static HOURGLASS_BUF: Mutex<RefCell<Option<Box<[u8]>>>> = Mutex::new(RefCell::new(None));
+
+// Page kind tracker for optimization
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum PageKind { Main, Settings, Omnitrix, Info }
+
+static LAST_PAGE_KIND: Mutex<RefCell<Option<PageKind>>> = Mutex::new(RefCell::new(None));
+
+static LAST_OMNI_TRANSFORM_ACTIVE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
+
+// Navigation history management
+static NAV_HISTORY: Mutex<RefCell<Vec<Page>>> = Mutex::new(RefCell::new(Vec::new()));
+fn nav_push(p: Page) {
+    critical_section::with(|cs| {
+        NAV_HISTORY.borrow(cs).borrow_mut().push(p);
+    });
+}
+fn nav_pop() -> Option<Page> {
+    critical_section::with(|cs| NAV_HISTORY.borrow(cs).borrow_mut().pop())
+}
 
 // UI State representation
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -105,9 +138,9 @@ pub enum Dialog {
 // States for Main Menu
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MainMenuState {
-    Home,
-    Start,
-    About,
+    Home,          // just show home
+    SettingsApp,   // enter Settings
+    InfoApp,       // enter Info
 }
 
 // States for Settings Menu
@@ -134,32 +167,32 @@ pub enum OmnitrixState {
 }
 
 impl UiState {
-    /// Switch to the next menu (Button 1)
-    pub fn next_menu(self) -> Self {
-        // If a dialog is open, ignore menu switching
-        if self.dialog.is_some() {
-            return self;
-        }
-        let next_page = match self.page {
-            Page::Main(_) => Page::Settings(SettingsMenuState::Volume),
-            Page::Settings(_) => Page::Omnitrix(OmnitrixState::Alien1),
-            Page::Omnitrix(_) => Page::Info,
-            Page::Info => Page::Main(MainMenuState::Home),
-        };
-        Self { page: next_page, dialog: None }
-    }
 
-    /// Move to the next item/state in the current menu (Button 3 or encoder)
+
+    // /// Switch to the next menu (Button 1)
+    // pub fn next_menu(self) -> Self {
+    //     // If a dialog is open, ignore menu switching
+    //     if self.dialog.is_some() {
+    //         return self;
+    //     }
+    //     let next_page = match self.page {
+    //         Page::Main(_) => Page::Settings(SettingsMenuState::Volume),
+    //         Page::Settings(_) => Page::Omnitrix(OmnitrixState::Alien1),
+    //         Page::Omnitrix(_) => Page::Info,
+    //         Page::Info => Page::Main(MainMenuState::Home),
+    //     };
+    //     Self { page: next_page, dialog: None }
+    // }
+
+    // Move to the next item/state in the current layer (rotary CW)
     pub fn next_item(self) -> Self {
-        if self.dialog.is_some() {
-            return self; // Or handle dialog-specific navigation here
-        }
+        if self.dialog.is_some() { return self; }
         let next_page = match self.page {
             Page::Main(state) => {
                 let next = match state {
-                    MainMenuState::Home => MainMenuState::Start,
-                    MainMenuState::Start => MainMenuState::About,
-                    MainMenuState::About => MainMenuState::Home,
+                    MainMenuState::Home        => MainMenuState::SettingsApp,
+                    MainMenuState::SettingsApp => MainMenuState::InfoApp,
+                    MainMenuState::InfoApp     => MainMenuState::Home,
                 };
                 Page::Main(next)
             }
@@ -191,17 +224,15 @@ impl UiState {
         Self { page: next_page, dialog: None }
     }
 
-    /// Move to the previous item/state in the current menu
+    // Move to the previous item/state (rotary CCW)
     pub fn prev_item(self) -> Self {
-        if self.dialog.is_some() {
-            return self; // Or handle dialog-specific navigation here
-        }
+        if self.dialog.is_some() { return self; }
         let prev_page = match self.page {
             Page::Main(state) => {
                 let prev = match state {
-                    MainMenuState::Home => MainMenuState::About,
-                    MainMenuState::Start => MainMenuState::Home,
-                    MainMenuState::About => MainMenuState::Start,
+                    MainMenuState::Home        => MainMenuState::InfoApp,
+                    MainMenuState::SettingsApp => MainMenuState::Home,
+                    MainMenuState::InfoApp     => MainMenuState::SettingsApp,
                 };
                 Page::Main(prev)
             }
@@ -233,24 +264,40 @@ impl UiState {
         Self { page: prev_page, dialog: None }
     }
 
-    /// Select current item (Button 2)
+    // Go back (Button 1)
+    pub fn back(self) -> Self {
+        if self.dialog.is_some() {
+            return Self { page: self.page, dialog: None };
+        }
+        if let Some(prev) = nav_pop() {
+            return Self { page: prev, dialog: None };
+        }
+        // Fallback if no history
+        Self { page: Page::Main(MainMenuState::Home), dialog: None }
+    }
+
+    // Select/enter (Button 2)
     pub fn select(self) -> Self {
-        // If a dialog is open, close it and return to the underlying page
         if let Some(_) = self.dialog {
             return Self { page: self.page, dialog: None };
         }
-        // Otherwise, open a dialog based on the current page/item
-        let dialog = match self.page {
-            Page::Main(MainMenuState::Home) => Some(Dialog::HomePage),
-            Page::Main(MainMenuState::Start) => Some(Dialog::StartPage),
-            Page::Main(MainMenuState::About) => Some(Dialog::AboutPage),
-            Page::Settings(SettingsMenuState::Volume) => Some(Dialog::VolumeAdjust),
-            Page::Settings(SettingsMenuState::Brightness) => Some(Dialog::BrightnessAdjust),
-            Page::Settings(SettingsMenuState::Reset) => Some(Dialog::ResetSelector),
-            Page::Omnitrix(_) => Some(Dialog::TransformPage),
-            Page::Info => None, // Or maybe Some(Dialog::AboutPage)
-        };
-        Self { page: self.page, dialog }
+        match self.page {
+            Page::Main(state) => {
+                // Enter a subpage from the top-level: remember current main selection
+                nav_push(Page::Main(state));
+                let page = match state {
+                    MainMenuState::Home        => Page::Omnitrix(OmnitrixState::Alien1),
+                    MainMenuState::SettingsApp => Page::Settings(SettingsMenuState::Volume),
+                    MainMenuState::InfoApp     => Page::Info,
+                };
+                Self { page, dialog: None }
+            }
+            // Inside Settings: treat select as no-op (or open a dialog if you add one)
+            Page::Settings(_) => Self { page: self.page, dialog: None },
+            // Inside Omnitrix: select opens Transform dialog; do not push page history
+            Page::Omnitrix(_) => Self { page: self.page, dialog: Some(Dialog::TransformPage) },
+            Page::Info => Self { page: self.page, dialog: None },
+        }
     }
 }
 
@@ -313,91 +360,96 @@ pub fn draw_image_bytes(
     }
 }
 
-// Size of one image in bytes
-const SLOT_BYTES: usize = (IMG_W as usize) * (IMG_H as usize) * 2;
-// Global arena: use raw pointer + len to avoid RefCell borrow lifetime issues
-static mut IMAGE_ARENA_PTR: *mut u8 = core::ptr::null_mut();
-static mut IMAGE_ARENA_LEN: usize = 0;
 
-static ARENA_FILLED: Mutex<RefCell<[bool; 10]>> =
-    Mutex::new(RefCell::new([false; 10]));
+const OMNI_MAX: usize = 10;
 
-// Allocate one big contiguous arena for up to `count` images.
-// Returns how many slots actually fit (<= count).
-pub fn init_image_arena(count: usize) -> usize {
-    let want = count.min(10);
-    // Try to reserve total bytes without panicking
-    let mut v = Vec::<u8>::new();
-    let mut ok_slots = want;
-    while ok_slots > 0 {
-        let need = SLOT_BYTES * ok_slots;
-        if v.try_reserve_exact(need).is_ok() {
-            v.resize(need, 0);
-            let leaked: &'static mut [u8] = alloc::boxed::Box::leak(v.into_boxed_slice());
-            unsafe {
-                IMAGE_ARENA_PTR = leaked.as_mut_ptr();
-                IMAGE_ARENA_LEN = leaked.len();
-            }
-            // Mark slots empty
+#[derive(Copy, Clone)]
+struct ImgMeta { w: u32, h: u32 }
+
+// Dimensions table; adjust per asset if not 466x466
+fn omni_dims(s: OmnitrixState) -> ImgMeta {
+    match s {
+        // Example: uncomment and adjust if an asset is 308x374
+        OmnitrixState::Alien1 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien2 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien3 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien4 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien5 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien6 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien7 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien8 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien9 => ImgMeta { w: 308, h: 374 },
+        OmnitrixState::Alien10 => ImgMeta { w: 308, h: 374 },
+        _ => ImgMeta { w: MAX_IMG_W, h: MAX_IMG_H },
+    }
+}
+
+static OMNI_BYTES: Mutex<RefCell<[Option<&'static [u8]>; OMNI_MAX]>> =
+    Mutex::new(RefCell::new([None; OMNI_MAX])); // Cached image byte slices
+
+static OMNI_META: Mutex<RefCell<[ImgMeta; OMNI_MAX]>> =
+    Mutex::new(RefCell::new([ImgMeta { w: IMG_W, h: IMG_H }; OMNI_MAX])); // Cached image metadata
+
+// Pre-cache one state; returns true on success
+pub fn precache_one(s: OmnitrixState) -> bool {
+    let idx = omni_index(s);
+    // Already cached?
+    if critical_section::with(|cs| OMNI_BYTES.borrow(cs).borrow()[idx].is_some()) {
+        return true;
+    }
+    let meta = omni_dims(s);
+    let need = (meta.w as usize) * (meta.h as usize) * 2;
+    let src = asset_for(s);
+
+    // If the asset is already raw RGB565 of the right size, copy it to PSRAM.
+    if src.len() == need {
+        let mut v = alloc::vec![0u8; need];
+        v.copy_from_slice(src);
+        let leaked: &'static mut [u8] = alloc::boxed::Box::leak(v.into_boxed_slice());
+        critical_section::with(|cs| {
+            OMNI_BYTES.borrow(cs).borrow_mut()[idx] = Some(leaked as &'static [u8]);
+            OMNI_META.borrow(cs).borrow_mut()[idx] = meta;
+        });
+        return true;
+    }
+
+    // Otherwise, try to decompress as zlib into the exact size.
+    if let Ok(tmp) = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(src, need) {
+        if tmp.len() == need {
+            let leaked: &'static mut [u8] = alloc::boxed::Box::leak(tmp.into_boxed_slice());
             critical_section::with(|cs| {
-                *ARENA_FILLED.borrow(cs).borrow_mut() = [false; 10];
+                OMNI_BYTES.borrow(cs).borrow_mut()[idx] = Some(leaked as &'static [u8]);
+                OMNI_META.borrow(cs).borrow_mut()[idx] = meta;
             });
-            return ok_slots;
+            return true;
         }
-        ok_slots -= 1;
     }
-    0
+
+    false
 }
 
-// Mark/Check a slot as filled
-fn set_filled(idx: usize) {
-    critical_section::with(|cs| ARENA_FILLED.borrow(cs).borrow_mut()[idx] = true);
-}
-fn is_filled(idx: usize) -> bool {
-    critical_section::with(|cs| ARENA_FILLED.borrow(cs).borrow()[idx])
-}
-
-// Write bytes into a slot (copy). Returns false if arena not ready.
-fn write_slot(idx: usize, src: &[u8]) -> bool {
-    if src.len() != SLOT_BYTES { return false; }
-    let start = idx * SLOT_BYTES;
-    unsafe {
-        if IMAGE_ARENA_PTR.is_null() || start + SLOT_BYTES > IMAGE_ARENA_LEN {
-            return false;
-        }
-        core::ptr::copy_nonoverlapping(src.as_ptr(), IMAGE_ARENA_PTR.add(start), SLOT_BYTES);
+// Pre-cache all (call once at boot)
+pub fn precache_all() -> usize {
+    let mut ok = 0;
+    for s in [
+        OmnitrixState::Alien1, OmnitrixState::Alien2, OmnitrixState::Alien3,
+        OmnitrixState::Alien4, OmnitrixState::Alien5, OmnitrixState::Alien6,
+        OmnitrixState::Alien7, OmnitrixState::Alien8, OmnitrixState::Alien9,
+        OmnitrixState::Alien10,
+    ] {
+        if precache_one(s) { ok += 1; } else { break; }
     }
-    set_filled(idx);
-    true
+    ok
 }
 
-// Decompress one image into its arena slot (bounded). Returns true on success.
-pub fn cache_slot(idx: usize) -> bool {
-    if idx >= 10 || is_filled(idx) { return true; }
-    let state = match idx {
-        0 => OmnitrixState::Alien1, 1 => OmnitrixState::Alien2, 2 => OmnitrixState::Alien3,
-        3 => OmnitrixState::Alien4, 4 => OmnitrixState::Alien5, 5 => OmnitrixState::Alien6,
-        6 => OmnitrixState::Alien7, 7 => OmnitrixState::Alien8, 8 => OmnitrixState::Alien9,
-        _ => OmnitrixState::Alien10,
-    };
-    let z = asset_for(state);
-    let tmp = decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
-        .unwrap_or_default();
-    if tmp.len() != SLOT_BYTES { return false; }
-    write_slot(idx, &tmp)
-}
-
-// Get a read-only slice for a cached image; None if not cached
-fn get_cached_slice(state: OmnitrixState) -> Option<&'static [u8]> {
-    let idx = omni_index(state);
-    if !is_filled(idx) { return None; }
-    let start = idx * SLOT_BYTES;
-    unsafe {
-        if IMAGE_ARENA_PTR.is_null() || start + SLOT_BYTES > IMAGE_ARENA_LEN {
-            return None;
-        }
-        Some(slice::from_raw_parts(IMAGE_ARENA_PTR.add(start), SLOT_BYTES))
-    }
+// Get cached bytes and dims
+fn get_cached_image(s: OmnitrixState) -> Option<(&'static [u8], u32, u32)> {
+    let idx = omni_index(s);
+    critical_section::with(|cs| {
+        let b = OMNI_BYTES.borrow(cs).borrow()[idx]?;
+        let m = OMNI_META.borrow(cs).borrow()[idx];
+        Some((b, m.w, m.h))
+    })
 }
 
 // Map OmnitrixState to a stable index 0..9
@@ -528,38 +580,13 @@ pub fn draw_hourglass_logo(
             buf[off + 1] = px[1];
         }
     }
-    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::co5300::DisplayType<'static>>() {
-        // Temporarily enable even-alignment for the controller's fast blit
-        // co.set_align_even(true);
+    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
         let _ = co.blit_rect_be_fast(0, 0, RESOLUTION as u16, RESOLUTION as u16, &buf);
-        // co.set_align_even(false);
         return;
     }
     let raw = ImageRawBE::<Rgb565>::new(&buf, size as u32);
     let _ = Image::new(&raw, Point::new(0, 0)).draw(disp);
 }
-
-
-fn draw_diamond_bg(disp: &mut impl PanelRgb565, color: Rgb565, clear_bg: bool) {
-    if clear_bg { let _ = disp.clear(Rgb565::BLACK); }
-    let size = RESOLUTION as i32;
-    let cy = size / 2;
-
-    // Draw diamond with scanline spans: width grows to center, then shrinks.
-    for y in 0..size {
-        let up = if y <= cy { y } else { size - 1 - y };
-        let width = (up * 2 + 1).clamp(1, size); // odd widths look centered
-        let left = ((size - width) / 2).max(0);
-        let _ = Rectangle::new(
-            Point::new(left, y),
-            Size::new(width as u32, 1),
-        )
-        .into_styled(embedded_graphics::primitives::PrimitiveStyle::with_fill(color))
-        .draw(disp);
-    }
-}
-
-
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
@@ -567,6 +594,37 @@ pub fn update_ui(
     state: UiState,
 )
 {
+    // Clear when:
+    // - entering Omnitrix from another page, OR
+    // - exiting Transform dialog while staying in Omnitrix
+    let current_kind = match state.page {
+        Page::Main(_)     => PageKind::Main,
+        Page::Settings(_) => PageKind::Settings,
+        Page::Omnitrix(_) => PageKind::Omnitrix,
+        Page::Info        => PageKind::Info,
+    };
+    let current_transform_active =
+        matches!(state.page, Page::Omnitrix(_)) &&
+        matches!(state.dialog, Some(Dialog::TransformPage));
+
+    let should_clear = critical_section::with(|cs| {
+        let mut last_kind = LAST_PAGE_KIND.borrow(cs).borrow_mut();
+        let mut last_tx   = LAST_OMNI_TRANSFORM_ACTIVE.borrow(cs).borrow_mut();
+
+        let entering_omni = current_kind == PageKind::Omnitrix && *last_kind != Some(PageKind::Omnitrix);
+        let exiting_transform = (*last_tx) && current_kind == PageKind::Omnitrix && !current_transform_active;
+
+        // update trackers for next frame
+        *last_kind = Some(current_kind);
+        *last_tx = current_transform_active;
+
+        entering_omni || exiting_transform
+    });
+
+    if should_clear {
+        let _ = disp.clear(Rgb565::BLACK);
+    }
+
     if let Some(dialog) = state.dialog {
         match dialog {
             Dialog::VolumeAdjust =>
@@ -582,6 +640,7 @@ pub fn update_ui(
             Dialog::AboutPage =>
                 draw_text(disp, "About Page (TEMP)", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true),
             Dialog::TransformPage => {
+                // show transform overlay; next frame (when dismissed) will clear due to logic above
                 disp.clear(OMNI_LIME).ok();
             }
         }
@@ -595,22 +654,21 @@ pub fn update_ui(
                     if let Some(buf) = get_hourglass_logo() {
                         draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
                     } else {
-                        // Fallback if not cached
                         cache_hourglass_logo(OMNI_LIME, Rgb565::BLACK);
                         if let Some(buf) = get_hourglass_logo() {
                             draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
                         }
                     }
-                    // draw_hourglass_logo(disp, OMNI_LIME, Rgb565::BLACK, false);
                 }
-                MainMenuState::Start => {
-                    draw_text(disp, "Main: Start", Rgb565::WHITE, Rgb565::GREEN, CENTER, CENTER, true);
+                MainMenuState::SettingsApp => {
+                    draw_text(disp, "Settings", Rgb565::WHITE, Rgb565::BLUE, CENTER, CENTER, true);
                 }
-                MainMenuState::About => {
-                    draw_text(disp, "Main: About", Rgb565::WHITE, Rgb565::GREEN, CENTER, CENTER, true);
+                MainMenuState::InfoApp => {
+                    draw_text(disp, "Info", Rgb565::WHITE, Rgb565::CYAN, CENTER, CENTER, true);
                 }
             }
         }
+
         Page::Settings(settings_state) => {
             let (msg, fg, bg) = match settings_state {
                 SettingsMenuState::Volume     => ("Settings: Volume", Rgb565::YELLOW, Rgb565::BLUE),
@@ -619,46 +677,15 @@ pub fn update_ui(
             };
             draw_text(disp, msg, fg, bg, CENTER, CENTER, true);
         }
-        // Page::Omnitrix(omnitrix_state) => {
-        //     let (msg, fg, bg) = match omnitrix_state {
-        //         OmnitrixState::Alien1  => ("Omnitrix: Alien 1", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien2  => ("Omnitrix: Alien 2", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien3  => ("Omnitrix: Alien 3", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien4  => ("Omnitrix: Alien 4", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien5  => ("Omnitrix: Alien 5", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien6  => ("Omnitrix: Alien 6", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien7  => ("Omnitrix: Alien 7", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien8  => ("Omnitrix: Alien 8", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien9  => ("Omnitrix: Alien 9", Rgb565::BLACK, Rgb565::WHITE),
-        //         OmnitrixState::Alien10 => ("Omnitrix: Alien 10", Rgb565::BLACK, Rgb565::WHITE),
-        //     };
-        //     draw_text(disp, msg, fg, bg, CENTER, CENTER, true);
-        // }
+
         Page::Omnitrix(omnitrix_state) => {
-            let (_msg, image) = match omnitrix_state {
-                OmnitrixState::Alien1  => ("Omnitrix: Alien 1", ALIEN1_IMAGE),
-                OmnitrixState::Alien2  => ("Omnitrix: Alien 2", ALIEN2_IMAGE),
-                OmnitrixState::Alien3  => ("Omnitrix: Alien 3", ALIEN3_IMAGE),
-                OmnitrixState::Alien4  => ("Omnitrix: Alien 4", ALIEN4_IMAGE),
-                OmnitrixState::Alien5  => ("Omnitrix: Alien 5", ALIEN5_IMAGE),
-                OmnitrixState::Alien6  => ("Omnitrix: Alien 6", ALIEN6_IMAGE),
-                OmnitrixState::Alien7  => ("Omnitrix: Alien 7", ALIEN7_IMAGE),
-                OmnitrixState::Alien8  => ("Omnitrix: Alien 8", ALIEN8_IMAGE),
-                OmnitrixState::Alien9  => ("Omnitrix: Alien 9", ALIEN9_IMAGE),
-                OmnitrixState::Alien10 => ("Omnitrix: Alien 10", ALIEN10_IMAGE),
-            };
-            if let Some(bytes) = get_cached_slice(omnitrix_state) {
-                draw_image_bytes(disp, bytes, IMG_W, IMG_H, false);
-            } else {
-                // Fallback if precache failed
-                let z = asset_for(omnitrix_state);
-                let tmp = decompress_to_vec_zlib_with_limit(z, SLOT_BYTES)
-                    .unwrap_or_default();
-                // Draw if valid
-                if tmp.len() == SLOT_BYTES {
-                    draw_image_bytes(disp, &tmp, IMG_W, IMG_H, false);
-                    // Store into arena (copy) to avoid re-decompress
-                    let _ = write_slot(omni_index(omnitrix_state), &tmp);
+            // Removed per-alien clear; handled by page transition above
+            if let Some((bytes, w, h)) = get_cached_image(omnitrix_state) {
+                draw_image_bytes(disp, bytes, w, h, false);
+                // esp_println::println!("Omnitrix: drew cached image");
+            } else if precache_one(omnitrix_state) {
+                if let Some((bytes, w, h)) = get_cached_image(omnitrix_state) {
+                    draw_image_bytes(disp, bytes, w, h, false);
                 }
             }
         }

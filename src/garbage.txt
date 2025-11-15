@@ -1,0 +1,540 @@
+use embedded_graphics::{
+prelude::*,
+primitives::{Rectangle, Circle, Line, PrimitiveStyle, PrimitiveStyleBuilder},
+mono_font::{ascii::FONT_6X10, MonoTextStyle},
+text::{Text, Alignment},
+};
+
+use embedded_graphics::Pixel;
+
+   
+    // Clear display
+    // my_display.clear(Rgb565::BLACK).ok();
+
+
+    // // quick tests
+    // let ox = 273i32;  // odd
+    // let oy = 241i32;  // odd
+    // let ww = 77i32;  // odd
+    // let hh = 39i32;  // odd
+
+    // let it = (0..hh).flat_map(|dy| {
+    //     (0..ww).map(move |dx| {
+    //         let x = ox + dx;
+    //         let y = oy + dy;
+    //         let r = ((dx as u32 * 31) / (ww as u32)).min(31) as u8;
+    //         let g = ((dy as u32 * 63) / (hh as u32)).min(63) as u8;
+    //         let b = (31 - r) as u8;
+    //         Pixel(Point::new(x, y), Rgb565::new(r, g, b))
+    //     })
+    // });
+    // my_display.draw_iter(it).ok();
+
+    // let ox = 200i32;
+    // let oy = 60i32;
+    // let w  = 40i32;
+    // let h  = 40i32;
+
+    // let it = (0..h).flat_map(|dy| {
+    //     (0..w).filter_map(move |dx| {
+    //         let x = ox + dx;
+    //         let y = oy + dy;
+    //         let on = ((dx ^ dy) & 1) == 0;
+    //         if on {
+    //             Some(Pixel(Point::new(x, y), Rgb565::WHITE))
+    //         } else {
+    //             None
+    //         }
+    //     })
+    // });
+    // my_display.draw_iter(it).ok();
+
+    // let ox = 265i32;
+    // let oy = 255i32;
+    // let w  = 21i32; // odd
+    // let h  = 17i32; // odd
+
+    // let it = (0..h).flat_map(|dy| {
+    //     (0..w).map(move |dx| {
+    //         let x = ox + dx;
+    //         let y = oy + dy;
+    //         Pixel(Point::new(x, y), Rgb565::RED)
+    //     })
+    // });
+    // my_display.draw_iter(it).ok();
+
+    // // Top-left 9×7 at (1,1)
+    // let it1 = (0..331i32).flat_map(|dy| {
+    //     (0..49i32).map(move |dx| 
+    //         Pixel(Point::new(1 + dx, 1 + dy), Rgb565::GREEN))
+    // });
+    // my_display.draw_iter(it1).ok();
+
+    // // Bottom-right 11×5 ending at panel edge
+    // let (width, height) = my_display.size();
+    // let px_w = width as i32;
+    // let px_h = height as i32;
+
+    // let w = 81i32; // odd
+    // let h = 81i32;  // odd
+    // let x1 = px_w - 1;
+    // let y1 = px_h - 1;
+    // let ox = x1 - w + 1;
+    // let oy = y1 - h + 1;
+
+    // let it2 = (0..h).flat_map(|dy| {
+    //     (0..w).map(move |dx| Pixel(Point::new(ox + dx, oy + dy), Rgb565::MAGENTA))
+    // });
+    // my_display.draw_iter(it2).ok();
+
+    // // use embedded_graphics::pixelcolor::Rgb565;
+
+    // // // Bulk fill stripes every 32 rows (should all appear)
+    // // for y in (0..466u16).step_by(32) {
+    // //     let _ = my_display.fill_rect_solid(0, y, 466, 2, Rgb565::new(0,31,0));
+    // // }
+    // // // Bulk fill stripes every 32 cols
+    // // for x in (0..466u16).step_by(32) {
+    // //     let _ = my_display.fill_rect_solid(x, 0, 2, 466, Rgb565::new(0,0,31));
+    // // }
+
+    // // Per-pixel overlay (white dots) to exercise tile path
+    // for y in (0..466u16).step_by(16) {
+    //     for x in (0..466u16).step_by(16) {
+    //         my_display.draw_iter(core::iter::once(
+    //             embedded_graphics::Pixel(
+    //                 embedded_graphics::prelude::Point::new(x as i32, y as i32),
+    //                 Rgb565::RED
+    //             )
+    //         )).ok();
+    //     }
+    // }
+
+    
+    // let x0 = 127i32; // can be odd or even
+    // let y0 = 121i32;
+    // let h: i32 = 59i32;
+
+    // let it = (0..h).flat_map(|dy| {
+    //     let y = y0 + dy;
+    //     [
+    //         Pixel(Point::new(x0, y),     Rgb565::RED),
+    //         Pixel(Point::new(x0 + 1, y), Rgb565::YELLOW),
+    //     ]
+    // });
+    // my_display.draw_iter(it).ok();
+
+    // let x0 = 127i32; // can be odd or even
+    // let y0 = 185i32;
+    // let h: i32 = 59i32;
+
+    // let it = (0..h).flat_map(|dy| {
+    //     let y = y0 + dy;
+    //     [
+    //         Pixel(Point::new(x0, y),     Rgb565::RED),
+    //         // Pixel(Point::new(x0 + 1, y), Rgb565::YELLOW),
+    //     ]
+    // });
+    // my_display.draw_iter(it).ok();
+
+    // let x0 = 127i32; // can be odd or even
+    // let y0 = 251i32;
+    // let h: i32 = 59i32;
+
+    // let it = (0..h).flat_map(|dy| {
+    //     let y = y0 + dy;
+    //     [
+    //         // Pixel(Point::new(x0, y),     Rgb565::RED),
+    //         Pixel(Point::new(x0 + 1, y), Rgb565::YELLOW),
+    //     ]
+    // });
+    // my_display.draw_iter(it).ok();
+
+    // let it = core::iter::once(Pixel(Point::new(179, 183), Rgb565::RED));
+    // my_display.draw_iter(it).ok();
+
+
+    // use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
+    // use embedded_graphics::image::{ImageRawBE, Image};
+    // use embedded_graphics::prelude::*;
+    // use esp_hal::timer::systimer::{SystemTimer, Unit};
+
+    
+    // // Helper: ticks -> microseconds
+    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
+    // let to_us = |t0: u64, t1: u64| -> u64 {
+    //     let dt = t1.saturating_sub(t0);
+    //     (dt.saturating_mul(1_000_000)) / ticks_per_s
+    // };
+
+    // let tb0 = SystemTimer::unit_value(Unit::Unit0);
+    // my_display.clear(Rgb565::RED).ok();
+    // let tb1 = SystemTimer::unit_value(Unit::Unit0);
+    // esp_println::println!("Clear: {} us", to_us(tb0, tb1));
+
+    
+
+    // const W: u32 = 466;
+    // const H: u32 = 466;
+    // let bytes1: u64 = (W as u64) * (H as u64) * 2;
+
+    // // --- Image 1 ---
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+
+    // let z1: &[u8] = include_bytes!("../assets/alien2_466x466_rgb565_be.raw.zlib");
+    // let raw1 = decompress_to_vec_zlib_with_limit(z1, (W * H * 2) as usize).unwrap_or_default();
+
+    // let t1 = SystemTimer::unit_value(Unit::Unit0);
+
+    // if raw1.len() == (W * H * 2) as usize {
+    //     // Draw (embedded-graphics will prefer fill_contiguous)
+    //     let raw_img: ImageRawBE<Rgb565> = ImageRawBE::new(&raw1, W);
+    //     let _ = Image::new(&raw_img, Point::new(0, 0)).draw(&mut my_display);
+    //     // // Direct one-shot blit without building a scratch Vec or using e-g.
+    // }
+
+    // let t2 = SystemTimer::unit_value(Unit::Unit0);
+
+    // let decomp_us1 = to_us(t0, t1);
+    // let draw_us1   = to_us(t1, t2);
+    // let kbps1 = (bytes1.saturating_mul(1_000_000) / draw_us1) / 1024;
+
+    // esp_println::println!(
+    //     "Image1 (ImageRawBE), data size {} decompress: {} us, draw: {} us ({} KiB/s)",
+    //     bytes1, decomp_us1, draw_us1, kbps1
+    // );
+
+
+    // // --- Image 3: blit_rect_be_fast (alien4) ---
+    // let t6 = SystemTimer::unit_value(Unit::Unit0);
+
+    // let z3: &[u8] = include_bytes!("../assets/alien4_466x466_rgb565_be.raw.zlib");
+    // let raw3 = decompress_to_vec_zlib_with_limit(z3, (W * H * 2) as usize).unwrap_or_default();
+
+    // let t7 = SystemTimer::unit_value(Unit::Unit0);
+
+    // if raw3.len() == (W * H * 2) as usize {
+    //     // Full-screen rect at (0,0). Change x,y,w,h to test sub-rect throughput.
+    //     let _ = my_display.blit_rect_be_fast(0, 0, W as u16, H as u16, &raw3);
+    // }
+
+    // let t8 = SystemTimer::unit_value(Unit::Unit0);
+
+    // let decomp_us3 = to_us(t6, t7);
+    // let draw_us3   = to_us(t7, t8);
+    // let kbps3 = (bytes1.saturating_mul(1_000_000) / draw_us3) / 1024;
+
+    // esp_println::println!(
+    //     "Image3 (blit_rect_be_fast), data size {} decompress: {} us, draw: {} us ({} KiB/s)",
+    //     bytes1, decomp_us3, draw_us3, kbps3
+    // );
+
+    
+    // const IMG_W_OP: u32 = 308;
+    // const IMG_H_OP: u32 = 374;
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien8: &[u8] = include_bytes!("../assets/alien1_308x374_rgb565_be.raw");
+
+    // if alien8.len() == (IMG_W_OP * IMG_H_OP * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien8, IMG_W_OP, IMG_H_OP, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien8 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien8 size mismatch: {}", alien8.len());
+    // }
+
+    // // --- Image 4: blit_full_frame_be_bounced (alien5) ---
+    // let t9 = SystemTimer::unit_value(Unit::Unit0);  
+    // let z4: &[u8] = include_bytes!("../assets/alien4_466x466_rgb565_be.raw.zlib");
+    // let raw4 = decompress_to_vec_zlib_with_limit(z4, (W * H * 2) as usize).unwrap_or_default();
+    // let t10 = SystemTimer::unit_value(Unit::Unit0);
+    // if raw4.len() == (W * H * 2) as usize {
+    //     // Full-screen rect at (0,0). Change x,y,w,h to test sub-rect throughput.
+    //     let _ = my_display.blit_full_frame_be_bounced(&raw4);
+    // }
+    // let t11 = SystemTimer::unit_value(Unit::Unit0);
+    // let decomp_us4 = to_us(t9, t10);
+    // let draw_us4   = to_us(t10, t11);
+    // let kbps4 = (bytes1.saturating_mul(1_000_000) / draw_us4) / 1024;
+    // esp_println::println!(
+    //     "Image4 (bounced) data size {} decompress: {} us, draw: {} us ({} KiB/s)",
+    //     bytes1, decomp_us4, draw_us4, kbps4
+    // );
+    
+
+    // // const OMNI_LIME: Rgb565 = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
+
+
+    // // let tb0 = SystemTimer::unit_value(Unit::Unit0);
+    // // draw_hourglass_logo(&mut my_display, OMNI_LIME, Rgb565::BLACK, false);
+
+    // // let tb1: u64 = SystemTimer::unit_value(Unit::Unit0);
+    // // esp_println::println!("Hourglass draw: {} us", to_us(tb0, tb1));
+    
+    // // Draw a white border rectangle and time it too
+    // let w: u32 = 200;
+    // let h: u32 = 200;
+    // let w2: u32 = w/2;
+    // let h2: u32 = h/2;
+    // let border_style = PrimitiveStyle::with_stroke(Rgb565::RED, 1);
+    // let tb0 = SystemTimer::unit_value(Unit::Unit0);
+
+    // Rectangle::new(Point::new((233 - (w/2)) as i32, (233 - (h/2)) as i32), Size::new(w, h))
+    //     .into_styled(border_style)
+    //     .draw(&mut my_display)
+    //     .ok();
+    // let tb1 = SystemTimer::unit_value(Unit::Unit0);
+    // Rectangle::new(Point::new((233 - (w/2)) as i32, (233 - (h/2)) as i32), Size::new(w2, h2))
+    //     .into_styled(border_style)
+    //     .draw(&mut my_display)
+    //     .ok();
+
+    // let tb2 = SystemTimer::unit_value(Unit::Unit0);
+
+    // esp_println::println!(
+    //     "Border draw: {} us, upload: {} us",
+    //     to_us(tb0, tb1),
+    //     to_us(tb1, tb2)
+    // );
+
+    // use embedded_graphics::mono_font::ascii::FONT_10X20;
+    // use embedded_graphics::mono_font::MonoTextStyleBuilder;
+    // use embedded_graphics::text::Text;
+    // use embedded_graphics::text::Alignment;
+
+    // let style = MonoTextStyleBuilder::new()
+    //     .font(&FONT_10X20)
+    //     .text_color(Rgb565::WHITE)
+    //     .background_color(Rgb565::BLACK)
+    //     .build();
+
+    // // Circle params
+    // let cx: i32 = 233;
+    // let cy: i32 = 233;
+    // let radius: i32 = 233;
+    // let margin: i32 = 20; // inward padding from edge
+    // // Diagonal offset (≈ 45°) staying inside circle
+    // let diag: i32 = (((radius - margin) as f32) * 0.7071) as i32;
+
+    // // Cardinal + diagonal positions (all inside circle)
+    // let samples = [
+    //     ("CENTER", cx, cy),
+    //     ("TOP",    cx, cy - (radius - margin)),
+    //     ("BOTTOM", cx, cy + (radius - margin)),
+    //     ("LEFT",   cx - (radius - margin), cy),
+    //     ("RIGHT",  cx + (radius - margin), cy),
+    //     ("NW",     cx - diag, cy - diag),
+    //     ("NE",     cx + diag, cy - diag),
+    //     ("SW",     cx - diag, cy + diag),
+    //     ("SE",     cx + diag, cy + diag),
+    // ];
+
+    // // Optional: draw circle outline for reference
+    // use embedded_graphics::primitives::{Circle, PrimitiveStyle};
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // let _ = Circle::new(Point::new(0, 0), (radius as u32) * 2)
+    //     .into_styled(PrimitiveStyle::with_stroke(Rgb565::BLUE, 1))
+    //     .draw(&mut my_display);
+    // let t1 = SystemTimer::unit_value(Unit::Unit0);
+    // esp_println::println!("Circle outline draw: {} us", to_us(t0, t1));
+
+    // for (label, x, y) in samples {
+    //     // Skip if outside square bounds (defensive)
+    //     if x < 0 || y < 0 || x >= 466 || y >= 466 { continue; }
+
+    //     // Center alignment keeps label centered on (x,y)
+    //     let t0 = SystemTimer::unit_value(Unit::Unit0);
+    //     let _ = Text::with_alignment(label, Point::new(x, y), style, Alignment::Center)
+    //         .draw(&mut my_display);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Text '{}' draw: {} us @ ({},{})", label, to_us(t0, t1), x, y);
+    // }
+
+
+    // use esp32s3_tests::ui::draw_image_bytes;
+
+    // const IMG_W: u32 = 466;
+    // const IMG_H: u32 = 466;
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien1: &[u8] = include_bytes!("../assets/alien1_466x466_rgb565_be.raw");
+
+    // if alien1.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien1, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien1 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien1 size mismatch: {}", alien1.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien2: &[u8] = include_bytes!("../assets/alien2_466x466_rgb565_be.raw");
+
+    // if alien2.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien2, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien2 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien2 size mismatch: {}", alien2.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien3: &[u8] = include_bytes!("../assets/alien3_466x466_rgb565_be.raw");
+
+    // if alien3.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien3, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien3 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien3 size mismatch: {}", alien3.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien4: &[u8] = include_bytes!("../assets/alien4_466x466_rgb565_be.raw");
+
+    // if alien4.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien4, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien4 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien4 size mismatch: {}", alien4.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien5: &[u8] = include_bytes!("../assets/alien5_466x466_rgb565_be.raw");
+
+    // if alien5.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien5, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien5 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien5 size mismatch: {}", alien5.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien6: &[u8] = include_bytes!("../assets/alien6_466x466_rgb565_be.raw");
+
+    // if alien6.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien6, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien6 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien6 size mismatch: {}", alien6.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien7: &[u8] = include_bytes!("../assets/alien7_466x466_rgb565_be.raw");
+
+    // if alien7.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien7, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien7 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien7 size mismatch: {}", alien7.len());
+    // }
+
+    // let mut alien8_psram = vec![0u8; (IMG_W_OP * IMG_H_OP * 2) as usize];
+    // alien8_psram.copy_from_slice(alien8);
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // draw_image_bytes(&mut my_display, &alien8_psram, IMG_W_OP, IMG_H_OP, false);
+    // let t1 = SystemTimer::unit_value(Unit::Unit0);
+    // esp_println::println!("Alien8 (PSRAM copy) draw: {} us", to_us(t0, t1));
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien9: &[u8] = include_bytes!("../assets/alien9_466x466_rgb565_be.raw");
+
+    // if alien9.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien9, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien9 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien9 size mismatch: {}", alien9.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien10: &[u8] = include_bytes!("../assets/alien10_466x466_rgb565_be.raw");
+
+    // if alien10.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien10, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien10 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien10 size mismatch: {}", alien10.len());
+    // }
+
+    // // // Test 2x2 block write
+    // let x: u16 = 200;
+    // let y: u16 = 100;
+    // let color_1 = Rgb565::RED;
+    // let color_2 = Rgb565::BLACK;
+    // let color_3 = Rgb565::BLACK;
+    // let color_4 = Rgb565::BLACK;
+    // my_display.write_2x2(x, y, color_1, color_2, color_3, color_4).ok();
+
+    // #[cfg(feature = "esp32s3-disp143Oled")]
+    // {
+    //     use embedded_graphics::pixelcolor::Rgb565;
+
+    //     // Make sure no alignment expansion interferes with the raw 2×2 tiles
+    //     my_display.set_align_even(false);
+
+    //     let x0: u16 = 100 & !1;
+    //     let y0: u16 = 100 & !1;
+
+    //     // Background is already black from clear(); FB contains black neighbors.
+
+    //     // // Tile at (x0, y0): set TL red (others remain black from FB)
+    //     let _ = my_display.write_logical_pixel(x0, y0, Rgb565::RED);
+
+    //     // Tile at (x0+2, y0): set TR green
+    //     let _ = my_display.write_logical_pixel(x0 + 2, y0, Rgb565::GREEN);
+
+    //     // // Tile at (x0, y0+2): set BL blue
+    //     // let _ = my_display.write_logical_pixel(x0, y0 + 1, Rgb565::BLUE);
+
+    //     // // Tile at (x0+2, y0+2): set BR yellow
+    //     // let _ = my_display.write_logical_pixel(x0 + 1, y0 + 1, Rgb565::YELLOW);
+    // }
+
+
+    // // 8×8 coarse blocks; adjust BLOCK for bigger/smaller squares.
+    // const BLOCK: i32 = 16;
+
+    // let (width, height) = my_display.size();
+    // let (w, h) = (width as i32, height as i32);
+
+    // let it = (0..w).flat_map(|x| {
+    //     (0..h).filter_map(move |y| {
+    //         let xb = (x / BLOCK) & 1;
+    //         let yb = (y / BLOCK) & 1;
+    //         if (xb ^ yb) == 1 {
+    //             Some(Pixel(Point::new(x, y), Rgb565::WHITE))
+    //         } else {
+    //             None
+    //         }
+    //     })
+    // });
+
+    // let _ = my_display.draw_iter(it);

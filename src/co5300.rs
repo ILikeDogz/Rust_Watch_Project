@@ -21,7 +21,6 @@ use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
-    pixelcolor::raw::RawU16,
 };
 use embedded_hal::{
     digital::OutputPin,
@@ -35,8 +34,6 @@ use esp_hal::Blocking;
 
 use embedded_hal::spi::Operation;
 
-use core::sync::atomic::{compiler_fence, Ordering};
-
 extern crate alloc;
 
 // Public constants so the rest of your code can adopt 466×466 easily.
@@ -47,14 +44,6 @@ const RAMWRC_OPCODE: u8 = 0x3C;
 
 // Use a small CPU staging buffer per call (HAL will copy it into DMA TX buffer)
 const STAGE_BYTES: usize = 2048; // safe on stack; adjust if needed
-
-// 32736 = 32 * 1023
-pub const DMA_CHUNK: usize = 32 * 1023; 
-#[repr(align(32))]
-struct AlignedBounce([u8; DMA_CHUNK]);
-
-#[link_section = ".dram0.bss"]
-static mut DMA_BOUNCE: AlignedBounce = AlignedBounce([0u8; DMA_CHUNK]);
 
 use embedded_graphics::prelude::IntoStorage;
 
@@ -97,9 +86,9 @@ impl<SpiE: fmt::Debug, GpioE: fmt::Debug> From<SpiE> for Co5300Error<SpiE, GpioE
     fn from(e: SpiE) -> Self { Self::Spi(e) }
 }
 
-/// A very small CO5300 panel driver speaking the "0x02 + CMD + DATA" SPI framing.
-/// No D/C pin is used; CS is handled by the `SpiDevice` implementation.
-/// Implements `DrawTarget<Rgb565>` for convenience (per-pixel path is simple but slow).
+// A very small CO5300 panel driver speaking the "0x02 + CMD + DATA" SPI framing.
+// No D/C pin is used; CS is handled by the `SpiDevice` implementation.
+// Implements `DrawTarget<Rgb565>` for convenience (per-pixel path is simple but slow).
 pub struct Co5300Display<'fb,SPI, RST> {
     pub spi: SPI,
     rst: Option<RST>,
@@ -118,12 +107,12 @@ where
     SPI: SpiDevice<u8>,
     RST: OutputPin,
 {
-    /// Create + init the panel. Call once at startup.
-    ///
-    /// * `spi` - an SPI device with CS control (e.g., `embedded_hal_bus::spi::ExclusiveDevice`)
-    /// * `rst` - optional reset pin (recommended to wire)
-    /// * `delay` - any `DelayNs` impl (spin delay is fine)
-    /// * `width`, `height` - normally 466x466 for this AMOLED
+    // Create + init the panel. Call once at startup.
+    //
+    // * `spi` - an SPI device with CS control (e.g., `embedded_hal_bus::spi::ExclusiveDevice`)
+    // * `rst` - optional reset pin (recommended to wire)
+    // * `delay` - any `DelayNs` impl (spin delay is fine)
+    // * `width`, `height` - normally 466x466 for this AMOLED
     pub fn new(
         spi: SPI,
         rst: Option<RST>,
@@ -373,7 +362,6 @@ where
 
 
     // Flush an FB rectangle, forcing even start/end (2x2 tiles), using raw window.
-    // #[esp_hal::ram]
     fn flush_fb_rect_even(
         &mut self,
         x0: u16, y0: u16, x1: u16, y1: u16,
@@ -418,7 +406,6 @@ where
     }
     
     // Convenience: fill a rectangle with a solid color, using staging buffer.
-    // #[esp_hal::ram]
     pub fn fill_rect_solid(
         &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565,
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
@@ -477,9 +464,13 @@ where
     }
 
     // Chunked rect blit from BE bytes; send slices directly (HAL copies to its DMA buffer).
-    // #[esp_hal::ram]
     pub fn blit_rect_be_fast(
-        &mut self, x0: u16, y0: u16, w: u16, h: u16, data: &[u8],
+        &mut self, 
+        x0: u16, 
+        y0: u16, 
+        w: u16, 
+        h: u16, 
+        data: &[u8],
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
         if w == 0 || h == 0 { return Ok(()); }
 
@@ -530,7 +521,6 @@ where
 
 
     // Full-frame blit from BE bytes, using direct slices.
-    // #[esp_hal::ram]
     pub fn blit_full_frame_be_bounced(&mut self, data: &[u8])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
@@ -567,7 +557,6 @@ where
     // ---- Low-level helpers ----
 
     // #[inline(always)]
-    // #[esp_hal::ram] // run from IRAM
     fn cmd(&mut self, cmd: u8, data: &[u8])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {

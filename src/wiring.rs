@@ -90,9 +90,9 @@ pub struct DisplayPins<'a> {
     // CS=GPIO9, CLK=GPIO10, dO0=GPIO11, dO1=GPIO12, dO2=GPIO13, dO3=GPIO14, RST=GPIO21, EN=GPIO42, TP_SDA=GPIO47, TP_SCL=GPIO48
     pub spi2: SPI2<'a>,     // <-- new: the SPI2 peripheral handle
     pub cs:  Output<'a>,    // GPIO9
-    pub clk: Output<'a>, // Change from Output<'a> to GPIO10<'a>
-    pub do0: Output<'a>, // Change from Output<'a> to GPIO11<'a>
-    pub do1: GPIO12<'a>,     // GPIO12 if you plan reads later
+    pub clk: Output<'a>,
+    pub do0: Output<'a>, 
+    // pub do1: GPIO12<'a>,     // GPIO12 if you plan reads later
     pub do2: GPIO13<'a>,    // (unused here)
     pub do3: GPIO14<'a>,    // (unused here)
     pub rst: Output<'a>,    // GPIO21
@@ -223,7 +223,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
                 cs,
                 clk,
                 do0,
-                do1,
+                // do1,
                 do2,
                 do3,
                 rst,
