@@ -10,9 +10,9 @@ path = "./src/bin/main.rs"
 
 [dependencies]
 # HAL + runtime
-esp-hal = { version = "1.0.0-rc.1", features = ["esp32s3", "unstable", "psram"] }
+esp-hal = { version = "1.0.0", features = ["esp32s3", "unstable", "psram"] }
 esp-println = "0.16.1"
-esp-backtrace = { version = "0.18.0", features = ["panic-handler", "println"] }
+esp-backtrace = { version = "0.18.1", features = ["panic-handler", "println"] }
 esp-bootloader-esp-idf = "0.4.0"
 critical-section = "1.1"
 cfg-if = "1.0.4"

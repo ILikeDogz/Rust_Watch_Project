@@ -90,8 +90,8 @@ pub struct DisplayPins<'a> {
     // CS=GPIO9, CLK=GPIO10, dO0=GPIO11, dO1=GPIO12, dO2=GPIO13, dO3=GPIO14, RST=GPIO21, EN=GPIO42, TP_SDA=GPIO47, TP_SCL=GPIO48
     pub spi2: SPI2<'a>,     // <-- new: the SPI2 peripheral handle
     pub cs:  Output<'a>,    // GPIO9
-    pub clk: GPIO10<'a>, // Change from Output<'a> to GPIO10<'a>
-    pub do0: GPIO11<'a>, // Change from Output<'a> to GPIO11<'a>
+    pub clk: Output<'a>, // Change from Output<'a> to GPIO10<'a>
+    pub do0: Output<'a>, // Change from Output<'a> to GPIO11<'a>
     pub do1: GPIO12<'a>,     // GPIO12 if you plan reads later
     pub do2: GPIO13<'a>,    // (unused here)
     pub do3: GPIO14<'a>,    // (unused here)
@@ -157,6 +157,8 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 // OLED profile
 #[cfg(feature = "esp32s3-disp143Oled")]
 pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
+    use esp_hal::gpio::DriveStrength;
+
     let io = Io::new(p.IO_MUX);
 
     // LEDs
@@ -184,11 +186,20 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 
     // SPI2 peripheral and pins
     let spi2 = p.SPI2;
-    let clk = p.GPIO10; // GPIO10 as Output (not SPI)
-    let do0 = p.GPIO11; // GPIO11 as Output (MOSI as GPIO)
-    // do1 if needed:
-    let do1 = p.GPIO12; // GPIO12 as Input (MISO as GPIO)
+    let clk = Output::new(
+        p.GPIO10,
+        Level::Low,
+        OutputConfig::default().with_drive_strength(DriveStrength::_40mA),
+    );
 
+    let do0 = Output::new(
+        p.GPIO11,
+        Level::Low,
+        OutputConfig::default().with_drive_strength(DriveStrength::_40mA),
+    );
+
+
+    let do1 = p.GPIO12;
     let do2 = p.GPIO13; // GPIO13 
     let do3 = p.GPIO14; // GPIO14 
 
@@ -198,6 +209,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 
     // DMA peripheral
     let dma_ch0 = p.DMA_CH0;
+    
 
     // Return IO handler and all pins
     (

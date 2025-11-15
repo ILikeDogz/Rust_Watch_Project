@@ -476,14 +476,14 @@ dependencies = [
 
 [[package]]
 name = "esp-backtrace"
-version = "0.18.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd8a541e17aa485d82df547f03c77b89f78cb110f59dea67cc90733d67e3678"
+checksum = "3318413fb566c7227387f67736cf70cd74d80a11f2bb31c7b95a9eb48d079669"
 dependencies = [
  "cfg-if",
  "document-features",
  "esp-config",
- "esp-metadata-generated 0.2.0",
+ "esp-metadata-generated 0.3.0",
  "esp-println",
  "heapless 0.9.1",
  "riscv",
@@ -501,7 +501,7 @@ dependencies = [
  "document-features",
  "embedded-storage",
  "esp-config",
- "esp-hal-procmacros 0.21.0",
+ "esp-hal-procmacros",
  "esp-metadata-generated 0.3.0",
  "esp-rom-sys",
  "jiff",
@@ -510,12 +510,12 @@ dependencies = [
 
 [[package]]
 name = "esp-config"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "289fde78fff1ff500e81efbdf958b1dae1614eacc61cc5560b0a3e03a25f266e"
+checksum = "102871054f8dd98202177b9890cb4b71d0c6fe1f1413b7a379a8e0841fc2473c"
 dependencies = [
  "document-features",
- "esp-metadata-generated 0.2.0",
+ "esp-metadata-generated 0.3.0",
  "serde",
  "serde_yaml",
  "somni-expr",
@@ -523,9 +523,9 @@ dependencies = [
 
 [[package]]
 name = "esp-hal"
-version = "1.0.0-rc.1"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f75242d788e67fc7ce51308019c0ff5d5103f989721577bb566b02710ef1ba79"
+checksum = "54786287c0a61ca0f78cb0c338a39427551d1be229103b4444591796c579e093"
 dependencies = [
  "bitfield",
  "bitflags",
@@ -549,8 +549,8 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "enumset",
  "esp-config",
- "esp-hal-procmacros 0.20.0",
- "esp-metadata-generated 0.2.0",
+ "esp-hal-procmacros",
+ "esp-metadata-generated 0.3.0",
  "esp-riscv-rt",
  "esp-rom-sys",
  "esp-sync",
@@ -580,26 +580,12 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-procmacros"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fd82a6506fb08d53a1086d165d92f085717aa9c59e67ac87a9e6f8acdcf6897"
-dependencies = [
- "document-features",
- "object",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.106",
- "termcolor",
-]
-
-[[package]]
-name = "esp-hal-procmacros"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e025a7a7a0affdb4ff913b5c4494aef96ee03d085bf83c27453ae3a71d50da6"
 dependencies = [
  "document-features",
+ "object",
  "proc-macro-crate",
  "proc-macro2",
  "quote",

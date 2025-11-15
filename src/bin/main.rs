@@ -369,10 +369,11 @@ fn main() -> ! {
     };
 
     let tb0 = SystemTimer::unit_value(Unit::Unit0);
-    my_display.clear(Rgb565::WHITE).ok();
+    my_display.clear(Rgb565::RED).ok();
     let tb1 = SystemTimer::unit_value(Unit::Unit0);
     esp_println::println!("Clear: {} us", to_us(tb0, tb1));
 
+    
 
     const W: u32 = 466;
     const H: u32 = 466;
@@ -400,8 +401,8 @@ fn main() -> ! {
     let kbps1 = (bytes1.saturating_mul(1_000_000) / draw_us1) / 1024;
 
     esp_println::println!(
-        "Image1 (ImageRawBE) decompress: {} us, draw: {} us ({} KiB/s)",
-        decomp_us1, draw_us1, kbps1
+        "Image1 (ImageRawBE), data size {} decompress: {} us, draw: {} us ({} KiB/s)",
+        bytes1, decomp_us1, draw_us1, kbps1
     );
 
 
@@ -425,9 +426,26 @@ fn main() -> ! {
     let kbps3 = (bytes1.saturating_mul(1_000_000) / draw_us3) / 1024;
 
     esp_println::println!(
-        "Image3 (blit_rect_be_fast) decompress: {} us, draw: {} us ({} KiB/s)",
-        decomp_us3, draw_us3, kbps3
+        "Image3 (blit_rect_be_fast), data size {} decompress: {} us, draw: {} us ({} KiB/s)",
+        bytes1, decomp_us3, draw_us3, kbps3
     );
+
+    
+    const IMG_W_OP: u32 = 308;
+    const IMG_H_OP: u32 = 374;
+
+    let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    let alien8: &[u8] = include_bytes!("../assets/alien1_308x374_rgb565_be.raw");
+
+    if alien8.len() == (IMG_W_OP * IMG_H_OP * 2) as usize {
+        // This helper centers automatically
+        draw_image_bytes(&mut my_display, alien8, IMG_W_OP, IMG_H_OP, false);
+        let t1 = SystemTimer::unit_value(Unit::Unit0);
+        esp_println::println!("Alien8 draw time: {} us", to_us(t0, t1));
+    } else {
+        esp_println::println!("alien8 size mismatch: {}", alien8.len());
+    }
 
     // --- Image 4: blit_full_frame_be_bounced (alien5) ---
     let t9 = SystemTimer::unit_value(Unit::Unit0);  
@@ -443,9 +461,10 @@ fn main() -> ! {
     let draw_us4   = to_us(t10, t11);
     let kbps4 = (bytes1.saturating_mul(1_000_000) / draw_us4) / 1024;
     esp_println::println!(
-        "Image4 (bounced) decompress: {} us, draw: {} us ({} KiB/s)",
-        decomp_us4, draw_us4, kbps4
+        "Image4 (bounced) data size {} decompress: {} us, draw: {} us ({} KiB/s)",
+        bytes1, decomp_us4, draw_us4, kbps4
     );
+    
 
     // const OMNI_LIME: Rgb565 = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
 
@@ -515,10 +534,13 @@ fn main() -> ! {
     ];
 
     // Optional: draw circle outline for reference
-    // use embedded_graphics::primitives::{Circle, PrimitiveStyle};
-    // let _ = Circle::new(Point::new(cx, cy), (radius as u32) * 2)
-    //     .into_styled(PrimitiveStyle::with_stroke(Rgb565::BLUE, 1))
-    //     .draw(&mut my_display);
+    use embedded_graphics::primitives::{Circle, PrimitiveStyle};
+    let t0 = SystemTimer::unit_value(Unit::Unit0);
+    let _ = Circle::new(Point::new(0, 0), (radius as u32) * 2)
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::BLUE, 1))
+        .draw(&mut my_display);
+    let t1 = SystemTimer::unit_value(Unit::Unit0);
+    esp_println::println!("Circle outline draw: {} us", to_us(t0, t1));
 
     for (label, x, y) in samples {
         // Skip if outside square bounds (defensive)
@@ -533,6 +555,135 @@ fn main() -> ! {
     }
 
 
+    use esp32s3_tests::ui::draw_image_bytes;
+
+    const IMG_W: u32 = 466;
+    const IMG_H: u32 = 466;
+
+    let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien1: &[u8] = include_bytes!("../assets/alien1_466x466_rgb565_be.raw");
+
+    // if alien1.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien1, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien1 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien1 size mismatch: {}", alien1.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien2: &[u8] = include_bytes!("../assets/alien2_466x466_rgb565_be.raw");
+
+    // if alien2.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien2, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien2 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien2 size mismatch: {}", alien2.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien3: &[u8] = include_bytes!("../assets/alien3_466x466_rgb565_be.raw");
+
+    // if alien3.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien3, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien3 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien3 size mismatch: {}", alien3.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien4: &[u8] = include_bytes!("../assets/alien4_466x466_rgb565_be.raw");
+
+    // if alien4.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien4, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien4 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien4 size mismatch: {}", alien4.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien5: &[u8] = include_bytes!("../assets/alien5_466x466_rgb565_be.raw");
+
+    // if alien5.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien5, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien5 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien5 size mismatch: {}", alien5.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien6: &[u8] = include_bytes!("../assets/alien6_466x466_rgb565_be.raw");
+
+    // if alien6.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien6, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien6 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien6 size mismatch: {}", alien6.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien7: &[u8] = include_bytes!("../assets/alien7_466x466_rgb565_be.raw");
+
+    // if alien7.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien7, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien7 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien7 size mismatch: {}", alien7.len());
+    // }
+
+    let mut alien8_psram = vec![0u8; (IMG_W_OP * IMG_H_OP * 2) as usize];
+    alien8_psram.copy_from_slice(alien8);
+
+    let t0 = SystemTimer::unit_value(Unit::Unit0);
+    draw_image_bytes(&mut my_display, &alien8_psram, IMG_W_OP, IMG_H_OP, false);
+    let t1 = SystemTimer::unit_value(Unit::Unit0);
+    esp_println::println!("Alien8 (PSRAM copy) draw: {} us", to_us(t0, t1));
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien9: &[u8] = include_bytes!("../assets/alien9_466x466_rgb565_be.raw");
+
+    // if alien9.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien9, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien9 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien9 size mismatch: {}", alien9.len());
+    // }
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
+    // let alien10: &[u8] = include_bytes!("../assets/alien10_466x466_rgb565_be.raw");
+
+    // if alien10.len() == (IMG_W * IMG_H * 2) as usize {
+    //     // This helper centers automatically
+    //     draw_image_bytes(&mut my_display, alien10, IMG_W, IMG_H, false);
+    //     let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //     esp_println::println!("Alien10 draw time: {} us", to_us(t0, t1));
+    // } else {
+    //     esp_println::println!("alien10 size mismatch: {}", alien10.len());
+    // }
 
     // // // Test 2x2 block write
     // let x: u16 = 200;

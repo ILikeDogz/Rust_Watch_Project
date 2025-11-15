@@ -16,7 +16,6 @@
 // Geometry: panel is 466 x 466 logical pixels (square).
 
 use core::fmt;
-use core::mem;
 
 use embedded_graphics::primitives::Rectangle;
 use embedded_graphics::{
@@ -36,8 +35,9 @@ use esp_hal::Blocking;
 
 use embedded_hal::spi::Operation;
 
+use core::sync::atomic::{compiler_fence, Ordering};
+
 extern crate alloc;
-use alloc::vec::Vec;
 
 // Public constants so the rest of your code can adopt 466×466 easily.
 pub const CO5300_WIDTH: u16 = 466;
@@ -46,10 +46,7 @@ const RAMWR_OPCODE: u8 = 0x2C;
 const RAMWRC_OPCODE: u8 = 0x3C;
 
 // 32736 = 32 * 1023
-pub const DMA_CHUNK: usize = 32 * 1023; // 32736
-const TX_DMA_CAP: usize = 65_536;
-const MAX_DMA_PAYLOAD: usize = TX_DMA_CAP - 4;
-
+pub const DMA_CHUNK: usize = 32 * 1023; 
 #[repr(align(32))]
 struct AlignedBounce([u8; DMA_CHUNK]);
 
@@ -58,7 +55,7 @@ static mut DMA_BOUNCE: AlignedBounce = AlignedBounce([0u8; DMA_CHUNK]);
 
 use embedded_graphics::prelude::IntoStorage;
 
-/// Low-level command send helper (basically holds this entire thing together)
+/// Low-level command send helper, for debugging
 #[esp_hal::ram] // run from IRAM
 pub fn ramwr_stream<SD: SpiDevice<u8>>(
     spi: &mut SD,
@@ -103,14 +100,11 @@ impl<SpiE: fmt::Debug, GpioE: fmt::Debug> From<SpiE> for Co5300Error<SpiE, GpioE
 pub struct Co5300Display<'fb,SPI, RST> {
     pub spi: SPI,
     rst: Option<RST>,
-    cs: Option<Output<'fb>>,             // manual CS when using DMA
     w: u16,
     h: u16,
     x_off: u16,
     y_off: u16,
-    align_even: bool,
     fb: &'fb mut [u16], // framebuffer storage
-    scratch: Vec<u8>,        
 }
 
 
@@ -120,11 +114,6 @@ where
     SPI: SpiDevice<u8>,
     RST: OutputPin,
 {
-    // Allow toggling even alignment from callers (optional)
-    pub fn set_align_even(&mut self, on: bool) { self.align_even = on; }
-
-    pub fn is_align_even(&self) -> bool { self.align_even }
-
     /// Create + init the panel. Call once at startup.
     ///
     /// * `spi` - an SPI device with CS control (e.g., `embedded_hal_bus::spi::ExclusiveDevice`)
@@ -138,7 +127,6 @@ where
         width: u16,
         height: u16,
         fb: &'fb mut [u16],
-        scratch: Vec<u8>,
     ) -> Result<Self, Co5300Error<SPI::Error, RST::Error>> {
 
         // Validate FB size matches WxH (RGB565)
@@ -151,38 +139,34 @@ where
         let mut this = Self {
             spi,
             rst,
-            cs: None,
             w: width,
             h: height,
             x_off: 0x0006,
             y_off: 0x0000,
-            align_even: false,
             fb,
-            scratch,
         };
 
         // Hard reset sequence
         if let Some(r) = this.rst.as_mut() {
             r.set_high().map_err(Co5300Error::Gpio)?;
-            delay.delay_ms(1);
+            delay.delay_ms(2);
             r.set_low().map_err(Co5300Error::Gpio)?;
-            delay.delay_ms(50);
+            delay.delay_ms(80);  
             r.set_high().map_err(Co5300Error::Gpio)?;
-            delay.delay_ms(150);
+            delay.delay_ms(200);  
         }
 
-
-        // this.cmd(0xFF, &[])?;   // Reset to single-SPI
+        // SW reset + settle
         this.cmd(0x01, &[])?; // SWRESET
+        delay.delay_ms(150);  // was 120
 
-        delay.delay_ms(10);
-    
-        // 0x11 (SLPOUT), no data, 80 ms delay
+        // Sleep out + settle
         this.cmd(0x11, &[])?;
-        delay.delay_ms(120);
+        delay.delay_ms(180);  // was 150
 
-        // Ensure pixel format = RGB565 (add if panel needs it)
-        this.cmd(0x3A, &[0x55])?; // COLMOD: 16bpp
+        // Pixel format + small settle
+        this.cmd(0x3A, &[0x55])?;
+        delay.delay_ms(2);
 
         // 0xC4 0x80
         this.cmd(0xC4, &[0x80])?;
@@ -201,9 +185,9 @@ where
         this.cmd(0x51, &[0x00])?;
         delay.delay_ms(1);
 
-        // 0x29 (DISPON), 10 ms delay
+        // Display ON + longer settle before any RAMWR
         this.cmd(0x29, &[])?;
-        delay.delay_ms(30);      // <-- add
+        delay.delay_ms(200);  // was 80, give panel more time
 
         // 0x51 0xFF (brightness max)
         this.cmd(0x51, &[0xFF])?;
@@ -216,11 +200,9 @@ where
         this.cmd(0x2B, &[0x00, 0x00, ((height-1)>>8) as u8, ((height-1)&0xFF) as u8])?;
         
         this.fb.fill(0); // clear FB
+        
         Ok(this)
     }
-
-    // Allow setting CS after construction (DMA setup path)
-    pub fn set_cs(&mut self, cs: Output<'fb>) { self.cs = Some(cs); }
 
     // Panel width in pixels.
     #[inline]
@@ -233,22 +215,17 @@ where
     // Panel Size
     pub fn size(&self) -> (u16, u16) { (self.w, self.h) }
 
-    // Set the active drawing window (inclusive coordinates).
-    // Use before streaming pixels with `write_pixels`.
-    pub fn set_window(
+    // Raw window set (no even expansion, still applies panel offsets)
+    #[esp_hal::ram] // run from IRAM
+    fn set_window_raw(
         &mut self,
-        mut x0: u16, mut y0: u16,
-        mut x1: u16, mut y1: u16,
+        x0: u16, y0: u16,
+        x1: u16, y1: u16,
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+
+        // Bounds check
         if x0 > x1 || y0 > y1 || x1 >= self.w || y1 >= self.h {
             return Err(Co5300Error::OutOfBounds);
-        }
-
-        if self.align_even {
-            x0 &= !1;
-            if (x1 & 1) == 0 { x1 = x1.saturating_add(1).min(self.w - 1); }
-            y0 &= !1;
-            if (y1 & 1) == 0 { y1 = y1.saturating_add(1).min(self.h - 1); }
         }
 
         // Apply panel offsets
@@ -257,28 +234,11 @@ where
         let y0p = y0 + self.y_off;
         let y1p = y1 + self.y_off;
 
+        // Set column and row addresses
         let ca = [(x0p >> 8) as u8, (x0p & 0xFF) as u8, (x1p >> 8) as u8, (x1p & 0xFF) as u8];
         let ra = [(y0p >> 8) as u8, (y0p & 0xFF) as u8, (y1p >> 8) as u8, (y1p & 0xFF) as u8];
-        self.cmd(0x2A, &ca)?;
-        self.cmd(0x2B, &ra)?;
-        Ok(())
-    }
 
-    // Raw window set (no even expansion, still applies panel offsets)
-    fn set_window_raw(
-        &mut self,
-        x0: u16, y0: u16,
-        x1: u16, y1: u16,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        if x0 > x1 || y0 > y1 || x1 >= self.w || y1 >= self.h {
-            return Err(Co5300Error::OutOfBounds);
-        }
-        let x0p = x0 + self.x_off;
-        let x1p = x1 + self.x_off;
-        let y0p = y0 + self.y_off;
-        let y1p = y1 + self.y_off;
-        let ca = [(x0p >> 8) as u8, (x0p & 0xFF) as u8, (x1p >> 8) as u8, (x1p & 0xFF) as u8];
-        let ra = [(y0p >> 8) as u8, (y0p & 0xFF) as u8, (y1p >> 8) as u8, (y1p & 0xFF) as u8];
+        // Send commands
         self.cmd(0x2A, &ca)?;
         self.cmd(0x2B, &ra)?;
         Ok(())
@@ -344,10 +304,12 @@ where
     // }
 
 
-    /// Write a list of pixel rows (each row is &[u8]) in one RAMWR transaction.
+    // Write a list of pixel rows (each row is &[u8]) in one RAMWR transaction.
+    #[esp_hal::ram] // run from IRAM
     pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
+        // Send RAMWR + pixel data
         ramwr_stream(&mut self.spi, rows).map_err(Co5300Error::Spi)
     }
 
@@ -387,132 +349,9 @@ where
         self.write_pixels_rows(&rows)
     }
 
-    // pub fn write_logical_pixel(
-    // &mut self,
-    // x: u16,
-    // y: u16,
-    // color: Rgb565,
-    // ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-    //     if x >= self.w || y >= self.h {
-    //         return Ok(());
-    //     }
-
-    //     // Tile origin (even coords)
-    //     let ax = x & !1;
-    //     let ay = y & !1;
-
-    //     // Tile size (clamp at panel edges)
-    //     let tile_w: u16 = if ax + 1 < self.w { 2 } else { 1 };
-    //     let tile_h: u16 = if ay + 1 < self.h { 2 } else { 1 };
-
-    //     // Load existing tile from FB
-    //     let fbw = self.w as usize;
-    //     let base = (ay as usize) * fbw + (ax as usize);
-
-    //     let mut a = self.fb[base];
-    //     let mut b = if tile_w == 2 { self.fb[base + 1] } else { a };
-    //     let mut c = if tile_h == 2 { self.fb[base + fbw] } else { a };
-    //     let mut d = if tile_w == 2 && tile_h == 2 { self.fb[base + fbw + 1] } else { c };
-
-    //     // Replace only the selected quadrant
-    //     let new16 = color.into_storage();
-    //     match ((x & 1) as u16, (y & 1) as u16) {
-    //         (0, 0) => { a = new16; self.fb[base] = new16; }
-    //         (1, 0) => { b = new16; if tile_w == 2 { self.fb[base + 1] = new16; } }
-    //         (0, 1) => { c = new16; if tile_h == 2 { self.fb[base + fbw] = new16; } }
-    //         (1, 1) => {
-    //             d = new16;
-    //             if tile_w == 2 && tile_h == 2 {
-    //                 self.fb[base + fbw + 1] = new16;
-    //             }
-    //         }
-    //         _ => {}
-    //     }
-
-    //     // Build rows
-    //     let a_bytes = a.to_be_bytes();
-    //     let b_bytes = b.to_be_bytes();
-    //     let c_bytes = c.to_be_bytes();
-    //     let d_bytes = d.to_be_bytes();
-
-    //     let mut row0 = [0u8; 4];
-    //     let mut row1 = [0u8; 4];
-
-    //     row0[0] = a_bytes[0]; 
-    //     row0[1] = a_bytes[1];
-
-    //     // Fill in the second pixel if it's a 2x2 tile, otherwise edge
-    //     if tile_w == 2 { row0[2] = b_bytes[0]; row0[3] = b_bytes[1]; }
-
-    //     row1[0] = c_bytes[0]; 
-    //     row1[1] = c_bytes[1];
-
-    //     // Fill in the second pixel if it's a 2x2 tile, otherwise edge
-    //     if tile_w == 2 && tile_h == 2 { row1[2] = d_bytes[0]; row1[3] = d_bytes[1]; }
-    //     if tile_w == 2 { row0[2] = b_bytes[0]; row0[3] = b_bytes[1]; }
-
-    //     row1[0] = c_bytes[0]; 
-    //     row1[1] = c_bytes[1];
-    //     // Fill in the second pixel if it's a 2x2 tile, otherwise edge
-    //     if tile_w == 2 && tile_h == 2 { row1[2] = d_bytes[0]; row1[3] = d_bytes[1]; }
-
-    //     // Program exact tile window (no even expansion)
-    //     self.set_window_raw(ax, ay, ax + tile_w - 1, ay + tile_h - 1)?;
-
-    //     // Stream tile
-    //     let rows: [&[u8]; 2] = [
-    //         &row0[..(tile_w as usize) * 2],
-    //         &row1[..(tile_h as usize) * (tile_w as usize) * 2 / (tile_h as usize)],
-    //     ];
-    //     let rows_slice = if tile_h == 2 { &rows[..] } else { &rows[..1] };
-    //     self.write_pixels_rows(rows_slice)
-    // }
-
-    // Flush a 2-row band from FB with even-aligned X and Y (single RAMWR for the band)
-    fn flush_fb_row_even(
-        &mut self,
-        y: u16,
-        x0: u16,
-        x1: u16,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        if y >= self.h || x0 > x1 || x0 >= self.w { return Ok(()); }
-
-        // Align X to even width
-        let mut ax0 = x0 & !1;
-        let mut ax1 = x1 | 1;
-        ax1 = ax1.min(self.w - 1);
-
-        // Align Y to even start and make height=2
-        let y0 = y & !1;
-        let y1 = (y0 + 1).min(self.h - 1);
-
-        let ew = (ax1 - ax0 + 1) as usize;
-        let fbw = self.w as usize;
-
-        // 2 rows * ew * 2 bytes
-        let mut band = [0u8; 466 * 2 * 2];
-
-        // Row y0
-        let row0_base = (y0 as usize) * fbw + (ax0 as usize);
-        for i in 0..ew {
-            let v = self.fb[row0_base + i].to_be_bytes();
-            band[i * 2] = v[0];
-            band[i * 2 + 1] = v[1];
-        }
-        // Row y1
-        let row1_base = (y1 as usize) * fbw + (ax0 as usize);
-        let off = ew * 2;
-        for i in 0..ew {
-            let v = self.fb[row1_base + i].to_be_bytes();
-            band[off + i * 2] = v[0];
-            band[off + i * 2 + 1] = v[1];
-        }
-
-        self.set_window_raw(ax0, y0, ax1, y1)?;
-        self.write_pixels_rows(&[&band[..ew * 4]])
-    }
 
     // Flush an FB rectangle, forcing even start/end (2x2 tiles), using raw window.
+    #[esp_hal::ram]
     fn flush_fb_rect_even(
         &mut self,
         x0: u16,
@@ -524,28 +363,20 @@ where
             return Ok(());
         }
 
-        // Align to hardware 2x2 granularity
-        let mut ax0 = x0 & !1;
-        let mut ay0 = y0 & !1;
-        let mut ax1 = x1 | 1;
-        let mut ay1 = y1 | 1;
-
-        ax1 = ax1.min(self.w - 1);
-        ay1 = ay1.min(self.h - 1);
+        let ax0 = x0 & !1;
+        let ay0 = y0 & !1;
+        let ax1 = (x1 | 1).min(self.w - 1);
+        let ay1 = (y1 | 1).min(self.h - 1);
 
         let ew = (ax1 - ax0 + 1) as usize;
-        let eh = (ay1 - ay0 + 1) as usize;
 
-        // Program window once
         self.set_window_raw(ax0, ay0, ax1, ay1)?;
 
-        // Stream FB contents through DRAM bounce buffer
         let fbw = self.w as usize;
         let mut first = true;
         let mut filled = 0usize;
 
-        // Helper to flush current bounce contents
-        let mut flush = |this: &mut Self, first_flag: &mut bool, count: usize| -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+        let flush = |this: &mut Self, first_flag: &mut bool, count: usize| -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
             if count == 0 { return Ok(()); }
             let cmd = if *first_flag { RAMWR_OPCODE } else { RAMWRC_OPCODE };
             *first_flag = false;
@@ -558,187 +389,128 @@ where
             Ok(())
         };
 
+        let cap = unsafe { DMA_BOUNCE.0.len() };
+
         for y in ay0..=ay1 {
             let row_base = (y as usize) * fbw + (ax0 as usize);
             for x in 0..ew {
+                // Pre-flush if not enough room for next 2 bytes
+                if filled + 2 > cap {
+                    compiler_fence(Ordering::Release);
+                    flush(self, &mut first, filled)?;
+                    compiler_fence(Ordering::Acquire);
+                    filled = 0;
+                }
                 let be = self.fb[row_base + x].to_be_bytes();
-                // Push 2 bytes into bounce
                 unsafe {
                     DMA_BOUNCE.0[filled] = be[0];
                     DMA_BOUNCE.0[filled + 1] = be[1];
                 }
                 filled += 2;
-
-                if filled >= unsafe { DMA_BOUNCE.0.len() } {
-                    flush(self, &mut first, filled)?;
-                    filled = 0;
-                }
             }
         }
-        // Flush remaining tail
+        compiler_fence(Ordering::Release);
         flush(self, &mut first, filled)?;
-
+        compiler_fence(Ordering::Acquire);
         Ok(())
     }
     
-    // /// Convenience: 2x2 solid color tile.
-    // pub fn write_2x2_solid(
-    //     &mut self,
-    //     x: u16,
-    //     y: u16,
-    //     color: Rgb565,
-    // ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-    //     self.write_2x2(x, y, color, color, color, color)
-    // }
-
-    /// Convenience: fill a rectangle with a solid color (fast path).
-    pub fn fill_rect_solid(&mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565)
-        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    {
+    // Convenience: fill a rectangle with a solid color (fast path).
+    #[esp_hal::ram]
+    pub fn fill_rect_solid(
+        &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565,
+    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
         if w == 0 || h == 0 { return Ok(()); }
-        let x1 = x + w - 1;
-        let y1: u16 = y + h - 1;
+
+        // overflow-safe bounds
+        let (pw, ph) = (self.w as u32, self.h as u32);
+        let (x0, y0, w32, h32) = (x as u32, y as u32, w as u32, h as u32);
+        if x0 >= pw || y0 >= ph { return Err(Co5300Error::OutOfBounds); }
+        if x0.checked_add(w32).unwrap_or(u32::MAX) > pw ||
+           y0.checked_add(h32).unwrap_or(u32::MAX) > ph {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        let (x1, y1) = ((x0 + w32 - 1) as u16, (y0 + h32 - 1) as u16);
+
         self.set_window_raw(x, y, x1, y1)?;
 
-        // Prepare one row of the solid color
+        let total_bytes = (w as usize) * (h as usize) * 2;
         let c = color.into_storage().to_be_bytes();
 
-        // Number of bytes per row
-        let nbytes = (w as usize) * 2;
-
-        // Build one row buffer filled with the color
-        let mut line = [0u8; 466*2];
-
-        // Fill the line buffer with the color
-        for i in (0..nbytes).step_by(2) { line[i]=c[0]; line[i+1]=c[1]; }
-
-        // Build a chunk list: one reference to the row per line
-        let mut chunks: heapless::Vec<&[u8], 466> = heapless::Vec::new();
-        for _ in 0..h {
-            chunks.push(&line[..nbytes]).map_err(|_| Co5300Error::OutOfBounds)?;
+        unsafe {
+            let buf = &mut DMA_BOUNCE.0;
+            let pattern32_le: u32 = u32::from_le_bytes([c[0], c[1], c[0], c[1]]);
+            let mut i = 0;
+            let len = buf.len() & !3;
+            while i < len {
+                core::ptr::write_unaligned(buf.as_mut_ptr().add(i) as *mut u32, pattern32_le);
+                i += 4;
+            }
+            let mut j = len;
+            while j + 2 <= buf.len() {
+                buf[j] = c[0];
+                buf[j + 1] = c[1];
+                j += 2;
+            }
         }
-        self.write_pixels_rows(&chunks)?;
+
+        // Make sure DMA sees the bytes we just wrote
+        compiler_fence(Ordering::Release);
+
+        let mut remaining = total_bytes;
+        let mut first = true;
+        while remaining > 0 {
+            let take = core::cmp::min(unsafe { DMA_BOUNCE.0.len() }, remaining);
+            let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+            first = false;
+            let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+            let chunk = unsafe { &DMA_BOUNCE.0[..take] };
+            self.spi.transaction(&mut [
+                Operation::Write(&hdr),
+                Operation::Write(chunk),
+            ]).map_err(Co5300Error::Spi)?;
+            remaining -= take;
+        }
+
+        // Ensure CPU sees any DMA side effects before touching FB
+        compiler_fence(Ordering::Acquire);
+
+        // FB update
+        let fbw = self.w as usize;
+        let row_w = w as usize;
+        let col_start = x as usize;
+        let row_start = y as usize;
+        let color16 = color.into_storage();
+        for ry in 0..(h as usize) {
+            let base = (row_start + ry) * fbw + col_start;
+            let dst = &mut self.fb[base..base + row_w];
+            for px in dst.iter_mut() { *px = color16; }
+        }
         Ok(())
     }
 
-
-    // ---- Low-level helpers ----
-
-    #[inline(always)]
-    // Force long-header cmd during bring-up
-    fn cmd(&mut self, cmd: u8, data: &[u8])
-        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    {
-        let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-        if data.is_empty() {
-            self.spi.write(&hdr).map_err(|e| {
-                // println!("spi.write(CMD sh) err: {:?}", e);
-                Co5300Error::Spi(e)
-            })
-        } else {
-            self.spi.transaction(&mut [
-                Operation::Write(&hdr),
-                Operation::Write(data),
-            ]).map_err(|e| {
-                // println!("spi.tx(CMD sh+data) err: {:?}", e);
-                Co5300Error::Spi(e)
-            })
-        }
-    }
-
-    // // Fast path for streaming a full-frame BE RGB565 image (w*h*2 bytes).
-    // // Sends one RAMWR with a single chunk; then updates the local FB.
-    // pub fn blit_full_frame_be(&mut self, data: &[u8])
-    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    // {
-    //     let w = self.w as usize;
-    //     let h = self.h as usize;
-    //     let needed = w * h * 2;
-    //     if data.len() != needed {
-    //         return Err(Co5300Error::OutOfBounds);
-    //     }
-
-    //     // Program full window without even expansion or padding.
-    //     self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
-
-    //     // Single-transaction stream: [HDR][data]
-    //     self.write_pixels_rows(&[data])?;
-
-    //     // Update FB from BE bytes (tight loop, avoids per-pixel overhead).
-    //     // SAFETY: 2 bytes per pixel, length checked above.
-    //     let mut i = 0usize;
-    //     let mut j = 0usize;
-    //     while i < needed {
-    //         let hi = data[i];
-    //         let lo = data[i + 1];
-    //         self.fb[j] = u16::from_be_bytes([hi, lo]);
-    //         i += 2;
-    //         j += 1;
-    //     }
-
-    //     Ok(())
-    // }
-
-    // // Chunked frame blit (replaces previous single-write version)
-    // pub fn blit_full_frame_be(&mut self, data: &[u8])
-    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    // {
-    //     let needed = (self.w as usize) * (self.h as usize) * 2;
-    //     if data.len() != needed { return Err(Co5300Error::OutOfBounds); }
-
-    //     self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
-
-    //     let mut off = 0usize;
-    //     let mut first = true;
-
-    //     while off < data.len() {
-    //         let take = core::cmp::min(MAX_DMA_PAYLOAD, data.len() - off);
-    //         let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
-    //         first = false;
-
-    //         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-    //         let slice = &data[off..off + take];
-
-    //         // Single transaction: header + payload chunk
-    //         self.spi.transaction(&mut [
-    //             Operation::Write(&hdr),
-    //             Operation::Write(slice),
-    //         ]).map_err(Co5300Error::Spi)?;
-
-    //         off += take;
-    //     }
-
-    //     // Update local FB
-    //     let mut si = 0usize;
-    //     for px in self.fb.iter_mut() {
-    //         let hi = data[si]; let lo = data[si + 1];
-    //         *px = u16::from_be_bytes([hi, lo]);
-    //         si += 2;
-    //     }
-    //     Ok(())
-    // }
-
     // Chunked rect blit (same logic, preserves local FB)
+    #[esp_hal::ram]
     pub fn blit_rect_be_fast(
-        &mut self,
-        x0: u16,
-        y0: u16,
-        w: u16,
-        h: u16,
-        data: &[u8],
+        &mut self, x0: u16, y0: u16, w: u16, h: u16, data: &[u8],
     ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
         if w == 0 || h == 0 { return Ok(()); }
-        let x1 = x0 + w - 1;
-        let y1 = y0 + h - 1;
-        if x1 >= self.w || y1 >= self.h { return Err(Co5300Error::OutOfBounds); }
+
+        // overflow-safe bounds
+        let (pw, ph) = (self.w as u32, self.h as u32);
+        let (x32, y32, w32, h32) = (x0 as u32, y0 as u32, w as u32, h as u32);
+        if x32 >= pw || y32 >= ph { return Err(Co5300Error::OutOfBounds); }
+        if x32.checked_add(w32).unwrap_or(u32::MAX) > pw ||
+           y32.checked_add(h32).unwrap_or(u32::MAX) > ph {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        let (x1, y1) = ((x32 + w32 - 1) as u16, (y32 + h32 - 1) as u16);
 
         let expected = (w as usize) * (h as usize) * 2;
         if data.len() != expected { return Err(Co5300Error::OutOfBounds); }
 
-        // Program rect window once
         self.set_window_raw(x0, y0, x1, y1)?;
 
-        // Stream via DRAM bounce buffer
         let mut off = 0usize;
         let mut first = true;
         while off < data.len() {
@@ -746,18 +518,22 @@ where
             unsafe { DMA_BOUNCE.0[..take].copy_from_slice(&data[off..off + take]); }
             off += take;
 
+            // Ensure DMA sees freshly copied bytes
+            compiler_fence(Ordering::Release);
+
             let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
             first = false;
-
             let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
             let chunk = unsafe { &DMA_BOUNCE.0[..take] };
             self.spi.transaction(&mut [
                 Operation::Write(&hdr),
                 Operation::Write(chunk),
             ]).map_err(Co5300Error::Spi)?;
+
+            compiler_fence(Ordering::Acquire);
         }
 
-        // FB update (only touched rect) remains the same
+        // FB update
         let fbw = self.w as usize;
         let mut si = 0usize;
         for ry in 0..(h as usize) {
@@ -772,9 +548,12 @@ where
         Ok(())
     }
 
+    // Full-frame blit from BE bytes with bounce buffer streaming.
+    #[esp_hal::ram] // run from IRAM
     pub fn blit_full_frame_be_bounced(&mut self, data: &[u8])
         -> Result<(), Co5300Error<SPI::Error, RST::Error>>
     {
+        // Data size check
         let needed = (self.w as usize) * (self.h as usize) * 2;
         if data.len() != needed { return Err(Co5300Error::OutOfBounds); }
 
@@ -817,6 +596,30 @@ where
         }
         Ok(())
     }
+
+    // ---- Low-level helpers ----
+
+    // #[inline(always)]
+    #[esp_hal::ram] // run from IRAM
+    fn cmd(&mut self, cmd: u8, data: &[u8])
+        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+    {
+        let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+        if data.is_empty() {
+            self.spi.write(&hdr).map_err(|e| {
+                // println!("spi.write(CMD sh) err: {:?}", e);
+                Co5300Error::Spi(e)
+            })
+        } else {
+            self.spi.transaction(&mut [
+                Operation::Write(&hdr),
+                Operation::Write(data),
+            ]).map_err(|e| {
+                // println!("spi.tx(CMD sh+data) err: {:?}", e);
+                Co5300Error::Spi(e)
+            })
+        }
+    }
 }
 
 // -------------------- embedded-graphics integration --------------------
@@ -840,32 +643,24 @@ where
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = embedded_graphics::Pixel<embedded_graphics::pixelcolor::Rgb565>>,
+        I: IntoIterator<Item = embedded_graphics::Pixel<Rgb565>>,
     {
-        use embedded_graphics::{prelude::Point, Pixel};
+        use embedded_graphics::Pixel;
 
-        // Global bbox only (cheap), and optionally row spans while sparse.
+        // Track dirty rectangle
         let mut any = false;
         let mut minx = self.w;
         let mut miny = self.h;
         let mut maxx: u16 = 0;
         let mut maxy: u16 = 0;
-        let mut npix: usize = 0;
 
-        #[derive(Copy, Clone)]
-        struct RowSpan { y: u16, minx: u16, maxx: u16 }
-        let mut spans: heapless::Vec<RowSpan, 512> = heapless::Vec::new();
-        let mut track_spans = true;
-
-        for Pixel(p, c) in pixels.into_iter() {
+        // Update FB and dirty rect
+        for Pixel(p, c) in pixels {
             if p.x < 0 || p.y < 0 { continue; }
             let (x, y) = (p.x as u16, p.y as u16);
             if x >= self.w || y >= self.h { continue; }
-
-            // Update FB single logical pixel
             self.fb[(y as usize) * (self.w as usize) + (x as usize)] = c.into_storage();
 
-            // Global bbox
             if !any {
                 any = true;
                 minx = x; maxx = x;
@@ -876,46 +671,12 @@ where
                 if x > maxx { maxx = x; }
                 if y > maxy { maxy = y; }
             }
-            npix += 1;
-
-            // Stop span tracking once enough pixels seen (dense case → bbox flush)
-            if track_spans && npix > 2048 {
-                track_spans = false;
-            }
-
-            if track_spans {
-                if let Some(r) = spans.iter_mut().find(|s| s.y == y) {
-                    if x < r.minx { r.minx = x; }
-                    if x > r.maxx { r.maxx = x; }
-                } else {
-                    let _ = spans.push(RowSpan { y, minx: x, maxx: x });
-                }
-            }
         }
 
-        if !any {
-            return Ok(());
-        }
-
-        // If we didn’t track spans (dense), flush one even-aligned rect.
-        if !track_spans {
-            let _ = self.flush_fb_rect_even(minx, miny, maxx, maxy);
-            return Ok(());
-        }
-
-        // Sparse heuristic: compare touched pixels to bbox area
-        let bbox_area = ((maxx - minx + 1) as usize) * ((maxy - miny + 1) as usize);
-        let use_spans = npix * 8 < bbox_area;
-
-        if use_spans {
-            spans.sort_unstable_by_key(|s| s.y);
-            for s in spans.into_iter() {
-                let _ = self.flush_fb_row_even(s.y, s.minx, s.maxx);
-            }
-        } else {
+        // Flush dirty rectangle if any
+        if any {
             let _ = self.flush_fb_rect_even(minx, miny, maxx, maxy);
         }
-
         Ok(())
     }
 
@@ -995,8 +756,7 @@ where
     }
 
     fn clear(&mut self, color: embedded_graphics::pixelcolor::Rgb565) -> Result<(), Self::Error> {
-        let v = color.into_storage();
-        for px in self.fb.iter_mut() { *px = v; }
+        // Use fast fill rect
         let _ = self.fill_rect_solid(0, 0, self.w, self.h, color);
         Ok(())
     }
@@ -1015,12 +775,12 @@ where
     SPI: embedded_hal::spi::SpiDevice<u8>,
     RST: embedded_hal::digital::OutputPin,
 {
-    let mut display = Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT, fb, Vec::new())?;
+    let mut display = Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT, fb)?;
     display.set_window_raw(0, 0, CO5300_WIDTH - 1, CO5300_HEIGHT - 1)?;
     Ok(display)
 }
 
-// This matches your wiring: Spi<'a, Blocking> + CS pin + NoDelay
+// This matches wiring: Spi<'a, Blocking> + CS pin + NoDelay
 pub type SpiDev<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>;
 
 // Expose a ready-to-use display type (share lifetime with SPI and FB)

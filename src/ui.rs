@@ -285,14 +285,16 @@ fn draw_text(
 }
 
 // Draw from already-decompressed bytes (used by cache on OLED)
-fn draw_image_bytes(
+pub fn draw_image_bytes(
     disp: &mut impl PanelRgb565,
     bytes: &[u8],
     w: u32,
     h: u32,
     clear: bool,
 ){
+    // Clear background if requested
     if clear { let _ = disp.clear(Rgb565::BLACK); }
+    // Validate size
     if bytes.len() != (w * h * 2) as usize { return; }
     let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
     let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
@@ -300,9 +302,12 @@ fn draw_image_bytes(
     // Try fast raw blit if this really is the CO5300 driver (DMA or non-DMA alias).
     // The display backend re-exports its concrete type as display::DisplayType.
     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
-        let _ = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes);
+        if let Err(e) = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes) {
+            esp_println::println!("fast blit failed: {:?}; fallback", e);
+            let raw = ImageRawBE::<Rgb565>::new(bytes, w);
+            let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
+        }
     } else {
-        // Fallback: embedded-graphics path (still uses fill_contiguous in driver)
         let raw = ImageRawBE::<Rgb565>::new(bytes, w);
         let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
     }
