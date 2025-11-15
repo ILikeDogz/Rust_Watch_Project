@@ -189,13 +189,13 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let clk = Output::new(
         p.GPIO10,
         Level::Low,
-        OutputConfig::default().with_drive_strength(DriveStrength::_40mA),
+        OutputConfig::default().with_drive_strength(DriveStrength::_20mA),
     );
 
     let do0 = Output::new(
         p.GPIO11,
         Level::Low,
-        OutputConfig::default().with_drive_strength(DriveStrength::_40mA),
+        OutputConfig::default().with_drive_strength(DriveStrength::_20mA),
     );
 
 

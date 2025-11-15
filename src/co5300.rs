@@ -44,6 +44,7 @@ const RAMWRC_OPCODE: u8 = 0x3C;
 
 // Use a small CPU staging buffer per call (HAL will copy it into DMA TX buffer)
 const STAGE_BYTES: usize = 2048; // safe on stack; adjust if needed
+const DMA_CHUNK_SIZE: usize = 32*1023; // 32*1023=32768 minus some overhead
 
 use embedded_graphics::prelude::IntoStorage;
 
@@ -183,8 +184,11 @@ where
         this.cmd(0x29, &[])?;
         delay.delay_ms(200);  // was 80, give panel more time
 
-        // 0x51 0xFF (brightness max)
-        this.cmd(0x51, &[0xFF])?;
+        // // 0x51 0xFF (brightness max)
+        // this.cmd(0x51, &[0xFF])?;
+
+        // lower brightness
+        this.cmd(0x51, &[0x80])?;
 
         // Set memory access control (orientation)
         this.cmd(0x36, &[0x00])?; 
@@ -196,6 +200,12 @@ where
         this.fb.fill(0); // clear FB
         
         Ok(this)
+    }
+
+    // Expose the underlying SPI device to allow changing frequency later.
+    // WARNING: Only do this when no transfer is active.
+    pub fn spi_mut(&mut self) -> &mut SPI {
+        &mut self.spi
     }
 
     // Panel width in pixels.
@@ -489,10 +499,12 @@ where
 
         self.set_window_raw(x0, y0, x1, y1)?;
 
+        // manually chunk to respect the DMA buffer size.
         let mut off = 0usize;
         let mut first = true;
         while off < data.len() {
-            let take = core::cmp::min(STAGE_BYTES, data.len() - off);
+            // Use our new large chunk size
+            let take = core::cmp::min(DMA_CHUNK_SIZE, data.len() - off);
             let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
             first = false;
             let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
@@ -529,10 +541,12 @@ where
 
         self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
 
+        // manually chunk to respect the DMA buffer size.
         let mut off = 0usize;
         let mut first = true;
         while off < data.len() {
-            let take = core::cmp::min(STAGE_BYTES, data.len() - off);
+            // Use our new large chunk size
+            let take = core::cmp::min(DMA_CHUNK_SIZE, data.len() - off);
             let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
             first = false;
             let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
@@ -543,6 +557,7 @@ where
             ]).map_err(Co5300Error::Spi)?;
             off += take;
         }
+        // ---- END OF CHANGE ----
 
         // Update FB
         let mut si = 0usize;

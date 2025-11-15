@@ -20,22 +20,50 @@ use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 
 use crate::wiring::DisplayPins;
 
-// A tiny busy-wait delay that satisfies embedded-hal 1.0 DelayNs.
-// #[cfg(feature = "devkit-esp32s3-disp128")]
-struct SpinDelay;
-// #[cfg(feature = "devkit-esp32s3-disp128")]
-impl embedded_hal::delay::DelayNs for SpinDelay {
+use esp_hal::timer::systimer::{SystemTimer, Unit};
+
+// A delay provider that uses the ESP32-S3's high-resolution SystemTimer.
+// This is the correct way to implement blocking delays in esp-hal 1.0.
+pub struct TimerDelay;
+
+impl embedded_hal::delay::DelayNs for TimerDelay {
     #[inline]
     fn delay_ns(&mut self, ns: u32) {
-        let mut n = ns / 50 + 1;
-        while n != 0 { core::hint::spin_loop(); n -= 1; }
-    }
-    #[inline]
-    fn delay_us(&mut self, us: u32) { for _ in 0..us { self.delay_ns(1_000); } }
-    #[inline]
-    fn delay_ms(&mut self, ms: u32) { for _ in 0..ms { self.delay_us(1_000); } }
-}
+        let ticks_per_sec = SystemTimer::ticks_per_second();
+        let start = SystemTimer::unit_value(Unit::Unit0); // <-- FIXED
+        // Calculate required ticks, rounding up to ensure at least minimum delay
+        let delta_ticks = (ns as u64 * ticks_per_sec).div_ceil(1_000_000_000);
+        let end_ticks = start.saturating_add(delta_ticks);
 
+        while SystemTimer::unit_value(Unit::Unit0) < end_ticks { // <-- FIXED
+            core::hint::spin_loop();
+        }
+    }
+
+    #[inline]
+    fn delay_us(&mut self, us: u32) {
+        let ticks_per_sec = SystemTimer::ticks_per_second();
+        let start = SystemTimer::unit_value(Unit::Unit0); // <-- FIXED
+        let delta_ticks = (us as u64 * ticks_per_sec).div_ceil(1_000_000);
+        let end_ticks = start.saturating_add(delta_ticks);
+
+        while SystemTimer::unit_value(Unit::Unit0) < end_ticks { // <-- FIXED
+            core::hint::spin_loop();
+        }
+    }
+
+    #[inline]
+    fn delay_ms(&mut self, ms: u32) {
+        let ticks_per_sec = SystemTimer::ticks_per_second();
+        let start = SystemTimer::unit_value(Unit::Unit0); // <-- FIXED
+        let delta_ticks = (ms as u64 * ticks_per_sec).div_ceil(1_000);
+        let end_ticks = start.saturating_add(delta_ticks);
+
+        while SystemTimer::unit_value(Unit::Unit0) < end_ticks { // <-- FIXED
+            core::hint::spin_loop();
+        }
+    }
+}
 // ==================================================================
 // GC9A01 (240x240) backend  — feature: devkit-esp32s3-disp128
 // ==================================================================
@@ -113,6 +141,8 @@ mod gc9a01_backend {
 #[cfg(feature = "esp32s3-disp143Oled")]
 mod co5300_backend {
     use super::*;
+    use embedded_graphics::pixelcolor::Rgb565;
+    use embedded_graphics::prelude::RgbColor;
     use embedded_hal::delay::DelayNs;
     use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
     use esp_hal::dma_buffers;
@@ -123,7 +153,7 @@ mod co5300_backend {
     pub type DisplayType<'a> =
         Co5300Display<
             'a,
-            ExclusiveDevice<SpiDmaBus<'a, Blocking>, Output<'a>, NoDelay>,
+            ExclusiveDevice<SpiDmaBus<'a, Blocking>, Output<'a>, TimerDelay>,
             Output<'a>,
         >;
 
@@ -146,7 +176,7 @@ mod co5300_backend {
             dma_ch0,
         } = display_pins;
 
-        let mut delay = SpinDelay;
+        let mut delay = TimerDelay; 
 
         // Power up panel
 
@@ -160,7 +190,7 @@ mod co5300_backend {
         let spi = Spi::new(
             spi2,
             Config::default()
-                .with_frequency(Rate::from_hz(60_000_000))
+                .with_frequency(Rate::from_hz(80_000_000))
                 .with_mode(Mode::_0),
         )
         .unwrap()
@@ -173,12 +203,12 @@ mod co5300_backend {
         let rx = DmaRxBuf::new(rx_desc, rx_buf).unwrap();
         let tx = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
 
-        let spi_bus: SpiDmaBus<'_, Blocking> = spi.with_buffers(rx, tx);
-        let spi_dev = ExclusiveDevice::new(spi_bus, cs, NoDelay).unwrap();
+        let spi_bus = spi.with_buffers(rx, tx);
+        let spi_dev = ExclusiveDevice::new(spi_bus, cs, TimerDelay).unwrap();
 
         co5300::new_with_defaults(spi_dev, Some(rst), &mut delay, fb)
             .expect("CO5300 init failed")
-            
+
     }
 }
 

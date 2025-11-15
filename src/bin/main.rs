@@ -196,12 +196,6 @@ fn main() -> ! {
     };
 
 
-    // // Helper: ticks -> microseconds
-    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
-    // let to_us = |t0: u64, t1: u64| -> u64 {
-    //     let dt = t1.saturating_sub(t0);
-    //     dt.saturating_mul(1_000_000) / ticks_per_s
-    // };
 
     my_display.clear(Rgb565::BLACK).ok();
 
@@ -228,12 +222,19 @@ fn main() -> ! {
         let _n = precache_all();
         // esp_println::println!("Precached {} Omnitrix images", n);
     }
-
     
     // // Demo sequence timing
     // let demo_start_ms = {
     //     let t = SystemTimer::unit_value(Unit::Unit0);
     //     t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    // };
+
+    
+    // // Helper: ticks -> microseconds
+    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
+    // let to_us = |t0: u64, t1: u64| -> u64 {
+    //     let dt = t1.saturating_sub(t0);
+    //     dt.saturating_mul(1_000_000) / ticks_per_s
     // };
 
     // enum DemoState {
@@ -357,7 +358,7 @@ fn main() -> ! {
                     critical_section::with(|cs| {
                         // esp_println::println!("Rotary turned clockwise to detent {} pos {}", detent, pos);
                         let state = UI_STATE.borrow(cs).get();
-                        let new_state = state.next_item();
+                        let new_state = state.prev_item();
                         UI_STATE.borrow(cs).set(new_state);
                     });
                 } else if step_delta < 0 {
@@ -365,7 +366,7 @@ fn main() -> ! {
                     critical_section::with(|cs| {
                         // esp_println::println!("Rotary turned counter-clockwise to detent {} pos {}", detent, pos);
                         let state = UI_STATE.borrow(cs).get();
-                        let new_state = state.prev_item();
+                        let new_state = state.next_item();
                         UI_STATE.borrow(cs).set(new_state);
                     });
                 }
