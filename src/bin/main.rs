@@ -219,19 +219,21 @@ fn main() -> ! {
 
     // // -------------------- UI Init --------------------
 
-    // Demo sequence timing
-    let demo_start_ms = {
-        let t = SystemTimer::unit_value(Unit::Unit0);
-        t.saturating_mul(1000) / SystemTimer::ticks_per_second()
-    };
+    // // Demo sequence timing
+    // let demo_start_ms = {
+    //     let t = SystemTimer::unit_value(Unit::Unit0);
+    //     t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    // };
 
     
-    // Helper: ticks -> microseconds
-    let ticks_per_s = SystemTimer::ticks_per_second() as u64;
-    let to_us = |t0: u64, t1: u64| -> u64 {
-        let dt = t1.saturating_sub(t0);
-        dt.saturating_mul(1_000_000) / ticks_per_s
-    };
+    // // Helper: ticks -> microseconds
+    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
+    // let to_us = |t0: u64, t1: u64| -> u64 {
+    //     let dt = t1.saturating_sub(t0);
+    //     dt.saturating_mul(1_000_000) / ticks_per_s
+    // };
+
+
     #[cfg(feature = "esp32s3-disp143Oled")]
     {
         // Pre-cache Omnitrix logo image
@@ -240,10 +242,10 @@ fn main() -> ! {
 
     // Initial UI draw (timed)
     {
-        let t0 = SystemTimer::unit_value(Unit::Unit0);
+        // let t0 = SystemTimer::unit_value(Unit::Unit0);
         update_ui(&mut my_display, last_ui_state);
-        let t1 = SystemTimer::unit_value(Unit::Unit0);
-        esp_println::println!("Initial UI draw: {} us", to_us(t0, t1));
+        // let t1 = SystemTimer::unit_value(Unit::Unit0);
+        // esp_println::println!("Initial UI draw: {} us", to_us(t0, t1));
     }
 
     
@@ -255,8 +257,6 @@ fn main() -> ! {
         let _n = precache_all();
         // esp_println::println!("Precached {} Omnitrix images", n);
     }
-
-
     
     // -------------------- Demo Sequence --------------------
     // Demo sequence timing
@@ -356,71 +356,71 @@ fn main() -> ! {
     // Main loop
     // loop {
 
-        // // Check for UI state changes
-        // let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
-        // if ui_state != last_ui_state {
-        //     update_ui(&mut my_display, ui_state);
-        //     // esp_println::println!("UI state changed: {:?}", ui_state);
-        //     last_ui_state = ui_state;
-        // }
+    //     // Check for UI state changes
+    //     let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
+    //     if ui_state != last_ui_state {
+    //         update_ui(&mut my_display, ui_state);
+    //         // esp_println::println!("UI state changed: {:?}", ui_state);
+    //         last_ui_state = ui_state;
+    //     }
 
-        // // Button 1 = Back (go up a layer)
-        // if BUTTON1_PRESSED.swap(false, Ordering::Acquire) {
-        //     critical_section::with(|cs| {
-        //         let state = UI_STATE.borrow(cs).get();
-        //         let new_state = state.back();
-        //         UI_STATE.borrow(cs).set(new_state);
-        //     });
-        // }
+    //     // Button 1 = Back (go up a layer)
+    //     if BUTTON1_PRESSED.swap(false, Ordering::Acquire) {
+    //         critical_section::with(|cs| {
+    //             let state = UI_STATE.borrow(cs).get();
+    //             let new_state = state.back();
+    //             UI_STATE.borrow(cs).set(new_state);
+    //         });
+    //     }
 
-        // // Button 2 = Select (enter/confirm)
-        // if BUTTON2_PRESSED.swap(false, Ordering::Acquire) {
-        //     critical_section::with(|cs| {
-        //         let state = UI_STATE.borrow(cs).get();
-        //         let new_state = state.select();
-        //         UI_STATE.borrow(cs).set(new_state);
-        //     });
-        // }
+    //     // Button 2 = Select (enter/confirm)
+    //     if BUTTON2_PRESSED.swap(false, Ordering::Acquire) {
+    //         critical_section::with(|cs| {
+    //             let state = UI_STATE.borrow(cs).get();
+    //             let new_state = state.select();
+    //             UI_STATE.borrow(cs).set(new_state);
+    //         });
+    //     }
 
-        // // Button 3 = Transform (exclusive)
-        // if BUTTON3_PRESSED.swap(false, Ordering::Acquire) {
-        //     critical_section::with(|cs| {
-        //         let state = UI_STATE.borrow(cs).get();
-        //         let new_state = state.transform(); // use Omnitrix-only dialog
-        //         UI_STATE.borrow(cs).set(new_state);
-        //     });
-        // }
+    //     // Button 3 = Transform (exclusive)
+    //     if BUTTON3_PRESSED.swap(false, Ordering::Acquire) {
+    //         critical_section::with(|cs| {
+    //             let state = UI_STATE.borrow(cs).get();
+    //             let new_state = state.transform(); // use Omnitrix-only dialog
+    //             UI_STATE.borrow(cs).set(new_state);
+    //         });
+    //     }
 
-        // // Rotary encoder handling
-        // let pos = critical_section::with(|cs| ROTARY.position.borrow(cs).get());
-        // let detent = pos / DETENT_STEPS; // use division (works well for negatives too)
+    //     // Rotary encoder handling
+    //     let pos = critical_section::with(|cs| ROTARY.position.borrow(cs).get());
+    //     let detent = pos / DETENT_STEPS; // use division (works well for negatives too)
         
-        // // If detent changed, update UI state
-        // if Some(detent) != last_detent {
-        //     if let Some(prev) = last_detent {
-        //         let step_delta = detent - prev;
-        //         if step_delta > 0 {
-        //             // turned clockwise: go to next state
-        //             critical_section::with(|cs| {
-        //                 // esp_println::println!("Rotary turned clockwise to detent {} pos {}", detent, pos);
-        //                 let state = UI_STATE.borrow(cs).get();
-        //                 let new_state = state.prev_item();
-        //                 UI_STATE.borrow(cs).set(new_state);
-        //             });
-        //         } else if step_delta < 0 {
-        //             // turned counter-clockwise: go to previous state (optional)
-        //             critical_section::with(|cs| {
-        //                 // esp_println::println!("Rotary turned counter-clockwise to detent {} pos {}", detent, pos);
-        //                 let state = UI_STATE.borrow(cs).get();
-        //                 let new_state = state.next_item();
-        //                 UI_STATE.borrow(cs).set(new_state);
-        //             });
-        //         }
-        //     }
-        //     last_detent = Some(detent);
-        // }
+    //     // If detent changed, update UI state
+    //     if Some(detent) != last_detent {
+    //         if let Some(prev) = last_detent {
+    //             let step_delta = detent - prev;
+    //             if step_delta > 0 {
+    //                 // turned clockwise: go to next state
+    //                 critical_section::with(|cs| {
+    //                     // esp_println::println!("Rotary turned clockwise to detent {} pos {}", detent, pos);
+    //                     let state = UI_STATE.borrow(cs).get();
+    //                     let new_state = state.prev_item();
+    //                     UI_STATE.borrow(cs).set(new_state);
+    //                 });
+    //             } else if step_delta < 0 {
+    //                 // turned counter-clockwise: go to previous state (optional)
+    //                 critical_section::with(|cs| {
+    //                     // esp_println::println!("Rotary turned counter-clockwise to detent {} pos {}", detent, pos);
+    //                     let state = UI_STATE.borrow(cs).get();
+    //                     let new_state = state.next_item();
+    //                     UI_STATE.borrow(cs).set(new_state);
+    //                 });
+    //             }
+    //         }
+    //         last_detent = Some(detent);
+    //     }
 
-        // // Small delay to reduce CPU usage
-        // for _ in 0..10000 { core::hint::spin_loop(); }
+    //     // Small delay to reduce CPU usage
+    //     for _ in 0..10000 { core::hint::spin_loop(); }
     // }
 }

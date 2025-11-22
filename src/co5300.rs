@@ -315,62 +315,16 @@ where
     //     Ok(())
     // }
 
-
-    // // Write a list of pixel rows (each row is &[u8]) in one RAMWR transaction. debug only
-    // pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
-    //     -> Result<(), Co5300Error<(), RST::Error>>
-    // {
-    //     // Simple implementation: send each row as a separate RAMWRC chunk.
-    //     let mut first = true;
-    //     for row in rows {
-    //         if row.is_empty() { continue; }
-    //         let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
-    //         first = false;
-    //         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-    //         let _ = self.spi.cs.set_low();
-    //         let _ = self.spi.bus.half_duplex_write(DataMode::Single, Command::None, Address::None, 0, &hdr);
-    //         let res = self.spi.bus.half_duplex_write(DataMode::Single, Command::None, Address::None, 0, row);
-    //         let _ = self.spi.cs.set_high();
-    //         res.map_err(|_| Co5300Error::Spi(()))?;
-    //     }
-    //     Ok(())
-    // }
-
-
-    // // temporary for prototyping
-    // pub fn write_2x2(
-    //     &mut self,
-    //     x: u16,
-    //     y: u16,
-    //     color_1: Rgb565,
-    //     color_2: Rgb565,
-    //     color_3: Rgb565,
-    //     color_4: Rgb565,
-    // ) -> Result<(), Co5300Error<(), RST::Error>> {
-    //     if x >= self.w || y >= self.h || x + 1 >= self.w || y + 1 >= self.h {
-    //         return Err(Co5300Error::OutOfBounds);
-    //     }
-    //     // Align to even x (panel quirk-friendly)
-    //     let x0 = x & !1;
-    //     let y0 = y & !1;
-
-    //     if x0 + 1 >= self.w || y0 + 1 >= self.h {
-    //         return Err(Co5300Error::OutOfBounds);
-    //     }
-
-    //     self.set_window_raw(x0, y0, x0 + 1, y0 + 1)?;
-
-    //     let a = color_1.into_storage().to_be_bytes();
-    //     let b = color_2.into_storage().to_be_bytes();
-    //     let c = color_3.into_storage().to_be_bytes();
-    //     let d = color_4.into_storage().to_be_bytes();
-
-    //     let row0 = [a[0], a[1], b[0], b[1]];
-    //     let row1 = [c[0], c[1], d[0], d[1]];
-
-    //     let rows: [&[u8]; 2] = [&row0, &row1];
-    //     self.write_pixels_rows(&rows)
-    // }
+    // adjustable brightness (0-255)
+    pub fn set_brightness(&mut self, bright: u8)
+        -> Result<(), Co5300Error<(), RST::Error>>
+    {
+        // exit qspi if needed
+        self.qspi_exit_single();
+        let res = self.cmd(0x51, &[bright]);
+        self.qspi_enter_quad();
+        res
+    }
 
 
     // Flush an FB rectangle, forcing even start/end (2x2 tiles), using raw window.
@@ -693,6 +647,26 @@ where
         let _ = self.spi.cs.set_high();
         res.map_err(|_| Co5300Error::Spi(()))
     }
+
+    // Send a bare QSPI mode-change instruction (0x38 enter, 0x3B enter dual, 0xFF exit).
+    // Must be sent in the *current* bus width (we enter from single, so use 1-wire).
+    fn qspi_send_mode_instr(&mut self, instr: u8, mode: DataMode) {
+        let command = Command::_8Bit(instr as u16, mode);
+        let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
+        let _ = self.spi.cs.set_low();
+        let _ = bus.half_duplex_write(mode, command, Address::None, 0, &[]);
+        let _ = self.spi.cs.set_high();
+    }
+
+    // Enter quad-data mode (enable QPI, per CO5300 table: 0x38).
+    fn qspi_enter_quad(&mut self) {
+        self.qspi_send_mode_instr(0x38, DataMode::Single);
+    }
+
+    // go back to 1-wire SPI (0xFF).
+    fn qspi_exit_single(&mut self) {
+        self.qspi_send_mode_instr(0xFF, DataMode::Quad);
+    }
 }
 
 // -------------------- embedded-graphics integration --------------------
@@ -852,46 +826,6 @@ where
     Ok(display)
 }
 
-// This matches wiring: Spi<'a, Blocking> + CS pin + NoDelay
-// pub type SpiDev<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>;
-
-// // Expose a ready-to-use display type (share lifetime with SPI and FB)
-// pub type DisplayType<'a> = Co5300Display<'a, SpiDev<'a>, Output<'a>>;
-
-// // This matches the alias we discussed above
-// pub type SpiDev<'a> =
-//     ExclusiveDevice<SpiDmaBus<'a, Blocking>, Output<'a>, TimerDelay>;
-
-// impl<'fb, RST> Co5300Display<'fb, SpiDev<'fb>, RST>
-// where
-//     RST: OutputPin,
-// {
-//     fn qspi_ram_write(
-//         &mut self,
-//         cmd: u8,
-//         addr: u32,
-//         dummy_cycles: u8,
-//         pixels: &[u8],
-//     ) -> Result<(), Co5300Error<(), RST::Error>> {
-//         // 1) configure command and address phases
-//         let command = Command::_8Bit(cmd as u16, DataMode::Single);
-//         let address = Address::_24Bit(addr, DataMode::Single);
-
-//         // 2) get the underlying SpiDmaBus from ExclusiveDevice
-//         let bus: &mut SpiDmaBus<'fb, Blocking> = self.spi.bus_mut();
-
-//         // 3) QSPI payload phase on 4 lines
-//         bus.half_duplex_write(
-//             DataMode::Quad,  // data payload on 4 lines
-//             command,
-//             address,
-//             dummy_cycles,
-//             pixels,
-//         )
-//         .map_err(|_| Co5300Error::Spi(()))
-//     }
-// }
-
 
 // Raw SPI container: manual CS + bus so we can wrap half_duplex writes ourselves.
 pub struct RawSpiDev<'a> {
@@ -901,84 +835,3 @@ pub struct RawSpiDev<'a> {
 
 // Keep this type alias in sync with display.rs
 pub type DisplayType<'a> = Co5300Display<'a, Output<'a>>;
-
-impl<'fb, RST> Co5300Display<'fb, RST>
-where
-    RST: OutputPin,
-{
-
-    // Send a bare QSPI mode-change instruction (0x38 enter, 0x3B enter dual, 0xFF exit).
-    // Must be sent in the *current* bus width (we enter from single, so use 1-wire).
-    fn qspi_send_mode_instr(&mut self, instr: u8, mode: DataMode) {
-        let command = Command::_8Bit(instr as u16, mode);
-        let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
-        let _ = self.spi.cs.set_low();
-        let _ = bus.half_duplex_write(mode, command, Address::None, 0, &[]);
-        let _ = self.spi.cs.set_high();
-    }
-
-    // Enter quad-data mode (enable QPI, per CO5300 table: 0x38).
-    fn qspi_enter_quad(&mut self) {
-        self.qspi_send_mode_instr(0x38, DataMode::Single);
-    }
-
-    // Optional: go back to 1-wire SPI (0xFF).
-    fn qspi_exit_single(&mut self) {
-        self.qspi_send_mode_instr(0xFF, DataMode::Quad);
-    }
-
-
-    // debugging
-    // // Fast quad fill that streams a solid color over QPI and mirrors into the FB.
-    // pub fn qspi_fill_solid(&mut self, color: Rgb565) {
-    //     let total_bytes = (self.w as usize) * (self.h as usize) * 2;
-    //     if total_bytes == 0 { return; }
-
-    //     let _ = self.qspi_set_window_raw(0, 0, self.w - 1, self.h - 1);
-
-    //     // Prepare staging buffer with the color pattern
-    //     let mut stage = mem::replace(&mut self.stage, alloc::vec![].into_boxed_slice());
-    //     let be = color.into_storage().to_be_bytes();
-    //     for i in (0..stage.len()).step_by(2) {
-    //         stage[i] = be[0];
-    //         if i + 1 < stage.len() { stage[i + 1] = be[1]; }
-    //     }
-
-    //     // Stream using quad opcode/address/data
-    //     let instruction = Command::_8Bit(0x32, DataMode::Quad);
-    //     let address_mode = DataMode::Quad;
-    //     let data_mode = DataMode::Quad;
-    //     let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
-
-    //     let mut remaining = total_bytes;
-    //     let mut current_cmd = RAMWR_OPCODE;
-    //     while remaining > 0 {
-    //         let take = core::cmp::min(stage.len(), remaining);
-    //         let ad: u32 = (current_cmd as u32) << 8;
-    //         let address = Address::_24Bit(ad, address_mode);
-
-    //         let _ = self.spi.cs.set_low();
-    //         let res = bus.half_duplex_write(
-    //             data_mode,
-    //             instruction,
-    //             address,
-    //             0,
-    //             &stage[..take],
-    //         );
-    //         let _ = self.spi.cs.set_high();
-    //         if res.is_err() {
-    //             esp_println::println!("quad fill error");
-    //             break;
-    //         }
-
-    //         remaining -= take;
-    //         current_cmd = RAMWRC_OPCODE;
-    //     }
-
-    //     // Restore stage buffer
-    //     self.stage = stage;
-
-    //     // Mirror into framebuffer
-    //     self.fb.fill(color.into_storage());
-    // }
-}

@@ -13,7 +13,6 @@ use esp_hal::{
     spi::master::Config,
     spi::Mode,
     time::Rate,
-    Blocking,
     timer::systimer::{SystemTimer, Unit},
 };
 
@@ -143,7 +142,7 @@ mod co5300_backend {
     use esp_hal::{
         dma::{DmaRxBuf, DmaTxBuf},
         dma_buffers,
-        spi::master::{Spi, SpiDmaBus},
+        spi::master::Spi,
     };
     use crate::co5300::{self, Co5300Display, RawSpiDev};
 
@@ -191,9 +190,7 @@ mod co5300_backend {
         // // .with_miso(do1)
         // .with_dma(dma_ch0);
 
-        use esp_hal::spi::master::DataMode; // we'll need this later
 
-        // 60 MHz quad; adjust if instability shows up
         let spi = Spi::new(
             spi2,
             Config::default()
