@@ -22,7 +22,7 @@ use esp32s3_tests::{
     display::setup_display,
     wiring::{init_board_pins, BoardPins},
     input::{ButtonState, RotaryState, handle_button_generic, handle_encoder_generic},
-    ui::{MainMenuState, Page, UiState, update_ui, precache_logo},
+    ui::{MainMenuState, Page, UiState, update_ui, precache_asset, AssetId},
 };
 
 use esp_backtrace as _;
@@ -137,6 +137,7 @@ fn main() -> ! {
     // initial UI state
     let mut last_ui_state = UiState { page: Page::Main(MainMenuState::Home), dialog: None };
 
+    let mut needs_redraw = true;
     // // for debug, start on Alien page
     // let mut last_ui_state = UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien10), dialog: None };
 
@@ -219,46 +220,6 @@ fn main() -> ! {
 
     // // -------------------- UI Init --------------------
 
-    // // Demo sequence timing
-    // let demo_start_ms = {
-    //     let t = SystemTimer::unit_value(Unit::Unit0);
-    //     t.saturating_mul(1000) / SystemTimer::ticks_per_second()
-    // };
-
-    
-    // // Helper: ticks -> microseconds
-    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
-    // let to_us = |t0: u64, t1: u64| -> u64 {
-    //     let dt = t1.saturating_sub(t0);
-    //     dt.saturating_mul(1_000_000) / ticks_per_s
-    // };
-
-
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    {
-        // Pre-cache Omnitrix logo image
-        let _ = precache_logo();
-    }
-
-    // Initial UI draw (timed)
-    {
-        // let t0 = SystemTimer::unit_value(Unit::Unit0);
-        update_ui(&mut my_display, last_ui_state);
-        // let t1 = SystemTimer::unit_value(Unit::Unit0);
-        // esp_println::println!("Initial UI draw: {} us", to_us(t0, t1));
-    }
-
-    
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    {
-        // Pre-cache all Omnitrix images
-
-        use esp32s3_tests::ui::precache_all;
-        let _n = precache_all();
-        // esp_println::println!("Precached {} Omnitrix images", n);
-    }
-    
-    // -------------------- Demo Sequence --------------------
     // Demo sequence timing
     let demo_start_ms = {
         let t = SystemTimer::unit_value(Unit::Unit0);
@@ -272,6 +233,51 @@ fn main() -> ! {
         let dt = t1.saturating_sub(t0);
         dt.saturating_mul(1_000_000) / ticks_per_s
     };
+
+    // let t0 = SystemTimer::unit_value(Unit::Unit0);
+    // my_display.fill_rect_solid_no_fb(0, 0, 466, 466, Rgb565::BLACK);
+    // let t1 = SystemTimer::unit_value(Unit::Unit0);
+    // esp_println::println!("Initial fill_rect_solid_no_fb: {} us", to_us(t0, t1));
+
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    {
+        // Pre-cache Omnitrix logo image
+        let _ = precache_asset(AssetId::Logo);
+    }
+
+    // Initial UI draw (timed)
+    {
+        let t0 = SystemTimer::unit_value(Unit::Unit0);
+        update_ui(&mut my_display, last_ui_state, needs_redraw);
+        let t1 = SystemTimer::unit_value(Unit::Unit0);
+        esp_println::println!("Initial UI draw: {} us", to_us(t0, t1));
+    }
+
+    needs_redraw = false;
+    
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    {
+        // Pre-cache all Omnitrix images
+
+        use esp32s3_tests::ui::precache_all;
+        let _n = precache_all();
+        // esp_println::println!("Precached {} Omnitrix images", n);
+    }
+    
+    // -------------------- Demo Sequence --------------------
+    // // Demo sequence timing
+    // let demo_start_ms = {
+    //     let t = SystemTimer::unit_value(Unit::Unit0);
+    //     t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    // };
+
+    
+    // // Helper: ticks -> microseconds
+    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
+    // let to_us = |t0: u64, t1: u64| -> u64 {
+    //     let dt = t1.saturating_sub(t0);
+    //     dt.saturating_mul(1_000_000) / ticks_per_s
+    // };
 
     enum DemoState {
         Home,
@@ -331,9 +337,14 @@ fn main() -> ! {
             }
             DemoState::BackToHome { last_ms } => {
                 if rel > last_ms + 1500 {
+                    // critical_section::with(|cs| {
+                    //     UI_STATE.borrow(cs).set(UiState { page: Page::Main(MainMenuState::Home), dialog: None });
+                    // });
+
+                    // set to info page instead
                     critical_section::with(|cs| {
-                        UI_STATE.borrow(cs).set(UiState { page: Page::Main(MainMenuState::Home), dialog: None });
-                    });
+                        UI_STATE.borrow(cs).set(UiState { page: Page::Info, dialog: None });
+                    }); 
                     demo_state = DemoState::Done;
                 }
             }
@@ -342,12 +353,16 @@ fn main() -> ! {
 
         let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
         if ui_state != last_ui_state {
-            let t0 = SystemTimer::unit_value(Unit::Unit0);
-            update_ui(&mut my_display, ui_state);
+            last_ui_state = ui_state;
+            needs_redraw = true;
+        }
+        let t0 = SystemTimer::unit_value(Unit::Unit0);
+        update_ui(&mut my_display, last_ui_state, needs_redraw);
+        if needs_redraw {
             let t1 = SystemTimer::unit_value(Unit::Unit0);
             esp_println::println!("UI update: {} us", to_us(t0, t1));
-            last_ui_state = ui_state;
         }
+        needs_redraw = false;
 
         for _ in 0..10000 { core::hint::spin_loop(); }
     }
@@ -359,10 +374,11 @@ fn main() -> ! {
     //     // Check for UI state changes
     //     let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
     //     if ui_state != last_ui_state {
-    //         update_ui(&mut my_display, ui_state);
-    //         // esp_println::println!("UI state changed: {:?}", ui_state);
     //         last_ui_state = ui_state;
+    //         needs_redraw = true;
     //     }
+    //     update_ui(&mut my_display, last_ui_state, needs_redraw);
+    //     needs_redraw = false;
 
     //     // Button 1 = Back (go up a layer)
     //     if BUTTON1_PRESSED.swap(false, Ordering::Acquire) {
