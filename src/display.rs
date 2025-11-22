@@ -17,8 +17,6 @@ use esp_hal::{
     timer::systimer::{SystemTimer, Unit},
 };
 
-use embedded_hal_bus::spi::ExclusiveDevice;
-
 use crate::wiring::DisplayPins;
 
 
@@ -63,6 +61,7 @@ impl embedded_hal::delay::DelayNs for TimerDelay {
         }
     }
 }
+
 // ==================================================================
 // GC9A01 (240x240) backend  — feature: devkit-esp32s3-disp128
 // ==================================================================
@@ -146,15 +145,9 @@ mod co5300_backend {
         dma_buffers,
         spi::master::{Spi, SpiDmaBus},
     };
-    use crate::co5300::{self, Co5300Display};
+    use crate::co5300::{self, Co5300Display, RawSpiDev};
 
-    // Bus is now `SpiDmaBus`, not `SpiDma`
-    pub type DisplayType<'a> =
-        Co5300Display<
-            'a,
-            ExclusiveDevice<SpiDmaBus<'a, Blocking>, Output<'a>, TimerDelay>,
-            Output<'a>,
-        >;
+    pub type DisplayType<'a> = Co5300Display<'a, Output<'a>>;
 
     pub fn setup_display<'a>(
         display_pins: DisplayPins<'a>,
@@ -165,9 +158,9 @@ mod co5300_backend {
             cs,
             clk,
             do0,
-            // do1,
-            // do2: _,
-            // do3: _,
+            do1,
+            do2 ,
+            do3,
             rst,
             mut en,
             tp_sda: _,
@@ -185,7 +178,22 @@ mod co5300_backend {
         en.set_high();
         delay.delay_ms(100);    // give panel power rails time to stabilise
 
-        // SPI @ 40 MHz in datasheet, Mode 0, known stable, up to 80 MHz overclock might work but is unstable
+        // // SPI @ 40 MHz in datasheet, Mode 0, known stable, up to 80 MHz overclock might work but is unstable
+        // let spi = Spi::new(
+        //     spi2,
+        //     Config::default()
+        //         .with_frequency(Rate::from_hz(80_000_000))
+        //         .with_mode(Mode::_0),
+        // )
+        // .unwrap()
+        // .with_sck(clk)
+        // .with_mosi(do0)
+        // // .with_miso(do1)
+        // .with_dma(dma_ch0);
+
+        use esp_hal::spi::master::DataMode; // we'll need this later
+
+        // 60 MHz quad; adjust if instability shows up
         let spi = Spi::new(
             spi2,
             Config::default()
@@ -194,18 +202,21 @@ mod co5300_backend {
         )
         .unwrap()
         .with_sck(clk)
-        .with_mosi(do0)
-        // .with_miso(do1)
+        .with_sio0(do0)
+        .with_sio1(do1)
+        .with_sio2(do2)
+        .with_sio3(do3)
         .with_dma(dma_ch0);
+
 
         let (rx_buf, rx_desc, tx_buf, tx_desc) = dma_buffers!(4096, 65536);
         let rx = DmaRxBuf::new(rx_desc, rx_buf).unwrap();
         let tx = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
 
         let spi_bus = spi.with_buffers(rx, tx);
-        let spi_dev = ExclusiveDevice::new(spi_bus, cs, TimerDelay).unwrap();
+        let raw = RawSpiDev { bus: spi_bus, cs };
 
-        co5300::new_with_defaults(spi_dev, Some(rst), &mut delay, fb)
+        co5300::new_with_defaults(raw, Some(rst), &mut delay, fb)
             .expect("CO5300 init failed")
 
     }

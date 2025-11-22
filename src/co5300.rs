@@ -24,21 +24,22 @@ use embedded_graphics::{
 };
 use embedded_hal::{
     digital::OutputPin,
-    spi::SpiDevice,
 };
-
-use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 
 use esp_hal::{
     Blocking,
     gpio::Output,
-    spi::master::Spi,
 };
 
-use embedded_hal::spi::Operation;
+// use embedded_hal::spi::Operation;
 use embedded_graphics::prelude::IntoStorage;
 
+use esp_hal::spi::master::{DataMode, Command, Address, SpiDmaBus};
+// use embedded_hal::delay::DelayNs;
+
+
 extern crate alloc;
+use alloc::vec;
 
 // Public constants so the rest of your code can adopt 466×466 easily.
 pub const CO5300_WIDTH: u16 = 466;
@@ -47,37 +48,10 @@ const RAMWR_OPCODE: u8 = 0x2C;
 const RAMWRC_OPCODE: u8 = 0x3C;
 
 // Use a small CPU staging buffer per call (HAL will copy it into DMA TX buffer)
-const STAGE_BYTES: usize = 2048; // safe on stack; adjust if needed
-const DMA_CHUNK_SIZE: usize = 32*1023; // 32*1023=32768 minus some overhead
+const STAGE_BYTES: usize = 4096; // safe on stack; adjust if needed
+const DMA_CHUNK_SIZE: usize = 32*1023; // max DMA chunk size for ESP32-S3 SPI
 
-/// Low-level command send helper, for debugging
-// #[esp_hal::ram] // run from IRAM
-pub fn ramwr_stream<SD: SpiDevice<u8>>(
-    spi: &mut SD,
-    chunks: &[&[u8]],
-) -> Result<(), SD::Error> {
-    use embedded_hal::spi::Operation;
-
-    if chunks.is_empty() {
-        return Ok(());
-    }
-
-    let hdr: [u8; 4] = [0x02, 0x00, RAMWR_OPCODE, 0x00];
-
-    // Header + many data chunks in one CS-asserted transaction
-    let mut ops: heapless::Vec<Operation<'_, u8>, 512> = heapless::Vec::new();
-    ops.push(Operation::Write(&hdr)).ok();
-
-    for &c in chunks {
-        if !c.is_empty() {
-            ops.push(Operation::Write(c)).ok();
-        }
-    }
-
-    spi.transaction(&mut ops)
-}
-
-/// Error type that wraps SPI and GPIO errors.
+// Error type that wraps SPI and GPIO errors.
 #[derive(Debug)]
 pub enum Co5300Error<SpiE, GpioE> {
     Spi(SpiE),
@@ -92,8 +66,8 @@ impl<SpiE: fmt::Debug, GpioE: fmt::Debug> From<SpiE> for Co5300Error<SpiE, GpioE
 // A very small CO5300 panel driver speaking the "0x02 + CMD + DATA" SPI framing.
 // No D/C pin is used; CS is handled by the `SpiDevice` implementation.
 // Implements `DrawTarget<Rgb565>` for convenience (per-pixel path is simple but slow).
-pub struct Co5300Display<'fb,SPI, RST> {
-    pub spi: SPI,
+pub struct Co5300Display<'fb, RST> {
+    pub spi: RawSpiDev<'fb>,
     rst: Option<RST>,
     w: u16,
     h: u16,
@@ -104,10 +78,8 @@ pub struct Co5300Display<'fb,SPI, RST> {
 }
 
 
-impl<'fb, SPI, RST> Co5300Display<'fb, SPI, RST>
+impl<'fb, RST> Co5300Display<'fb, RST>
 where
-    // embedded-hal 1.0 `SpiDevice<u8>` so we can do atomic CS-asserted transfers.
-    SPI: SpiDevice<u8>,
     RST: OutputPin,
 {
     // Create + init the panel. Call once at startup.
@@ -117,13 +89,13 @@ where
     // * `delay` - any `DelayNs` impl (spin delay is fine)
     // * `width`, `height` - normally 466x466 for this AMOLED
     pub fn new(
-        spi: SPI,
+        spi: RawSpiDev<'fb>,
         rst: Option<RST>,
         delay: &mut impl embedded_hal::delay::DelayNs,
         width: u16,
         height: u16,
         fb: &'fb mut [u16],
-    ) -> Result<Self, Co5300Error<SPI::Error, RST::Error>> {
+    ) -> Result<Self, Co5300Error<(), RST::Error>> {
 
         // Validate FB size matches WxH (RGB565)
         let expected = (width as usize) * (height as usize);
@@ -186,11 +158,14 @@ where
         this.cmd(0x29, &[])?;
         delay.delay_ms(200);  // was 80, give panel more time
 
-        // // 0x51 0xFF (brightness max)
-        // this.cmd(0x51, &[0xFF])?;
+        // 0x51 0xFF (brightness max)
+        this.cmd(0x51, &[0xFF])?;
 
-        // lower brightness
-        this.cmd(0x51, &[0x80])?;
+        // this.cmd(0x38, &[])?;   // Enable QPI / Quad SPI
+        // delay.delay_ms(10);
+
+        // // lower brightness
+        // this.cmd(0x51, &[0x80])?;
 
         // Set memory access control (orientation)
         this.cmd(0x36, &[0x00])?; 
@@ -202,12 +177,6 @@ where
         this.fb.fill(0); // clear FB
         
         Ok(this)
-    }
-
-    // Expose the underlying SPI device to allow changing frequency later.
-    // WARNING: Only do this when no transfer is active.
-    pub fn spi_mut(&mut self) -> &mut SPI {
-        &mut self.spi
     }
 
     // Panel width in pixels.
@@ -222,12 +191,11 @@ where
     pub fn size(&self) -> (u16, u16) { (self.w, self.h) }
 
     // Raw window set (no even expansion, still applies panel offsets)
-    // #[esp_hal::ram] // run from IRAM
     fn set_window_raw(
         &mut self,
         x0: u16, y0: u16,
         x1: u16, y1: u16,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
 
         // Bounds check
         if x0 > x1 || y0 > y1 || x1 >= self.w || y1 >= self.h {
@@ -250,6 +218,44 @@ where
         Ok(())
     }
 
+    // QSPI variant: send CASET/RASET using quad instruction/address/data while in QPI.
+    fn qspi_set_window_raw(
+        &mut self,
+        x0: u16, y0: u16,
+        x1: u16, y1: u16,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
+        if x0 > x1 || y0 > y1 || x1 >= self.w || y1 >= self.h {
+            return Err(Co5300Error::OutOfBounds);
+        }
+
+        let x0p = x0 + self.x_off;
+        let x1p = x1 + self.x_off;
+        let y0p = y0 + self.y_off;
+        let y1p = y1 + self.y_off;
+
+        let ca = [(x0p >> 8) as u8, (x0p & 0xFF) as u8, (x1p >> 8) as u8, (x1p & 0xFF) as u8];
+        let ra = [(y0p >> 8) as u8, (y0p & 0xFF) as u8, (y1p >> 8) as u8, (y1p & 0xFF) as u8];
+
+        // Quad command writer: opcode 0x02, address on quad, data on quad
+        let mut send_cmd_qspi = |cmd: u8, data: &[u8]| -> Result<(), Co5300Error<(), RST::Error>> {
+            let instruction = Command::_8Bit(0x02, DataMode::Quad);
+            let address = Address::_24Bit((cmd as u32) << 8, DataMode::Quad);
+            let _ = self.spi.cs.set_low();
+            let res = self.spi.bus.half_duplex_write(
+                DataMode::Quad,
+                instruction,
+                address,
+                0,
+                data,
+            );
+            let _ = self.spi.cs.set_high();
+            res.map_err(|_| Co5300Error::Spi(()))
+        };
+
+        send_cmd_qspi(0x2A, &ca)?;
+        send_cmd_qspi(0x2B, &ra)?;
+        Ok(())
+    }
 
     // TODO LETS TEST THESE, also I want brightness control
     // //---- Power control ---- all untested:
@@ -310,74 +316,68 @@ where
     // }
 
 
-    // Write a list of pixel rows (each row is &[u8]) in one RAMWR transaction.
-    // #[esp_hal::ram] // run from IRAM
-    pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
-        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    {
-        // Send RAMWR + pixel data
-        ramwr_stream(&mut self.spi, rows).map_err(Co5300Error::Spi)
-    }
+    // // Write a list of pixel rows (each row is &[u8]) in one RAMWR transaction. debug only
+    // pub fn write_pixels_rows(&mut self, rows: &[&[u8]])
+    //     -> Result<(), Co5300Error<(), RST::Error>>
+    // {
+    //     // Simple implementation: send each row as a separate RAMWRC chunk.
+    //     let mut first = true;
+    //     for row in rows {
+    //         if row.is_empty() { continue; }
+    //         let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+    //         first = false;
+    //         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+    //         let _ = self.spi.cs.set_low();
+    //         let _ = self.spi.bus.half_duplex_write(DataMode::Single, Command::None, Address::None, 0, &hdr);
+    //         let res = self.spi.bus.half_duplex_write(DataMode::Single, Command::None, Address::None, 0, row);
+    //         let _ = self.spi.cs.set_high();
+    //         res.map_err(|_| Co5300Error::Spi(()))?;
+    //     }
+    //     Ok(())
+    // }
 
 
-    // temporary for prototyping
-    pub fn write_2x2(
-        &mut self,
-        x: u16,
-        y: u16,
-        color_1: Rgb565,
-        color_2: Rgb565,
-        color_3: Rgb565,
-        color_4: Rgb565,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        if x >= self.w || y >= self.h || x + 1 >= self.w || y + 1 >= self.h {
-            return Err(Co5300Error::OutOfBounds);
-        }
-        // Align to even x (panel quirk-friendly)
-        let x0 = x & !1;
-        let y0 = y & !1;
+    // // temporary for prototyping
+    // pub fn write_2x2(
+    //     &mut self,
+    //     x: u16,
+    //     y: u16,
+    //     color_1: Rgb565,
+    //     color_2: Rgb565,
+    //     color_3: Rgb565,
+    //     color_4: Rgb565,
+    // ) -> Result<(), Co5300Error<(), RST::Error>> {
+    //     if x >= self.w || y >= self.h || x + 1 >= self.w || y + 1 >= self.h {
+    //         return Err(Co5300Error::OutOfBounds);
+    //     }
+    //     // Align to even x (panel quirk-friendly)
+    //     let x0 = x & !1;
+    //     let y0 = y & !1;
 
-        if x0 + 1 >= self.w || y0 + 1 >= self.h {
-            return Err(Co5300Error::OutOfBounds);
-        }
+    //     if x0 + 1 >= self.w || y0 + 1 >= self.h {
+    //         return Err(Co5300Error::OutOfBounds);
+    //     }
 
-        self.set_window_raw(x0, y0, x0 + 1, y0 + 1)?;
+    //     self.set_window_raw(x0, y0, x0 + 1, y0 + 1)?;
 
-        let a = color_1.into_storage().to_be_bytes();
-        let b = color_2.into_storage().to_be_bytes();
-        let c = color_3.into_storage().to_be_bytes();
-        let d = color_4.into_storage().to_be_bytes();
+    //     let a = color_1.into_storage().to_be_bytes();
+    //     let b = color_2.into_storage().to_be_bytes();
+    //     let c = color_3.into_storage().to_be_bytes();
+    //     let d = color_4.into_storage().to_be_bytes();
 
-        let row0 = [a[0], a[1], b[0], b[1]];
-        let row1 = [c[0], c[1], d[0], d[1]];
+    //     let row0 = [a[0], a[1], b[0], b[1]];
+    //     let row1 = [c[0], c[1], d[0], d[1]];
 
-        let rows: [&[u8]; 2] = [&row0, &row1];
-        self.write_pixels_rows(&rows)
-    }
-
-    #[inline(always)]
-    fn write_ram_chunk(
-        &mut self,
-        first_flag: &mut bool,
-        chunk: &[u8],
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-        let cmd = if *first_flag { RAMWR_OPCODE } else { RAMWRC_OPCODE };
-        *first_flag = false;
-        let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-        self.spi
-            .transaction(&mut [
-                Operation::Write(&hdr),
-                Operation::Write(chunk),
-            ])
-            .map_err(Co5300Error::Spi)
-    }
+    //     let rows: [&[u8]; 2] = [&row0, &row1];
+    //     self.write_pixels_rows(&rows)
+    // }
 
 
     // Flush an FB rectangle, forcing even start/end (2x2 tiles), using raw window.
     fn flush_fb_rect_even(
         &mut self,
         x0: u16, y0: u16, x1: u16, y1: u16,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         if x0 > x1 || y0 > y1 || x0 >= self.w || y0 >= self.h {
             return Ok(());
         }
@@ -388,10 +388,15 @@ where
         let ay1 = (y1 | 1).min(self.h - 1);
         let ew = (ax1 - ax0 + 1) as usize;
 
-        self.set_window_raw(ax0, ay0, ax1, ay1)?;
+        // Use quad window and quad payload streaming
+        self.qspi_set_window_raw(ax0, ay0, ax1, ay1)?;
 
         let fbw = self.w as usize;
-        let mut first = true;
+        let instruction = Command::_8Bit(0x32, DataMode::Quad);
+        let mut current_cmd = RAMWR_OPCODE;
+        let address_mode = DataMode::Quad;
+        let data_mode = DataMode::Quad;
+        let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
 
         // Move stage out, use it locally, then restore to self at end
         let mut stage = mem::replace(&mut self.stage, alloc::vec![].into_boxed_slice());
@@ -401,7 +406,20 @@ where
             let row_base = (y as usize) * fbw + (ax0 as usize);
             for x in 0..ew {
                 if filled + 2 > stage.len() {
-                    self.write_ram_chunk(&mut first, &stage[..filled])?;
+                    // send current chunk over quad
+                    let ad: u32 = (current_cmd as u32) << 8;
+                    let address = Address::_24Bit(ad, address_mode);
+                    let _ = self.spi.cs.set_low();
+                    let res = bus.half_duplex_write(
+                        data_mode,
+                        instruction,
+                        address,
+                        0,
+                        &stage[..filled],
+                    );
+                    let _ = self.spi.cs.set_high();
+                    res.map_err(|_| Co5300Error::Spi(()))?;
+                    current_cmd = RAMWRC_OPCODE;
                     filled = 0;
                 }
                 let be = self.fb[row_base + x].to_be_bytes();
@@ -410,7 +428,21 @@ where
                 filled += 2;
             }
         }
-        self.write_ram_chunk(&mut first, &stage[..filled])?;
+
+        if filled > 0 {
+            let ad: u32 = (current_cmd as u32) << 8;
+            let address = Address::_24Bit(ad, address_mode);
+            let _ = self.spi.cs.set_low();
+            let res = bus.half_duplex_write(
+                data_mode,
+                instruction,
+                address,
+                0,
+                &stage[..filled],
+            );
+            let _ = self.spi.cs.set_high();
+            res.map_err(|_| Co5300Error::Spi(()))?;
+        }
 
         // Restore stage buffer to self
         self.stage = stage;
@@ -420,7 +452,20 @@ where
     // Convenience: fill a rectangle with a solid color, using staging buffer.
     pub fn fill_rect_solid(
         &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565,
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
+        self.fill_rect_solid_opt(x, y, w, h, color, true)
+    }
+
+    // Same as `fill_rect_solid` but optionally skips framebuffer mirroring for speed.
+    pub fn fill_rect_solid_no_fb(
+        &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
+        self.fill_rect_solid_opt(x, y, w, h, color, false)
+    }
+
+    fn fill_rect_solid_opt(
+        &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565, update_fb: bool,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         if w == 0 || h == 0 { return Ok(()); }
 
         // overflow-safe bounds
@@ -429,14 +474,13 @@ where
         if x0 >= pw || y0 >= ph { return Err(Co5300Error::OutOfBounds); }
         if x0.checked_add(w32).unwrap_or(u32::MAX) > pw ||
            y0.checked_add(h32).unwrap_or(u32::MAX) > ph {
-            return Err(Co5300Error::OutOfBounds);
-        }
+            return Err(Co5300Error::OutOfBounds); }
         let (x1, y1) = ((x0 + w32 - 1) as u16, (y0 + h32 - 1) as u16);
 
-        self.set_window_raw(x, y, x1, y1)?;
+        self.qspi_set_window_raw(x, y, x1, y1)?;
 
         // Move stage out, fill pattern, send in chunks, then restore
-        let mut stage = mem::replace(&mut self.stage, alloc::vec![].into_boxed_slice());
+        let mut stage = mem::replace(&mut self.stage, vec![].into_boxed_slice());
 
         // Prepare BE pattern once
         let c = color.into_storage().to_be_bytes();
@@ -446,36 +490,49 @@ where
         }
 
         let mut remaining = (w as usize) * (h as usize) * 2;
-        let mut first = true;
+        let instruction = Command::_8Bit(0x32, DataMode::Quad);
+        let data_mode = DataMode::Quad;
+        let address_mode = DataMode::Quad;
+        let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
+        let mut current_cmd = RAMWR_OPCODE;
         while remaining > 0 {
             let take = core::cmp::min(stage.len(), remaining);
-            let hdr: [u8; 4] = [0x02, 0x00, if first { RAMWR_OPCODE } else { RAMWRC_OPCODE }, 0x00];
-            first = false;
-            self.spi.transaction(&mut [
-                Operation::Write(&hdr),
-                Operation::Write(&stage[..take]),
-            ]).map_err(Co5300Error::Spi)?;
+            let ad: u32 = (current_cmd as u32) << 8;
+            let address = Address::_24Bit(ad, address_mode);
+            let _ = self.spi.cs.set_low();
+            let res = bus.half_duplex_write(
+                data_mode,
+                instruction,
+                address,
+                0,
+                &stage[..take],
+            );
+            let _ = self.spi.cs.set_high();
+            res.map_err(|_| Co5300Error::Spi(()))?;
             remaining -= take;
+            current_cmd = RAMWRC_OPCODE;
         }
 
         // Restore stage buffer
         self.stage = stage;
 
         // Mirror into FB
-        let fbw = self.w as usize;
-        let row_w = w as usize;
-        let col_start = x as usize;
-        let row_start = y as usize;
-        let color16 = color.into_storage();
-        for ry in 0..(h as usize) {
-            let base = (row_start + ry) * fbw + col_start;
-            let dst = &mut self.fb[base..base + row_w];
-            for px in dst.iter_mut() { *px = color16; }
+        if update_fb {
+            let fbw = self.w as usize;
+            let row_w = w as usize;
+            let col_start = x as usize;
+            let row_start = y as usize;
+            let color16 = color.into_storage();
+            for ry in 0..(h as usize) {
+                let base = (row_start + ry) * fbw + col_start;
+                let dst = &mut self.fb[base..base + row_w];
+                for px in dst.iter_mut() { *px = color16; }
+            }
         }
         Ok(())
     }
 
-    // Chunked rect blit from BE bytes; send slices directly (HAL copies to its DMA buffer).
+    // Chunked rect blit from BE bytes; send slices directly using quad and mirror into FB.
     pub fn blit_rect_be_fast(
         &mut self, 
         x0: u16, 
@@ -483,7 +540,31 @@ where
         w: u16, 
         h: u16, 
         data: &[u8],
-    ) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
+        self.blit_rect_be_fast_opt(x0, y0, w, h, data, true)
+    }
+
+    // Same as `blit_rect_be_fast` but optionally skips framebuffer mirroring for speed.
+    pub fn blit_rect_be_fast_no_fb(
+        &mut self, 
+        x0: u16, 
+        y0: u16, 
+        w: u16, 
+        h: u16, 
+        data: &[u8],
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
+        self.blit_rect_be_fast_opt(x0, y0, w, h, data, false)
+    }
+
+    fn blit_rect_be_fast_opt(
+        &mut self, 
+        x0: u16, 
+        y0: u16, 
+        w: u16, 
+        h: u16, 
+        data: &[u8],
+        update_fb: bool,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         if w == 0 || h == 0 { return Ok(()); }
 
         // overflow-safe bounds
@@ -499,103 +580,124 @@ where
         let expected = (w as usize) * (h as usize) * 2;
         if data.len() != expected { return Err(Co5300Error::OutOfBounds); }
 
-        self.set_window_raw(x0, y0, x1, y1)?;
+        self.qspi_set_window_raw(x0, y0, x1, y1)?;
 
-        // manually chunk to respect the DMA buffer size.
         let mut off = 0usize;
-        let mut first = true;
+        let mut current_cmd = RAMWR_OPCODE;
+        let instruction = Command::_8Bit(0x32, DataMode::Quad);
+        let address_mode = DataMode::Quad;
+        let data_mode = DataMode::Quad;
+        let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
+
         while off < data.len() {
-            // Use our new large chunk size
             let take = core::cmp::min(DMA_CHUNK_SIZE, data.len() - off);
-            let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
-            first = false;
-            let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+            let ad: u32 = (current_cmd as u32) << 8;
+            let address = Address::_24Bit(ad, address_mode);
             let chunk = &data[off..off + take];
-            self.spi.transaction(&mut [
-                Operation::Write(&hdr),
-                Operation::Write(chunk),
-            ]).map_err(Co5300Error::Spi)?;
+            let _ = self.spi.cs.set_low();
+            let res = bus.half_duplex_write(
+                data_mode,
+                instruction,
+                address,
+                0,
+                chunk,
+            );
+            let _ = self.spi.cs.set_high();
+            res.map_err(|_| Co5300Error::Spi(()))?;
             off += take;
+            current_cmd = RAMWRC_OPCODE;
         }
 
         // Update FB (convert BE bytes to native u16)
-        let fbw = self.w as usize;
-        let mut si = 0usize;
-        for ry in 0..(h as usize) {
-            let base = (y0 as usize + ry) * fbw + (x0 as usize);
-            let row = &mut self.fb[base..base + (w as usize)];
-            for px in row.iter_mut() {
-                let hi = data[si]; let lo = data[si + 1];
-                *px = u16::from_be_bytes([hi, lo]);
-                si += 2;
+        if update_fb {
+            let fbw = self.w as usize;
+            let mut si = 0usize;
+            for ry in 0..(h as usize) {
+                let base = (y0 as usize + ry) * fbw + (x0 as usize);
+                let row = &mut self.fb[base..base + (w as usize)];
+                for px in row.iter_mut() {
+                    let hi = data[si]; let lo = data[si + 1];
+                    *px = u16::from_be_bytes([hi, lo]);
+                    si += 2;
+                }
             }
         }
         Ok(())
     }
 
 
-    // Full-frame blit from BE bytes, using direct slices.
-    pub fn blit_full_frame_be_bounced(&mut self, data: &[u8])
-        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    {
-        let needed = (self.w as usize) * (self.h as usize) * 2;
-        if data.len() != needed { return Err(Co5300Error::OutOfBounds); }
+    // // Full-frame blit from BE bytes, using direct slices.
+    // pub fn blit_full_frame_be_bounced(&mut self, data: &[u8])
+    //     -> Result<(), Co5300Error<(), RST::Error>>
+    // {
+    //     let needed = (self.w as usize) * (self.h as usize) * 2;
+    //     if data.len() != needed { return Err(Co5300Error::OutOfBounds); }
 
-        self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
+    //     self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
 
-        // manually chunk to respect the DMA buffer size.
-        let mut off = 0usize;
-        let mut first = true;
-        while off < data.len() {
-            // Use our new large chunk size
-            let take = core::cmp::min(DMA_CHUNK_SIZE, data.len() - off);
-            let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
-            first = false;
-            let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-            let chunk = &data[off..off + take];
-            self.spi.transaction(&mut [
-                Operation::Write(&hdr),
-                Operation::Write(chunk),
-            ]).map_err(Co5300Error::Spi)?;
-            off += take;
-        }
-        // ---- END OF CHANGE ----
+    //     // manually chunk to respect the DMA buffer size.
+    //     let mut off = 0usize;
+    //     let mut first = true;
+    //     while off < data.len() {
+    //         // Use our new large chunk size
+    //         let take = core::cmp::min(DMA_CHUNK_SIZE, data.len() - off);
+    //         let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
+    //         first = false;
+    //         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
+    //         let chunk = &data[off..off + take];
+    //         let _ = self.spi.cs.set_low();
+    //         let _ = self.spi.bus.half_duplex_write(
+    //             DataMode::Single,
+    //             Command::None,
+    //             Address::None,
+    //             0,
+    //             &hdr,
+    //         );
+    //         let res = self.spi.bus.half_duplex_write(
+    //             DataMode::Single,
+    //             Command::None,
+    //             Address::None,
+    //             0,
+    //             chunk,
+    //         );
+    //         let _ = self.spi.cs.set_high();
+    //         res.map_err(|_| Co5300Error::Spi(()))?;
+    //         off += take;
+    //     }
+    //     // ---- END OF CHANGE ----
 
-        // Update FB
-        let mut si = 0usize;
-        for px in self.fb.iter_mut() {
-            let hi = data[si]; let lo = data[si + 1];
-            *px = u16::from_be_bytes([hi, lo]);
-            si += 2;
-        }
-        Ok(())
-    }
+    //     // Update FB
+    //     let mut si = 0usize;
+    //     for px in self.fb.iter_mut() {
+    //         let hi = data[si]; let lo = data[si + 1];
+    //         *px = u16::from_be_bytes([hi, lo]);
+    //         si += 2;
+    //     }
+    //     Ok(())
+    // }
 
     // ---- Low-level helpers ----
+    // Low-level command send (with data)
     #[inline(always)]
     fn cmd(&mut self, cmd: u8, data: &[u8])
-        -> Result<(), Co5300Error<SPI::Error, RST::Error>>
+        -> Result<(), Co5300Error<(), RST::Error>>
     {
-        let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-        if data.is_empty() {
-            self.spi.write(&hdr).map_err(|e| {
-                Co5300Error::Spi(e)
-            })
-        } else {
-            self.spi.transaction(&mut [
-                Operation::Write(&hdr),
-                Operation::Write(data),
-            ]).map_err(|e| {
-                Co5300Error::Spi(e)
-            })
-        }
+        let _ = self.spi.cs.set_low();
+        let res = self.spi.bus.half_duplex_write(
+            DataMode::Single,
+            Command::_8Bit(0x02, DataMode::Single),
+            Address::_24Bit((cmd as u32) << 8, DataMode::Single),
+            0,
+            data,
+        );
+        let _ = self.spi.cs.set_high();
+        res.map_err(|_| Co5300Error::Spi(()))
     }
 }
 
 // -------------------- embedded-graphics integration --------------------
-impl<'fb, SPI, RST> OriginDimensions for Co5300Display<'fb, SPI, RST>
+impl<'fb, RST> OriginDimensions for Co5300Display<'fb, RST>
 where
-    SPI: SpiDevice<u8>,
     RST: OutputPin,
 {
     fn size(&self) -> Size {
@@ -603,9 +705,8 @@ where
     }
 }
 
-impl<'fb, SPI, RST> embedded_graphics::draw_target::DrawTarget for Co5300Display<'fb, SPI, RST>
+impl<'fb, RST> embedded_graphics::draw_target::DrawTarget for Co5300Display<'fb, RST>
 where
-    SPI: embedded_hal::spi::SpiDevice<u8>,
     RST: embedded_hal::digital::OutputPin,
 {
     type Color = embedded_graphics::pixelcolor::Rgb565;
@@ -735,23 +836,149 @@ where
 
 // Convenience builder that picks common defaults and returns the concrete type.
 // Returning the concrete type lets display.rs use `impl Trait` to erase it later.
-pub fn new_with_defaults<'fb, SPI, RST>(
-    spi: SPI,
+pub fn new_with_defaults<'fb, RST>(
+    spi: RawSpiDev<'fb>,
     rst: Option<RST>,
     delay: &mut impl embedded_hal::delay::DelayNs,
     fb: &'fb mut [u16],
-) -> Result<Co5300Display<'fb, SPI, RST>, Co5300Error<SPI::Error, RST::Error>>
+    ) -> Result<Co5300Display<'fb, RST>, Co5300Error<(), RST::Error>>
 where
-    SPI: embedded_hal::spi::SpiDevice<u8>,
     RST: embedded_hal::digital::OutputPin,
 {
     let mut display = Co5300Display::new(spi, rst, delay, CO5300_WIDTH, CO5300_HEIGHT, fb)?;
     display.set_window_raw(0, 0, CO5300_WIDTH - 1, CO5300_HEIGHT - 1)?;
+    // Enter QPI once; we will stay in quad for pixel data and revert only if caller asks.
+    display.qspi_enter_quad();
     Ok(display)
 }
 
 // This matches wiring: Spi<'a, Blocking> + CS pin + NoDelay
-pub type SpiDev<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>;
+// pub type SpiDev<'a> = ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>;
 
-// Expose a ready-to-use display type (share lifetime with SPI and FB)
-pub type DisplayType<'a> = Co5300Display<'a, SpiDev<'a>, Output<'a>>;
+// // Expose a ready-to-use display type (share lifetime with SPI and FB)
+// pub type DisplayType<'a> = Co5300Display<'a, SpiDev<'a>, Output<'a>>;
+
+// // This matches the alias we discussed above
+// pub type SpiDev<'a> =
+//     ExclusiveDevice<SpiDmaBus<'a, Blocking>, Output<'a>, TimerDelay>;
+
+// impl<'fb, RST> Co5300Display<'fb, SpiDev<'fb>, RST>
+// where
+//     RST: OutputPin,
+// {
+//     fn qspi_ram_write(
+//         &mut self,
+//         cmd: u8,
+//         addr: u32,
+//         dummy_cycles: u8,
+//         pixels: &[u8],
+//     ) -> Result<(), Co5300Error<(), RST::Error>> {
+//         // 1) configure command and address phases
+//         let command = Command::_8Bit(cmd as u16, DataMode::Single);
+//         let address = Address::_24Bit(addr, DataMode::Single);
+
+//         // 2) get the underlying SpiDmaBus from ExclusiveDevice
+//         let bus: &mut SpiDmaBus<'fb, Blocking> = self.spi.bus_mut();
+
+//         // 3) QSPI payload phase on 4 lines
+//         bus.half_duplex_write(
+//             DataMode::Quad,  // data payload on 4 lines
+//             command,
+//             address,
+//             dummy_cycles,
+//             pixels,
+//         )
+//         .map_err(|_| Co5300Error::Spi(()))
+//     }
+// }
+
+
+// Raw SPI container: manual CS + bus so we can wrap half_duplex writes ourselves.
+pub struct RawSpiDev<'a> {
+    pub bus: SpiDmaBus<'a, Blocking>,
+    pub cs: Output<'a>,
+}
+
+// Keep this type alias in sync with display.rs
+pub type DisplayType<'a> = Co5300Display<'a, Output<'a>>;
+
+impl<'fb, RST> Co5300Display<'fb, RST>
+where
+    RST: OutputPin,
+{
+
+    // Send a bare QSPI mode-change instruction (0x38 enter, 0x3B enter dual, 0xFF exit).
+    // Must be sent in the *current* bus width (we enter from single, so use 1-wire).
+    fn qspi_send_mode_instr(&mut self, instr: u8, mode: DataMode) {
+        let command = Command::_8Bit(instr as u16, mode);
+        let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
+        let _ = self.spi.cs.set_low();
+        let _ = bus.half_duplex_write(mode, command, Address::None, 0, &[]);
+        let _ = self.spi.cs.set_high();
+    }
+
+    // Enter quad-data mode (enable QPI, per CO5300 table: 0x38).
+    fn qspi_enter_quad(&mut self) {
+        self.qspi_send_mode_instr(0x38, DataMode::Single);
+    }
+
+    // Optional: go back to 1-wire SPI (0xFF).
+    fn qspi_exit_single(&mut self) {
+        self.qspi_send_mode_instr(0xFF, DataMode::Quad);
+    }
+
+
+    // debugging
+    // // Fast quad fill that streams a solid color over QPI and mirrors into the FB.
+    // pub fn qspi_fill_solid(&mut self, color: Rgb565) {
+    //     let total_bytes = (self.w as usize) * (self.h as usize) * 2;
+    //     if total_bytes == 0 { return; }
+
+    //     let _ = self.qspi_set_window_raw(0, 0, self.w - 1, self.h - 1);
+
+    //     // Prepare staging buffer with the color pattern
+    //     let mut stage = mem::replace(&mut self.stage, alloc::vec![].into_boxed_slice());
+    //     let be = color.into_storage().to_be_bytes();
+    //     for i in (0..stage.len()).step_by(2) {
+    //         stage[i] = be[0];
+    //         if i + 1 < stage.len() { stage[i + 1] = be[1]; }
+    //     }
+
+    //     // Stream using quad opcode/address/data
+    //     let instruction = Command::_8Bit(0x32, DataMode::Quad);
+    //     let address_mode = DataMode::Quad;
+    //     let data_mode = DataMode::Quad;
+    //     let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
+
+    //     let mut remaining = total_bytes;
+    //     let mut current_cmd = RAMWR_OPCODE;
+    //     while remaining > 0 {
+    //         let take = core::cmp::min(stage.len(), remaining);
+    //         let ad: u32 = (current_cmd as u32) << 8;
+    //         let address = Address::_24Bit(ad, address_mode);
+
+    //         let _ = self.spi.cs.set_low();
+    //         let res = bus.half_duplex_write(
+    //             data_mode,
+    //             instruction,
+    //             address,
+    //             0,
+    //             &stage[..take],
+    //         );
+    //         let _ = self.spi.cs.set_high();
+    //         if res.is_err() {
+    //             esp_println::println!("quad fill error");
+    //             break;
+    //         }
+
+    //         remaining -= take;
+    //         current_cmd = RAMWRC_OPCODE;
+    //     }
+
+    //     // Restore stage buffer
+    //     self.stage = stage;
+
+    //     // Mirror into framebuffer
+    //     self.fb.fill(color.into_storage());
+    // }
+}

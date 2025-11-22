@@ -40,8 +40,6 @@ use embedded_graphics::{
     text::{Alignment, Baseline, Text}
 };
 
-use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
-
 use core::any::Any;
 
 // Make a lightweight trait bound we’ll use for the factory’s return type.
@@ -80,8 +78,11 @@ static ALIEN7_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien7_",  res!(), 
 static ALIEN8_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien8_",  res!(), "_rgb565_be.raw"));
 static ALIEN9_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien9_",  res!(), "_rgb565_be.raw"));
 static ALIEN10_IMAGE: &[u8] = include_bytes!(concat!("assets/alien10_", res!(), "_rgb565_be.raw"));
+static ALIEN_LOGO: &[u8]    = include_bytes!(concat!("assets/omnitrix_logo_466x466_rgb565_be.raw"));
 
+static LOGO_CACHE: Mutex<RefCell<Option<&'static [u8]>>> = Mutex::new(RefCell::new(None));
 // compressed assets
+// use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
 // static ALIEN1_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien1_",  res!(), "_rgb565_be.raw.zlib"));
 // static ALIEN2_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien2_",  res!(), "_rgb565_be.raw.zlib"));
 // static ALIEN3_IMAGE: &[u8]  = include_bytes!(concat!("assets/alien3_",  res!(), "_rgb565_be.raw.zlib"));
@@ -175,23 +176,6 @@ pub enum OmnitrixState {
 }
 
 impl UiState {
-
-
-    // /// Switch to the next menu (Button 1)
-    // pub fn next_menu(self) -> Self {
-    //     // If a dialog is open, ignore menu switching
-    //     if self.dialog.is_some() {
-    //         return self;
-    //     }
-    //     let next_page = match self.page {
-    //         Page::Main(_) => Page::Settings(SettingsMenuState::Volume),
-    //         Page::Settings(_) => Page::Omnitrix(OmnitrixState::Alien1),
-    //         Page::Omnitrix(_) => Page::Info,
-    //         Page::Info => Page::Main(MainMenuState::Home),
-    //     };
-    //     Self { page: next_page, dialog: None }
-    // }
-
     // Move to the next item/state in the current layer (rotary CW)
     pub fn next_item(self) -> Self {
         if self.dialog.is_some() { return self; }
@@ -322,21 +306,31 @@ fn draw_text(
     disp: &mut impl PanelRgb565,
     text: &str,
     fg: Rgb565,
-    bg: Rgb565,
+    bg: Option<Rgb565>,
     x_point: i32,
     y_point: i32,
     clear: bool,
+    update_fb: bool,
 ) {
     if clear {
-        // Clear the display with background color
-        disp.clear(Rgb565::BLACK).ok();
+        // Prefer no-FB clear if available and requested
+        if !update_fb {
+            if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
+                let _ = co.fill_rect_solid_no_fb(0, 0, RESOLUTION as u16, RESOLUTION as u16, Rgb565::BLACK);
+            } else {
+                let _ = disp.clear(Rgb565::BLACK);
+            }
+        } else {
+            let _ = disp.clear(Rgb565::BLACK);
+        }
     }
-    let style = MonoTextStyleBuilder::new()
+    let mut builder = MonoTextStyleBuilder::new()
         .font(&FONT_10X20)
-        .text_color(fg)
-        .background_color(bg)
-        .build();
-
+        .text_color(fg);
+    if let Some(b) = bg {
+        builder = builder.background_color(b);
+    }
+    let style = builder.build();
     Text::with_alignment(
         text,
         Point::new(x_point, y_point),
@@ -354,9 +348,20 @@ pub fn draw_image_bytes(
     w: u32,
     h: u32,
     clear: bool,
+    update_fb: bool,
 ){
     // Clear background if requested
-    if clear { let _ = disp.clear(Rgb565::BLACK); }
+    if clear {
+        if !update_fb {
+            if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
+                let _ = co.fill_rect_solid_no_fb(0, 0, RESOLUTION as u16, RESOLUTION as u16, Rgb565::BLACK);
+            } else {
+                let _ = disp.clear(Rgb565::BLACK);
+            }
+        } else {
+            let _ = disp.clear(Rgb565::BLACK);
+        }
+    }
     // Validate size
     if bytes.len() != (w * h * 2) as usize { return; }
     let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
@@ -365,7 +370,12 @@ pub fn draw_image_bytes(
     // Try fast raw blit if this really is the CO5300 driver (DMA or non-DMA alias).
     // The display backend re-exports its concrete type as display::DisplayType.
     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
-        if let Err(e) = co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes) {
+        let res = if update_fb {
+            co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes)
+        } else {
+            co.blit_rect_be_fast_no_fb(x as u16, y as u16, w as u16, h as u16, bytes)
+        };
+        if let Err(e) = res {
             esp_println::println!("fast blit failed: {:?}; fallback", e);
             let raw = ImageRawBE::<Rgb565>::new(bytes, w);
             let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
@@ -458,6 +468,26 @@ pub fn precache_all() -> usize {
     ok
 }
 
+// Cache the Omnitrix logo (466x466) once.
+pub fn precache_logo() -> bool {
+    let need = 466usize * 466usize * 2;
+    if critical_section::with(|cs| LOGO_CACHE.borrow(cs).borrow().is_some()) {
+        return true;
+    }
+    if ALIEN_LOGO.len() != need { return false; }
+    let mut v = alloc::vec![0u8; need];
+    v.copy_from_slice(ALIEN_LOGO);
+    let leaked: &'static mut [u8] = alloc::boxed::Box::leak(v.into_boxed_slice());
+    critical_section::with(|cs| {
+        LOGO_CACHE.borrow(cs).replace(Some(leaked as &'static [u8]));
+    });
+    true
+}
+
+pub fn get_logo_image() -> Option<&'static [u8]> {
+    critical_section::with(|cs| LOGO_CACHE.borrow(cs).borrow().clone())
+}
+
 // Get cached bytes and dims
 fn get_cached_image(s: OmnitrixState) -> Option<(&'static [u8], u32, u32)> {
     let idx = omni_index(s);
@@ -500,109 +530,57 @@ fn asset_for(state: OmnitrixState) -> &'static [u8] {
     }
 }
 
-// Cache a full-frame Omnitrix-style hourglass into a static buffer.
-pub fn cache_hourglass_logo(color: Rgb565, bg: Rgb565) {
-    let size = RESOLUTION as usize;
-    let center = size / 2;
+// pub fn draw_hourglass_logo(
+//     disp: &mut impl PanelRgb565,
+//     color: Rgb565,
+//     bg: Rgb565,
+//     clear: bool,
+// ) {
+//     if clear {
+//         // Clear the display with background color
+//         let _ = disp.clear(Rgb565::BLACK);
+//     }
+//     let size = RESOLUTION as usize;
+//     let center = size / 2;
+//     // This is a magic number, calculated from the original image this drawing is based on
+//     let waist = 80;
+//     let drop = (size - waist) as f32;
 
-    // This is a magic number, calculated from the original image this drawing is based on
-    let waist = 148;
-    let drop = (size - waist) as f32;
+//     // Prepare buffer: RGB565 big-endian, size*size*2 bytes
+//     let mut buf = vec![0u8; size * size * 2];
 
-    // Prepare buffer: RGB565 big-endian, size*size*2 bytes
-    let mut buf = alloc::vec![0u8; size * size * 2];
-    let fg = color.into_storage().to_be_bytes();
-    let bgc = bg.into_storage().to_be_bytes();
+//     // Precompute color bytes
+//     let fg = color.into_storage().to_be_bytes();
+//     let bgc = bg.into_storage().to_be_bytes();
 
-    // Draw hourglass into buffer
-    for y in 0..size {
+//     for y in 0..size {
+//         // Compute width at this y (float math for smooth edges)
+//         let width = if y < center {
+//             size as f32 - drop * (y as f32 / center as f32)
+//         } else {
+//             waist as f32 + drop * ((y - center) as f32 / center as f32)
+//         };
 
-        // Compute width at this y (float math for smooth edges)
-        let width = if y < center {
-            size as f32 - drop * (y as f32 / center as f32)
-        } else {
-            waist as f32 + drop * ((y - center) as f32 / center as f32)
-        };
+//         // Compute width at this y (float math for smooth edges)
+//         let width = (width + 0.5) as usize;
+//         let left = ((size - width) / 2).max(0);
+//         let right = (left + width).min(size);
 
-        // Compute width at this y (float math for smooth edges)
-        let width = (width + 0.5) as usize;
-        let left = ((size - width) / 2).max(0);
-        let right = (left + width).min(size);
-
-        // Fill pixels
-        for x in 0..size {
-            let off = (y * size + x) * 2;
-            let px = if x >= left && x < right { fg } else { bgc };
-            buf[off] = px[0];
-            buf[off + 1] = px[1];
-        }
-    }
-
-    // Store boxed slice in static mutex
-    let boxed = buf.into_boxed_slice();
-    critical_section::with(|cs| {
-        *HOURGLASS_BUF.borrow(cs).borrow_mut() = Some(boxed);
-    });
-}
-
-// Retrieve the cached hourglass logo buffer, if available.
-fn get_hourglass_logo() -> Option<Box<[u8]>> {
-    critical_section::with(|cs| {
-        HOURGLASS_BUF.borrow(cs).borrow().as_ref().map(|b| b.clone())
-    })
-}
-
-pub fn draw_hourglass_logo(
-    disp: &mut impl PanelRgb565,
-    color: Rgb565,
-    bg: Rgb565,
-    clear: bool,
-) {
-    if clear {
-        // Clear the display with background color
-        let _ = disp.clear(Rgb565::BLACK);
-    }
-    let size = RESOLUTION as usize;
-    let center = size / 2;
-    // This is a magic number, calculated from the original image this drawing is based on
-    let waist = 80;
-    let drop = (size - waist) as f32;
-
-    // Prepare buffer: RGB565 big-endian, size*size*2 bytes
-    let mut buf = vec![0u8; size * size * 2];
-
-    // Precompute color bytes
-    let fg = color.into_storage().to_be_bytes();
-    let bgc = bg.into_storage().to_be_bytes();
-
-    for y in 0..size {
-        // Compute width at this y (float math for smooth edges)
-        let width = if y < center {
-            size as f32 - drop * (y as f32 / center as f32)
-        } else {
-            waist as f32 + drop * ((y - center) as f32 / center as f32)
-        };
-
-        // Compute width at this y (float math for smooth edges)
-        let width = (width + 0.5) as usize;
-        let left = ((size - width) / 2).max(0);
-        let right = (left + width).min(size);
-
-        // Fill pixels
-        for x in 0..size {
-            let off = (y * size + x) * 2;
-            let px = if x >= left && x < right { fg } else { bgc };
-            buf[off] = px[0];
-            buf[off + 1] = px[1];
-        }
-    }
-    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
-        let _ = co.blit_rect_be_fast(0, 0, RESOLUTION as u16, RESOLUTION as u16, &buf);
-        return;
-    }
-    let raw = ImageRawBE::<Rgb565>::new(&buf, size as u32);
-    let _ = Image::new(&raw, Point::new(0, 0)).draw(disp);
-}
+//         // Fill pixels
+//         for x in 0..size {
+//             let off = (y * size + x) * 2;
+//             let px = if x >= left && x < right { fg } else { bgc };
+//             buf[off] = px[0];
+//             buf[off + 1] = px[1];
+//         }
+//     }
+//     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
+//         let _ = co.blit_rect_be_fast(0, 0, RESOLUTION as u16, RESOLUTION as u16, &buf);
+//         return;
+//     }
+//     let raw = ImageRawBE::<Rgb565>::new(&buf, size as u32);
+//     let _ = Image::new(&raw, Point::new(0, 0)).draw(disp);
+// }
 
 // helper function to update the display based on UI_STATE
 pub fn update_ui(
@@ -644,17 +622,17 @@ pub fn update_ui(
     if let Some(dialog) = state.dialog {
         match dialog {
             Dialog::VolumeAdjust =>
-                draw_text(disp, "Adjust Volume (TEMP)", Rgb565::WHITE, Rgb565::RED, CENTER, CENTER, true),
+                draw_text(disp, "Adjust Volume (TEMP)", Rgb565::WHITE, Some(Rgb565::RED), CENTER, CENTER, true, true),
             Dialog::BrightnessAdjust =>
-                draw_text(disp, "Adjust Brightness (TEMP)", Rgb565::WHITE, Rgb565::MAGENTA, CENTER, CENTER, true),
+                draw_text(disp, "Adjust Brightness (TEMP)", Rgb565::WHITE, Some(Rgb565::MAGENTA), CENTER, CENTER, true, true),
             Dialog::ResetSelector =>
-                draw_text(disp, "Reset? (TEMP)", Rgb565::WHITE, Rgb565::YELLOW, CENTER, CENTER, true),
+                draw_text(disp, "Reset? (TEMP)", Rgb565::WHITE, Some(Rgb565::YELLOW), CENTER, CENTER, true, true),
             Dialog::HomePage =>
-                draw_text(disp, "Home Page (TEMP)", Rgb565::GREEN, Rgb565::BLACK, CENTER, CENTER, true),
+                draw_text(disp, "Home Page (TEMP)", Rgb565::GREEN, Some(Rgb565::BLACK), CENTER, CENTER, true, true),
             Dialog::StartPage =>
-                draw_text(disp, "Start Page (TEMP)", Rgb565::BLUE, Rgb565::BLACK, CENTER, CENTER, true),
+                draw_text(disp, "Start Page (TEMP)", Rgb565::BLUE, Some(Rgb565::BLACK), CENTER, CENTER, true, true),
             Dialog::AboutPage =>
-                draw_text(disp, "About Page (TEMP)", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true),
+                draw_text(disp, "About Page (TEMP)", Rgb565::CYAN, Some(Rgb565::BLACK), CENTER, CENTER, true, true),
             Dialog::TransformPage => {
                 // show transform overlay; next frame (when dismissed) will clear due to logic above
                 disp.clear(OMNI_LIME).ok();
@@ -667,47 +645,50 @@ pub fn update_ui(
         Page::Main(menu_state) => {
             match menu_state {
                 MainMenuState::Home => {
-                    if let Some(buf) = get_hourglass_logo() {
-                        draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
+                    // Draw the cached Omnitrix logo asset (no FB mirror)
+                    if let Some(buf) = get_logo_image() {
+                        draw_image_bytes(disp, buf, 466, 466, false, false);
                     } else {
-                        cache_hourglass_logo(OMNI_LIME, Rgb565::BLACK);
-                        if let Some(buf) = get_hourglass_logo() {
-                            draw_image_bytes(disp, &buf, RESOLUTION, RESOLUTION, false);
+                        if precache_logo() {
+                            if let Some(buf) = get_logo_image() {
+                                draw_image_bytes(disp, buf, 466, 466, false, false);
+                            }
                         }
                     }
                 }
                 MainMenuState::SettingsApp => {
-                    draw_text(disp, "Settings", Rgb565::WHITE, Rgb565::BLUE, CENTER, CENTER, true);
+                    draw_text(disp, "Settings", Rgb565::WHITE, Some(Rgb565::BLUE), CENTER, CENTER, true, true);
                 }
                 MainMenuState::InfoApp => {
-                    draw_text(disp, "Info", Rgb565::WHITE, Rgb565::CYAN, CENTER, CENTER, true);
+                    draw_text(disp, "Info", Rgb565::WHITE, Some(Rgb565::CYAN), CENTER, CENTER, true, true);
                 }
             }
         }
 
         Page::Settings(settings_state) => {
             let (msg, fg, bg) = match settings_state {
-                SettingsMenuState::Volume     => ("Settings: Volume", Rgb565::YELLOW, Rgb565::BLUE),
-                SettingsMenuState::Brightness => ("Settings: Brightness", Rgb565::YELLOW, Rgb565::BLUE),
-                SettingsMenuState::Reset      => ("Settings: Reset", Rgb565::YELLOW, Rgb565::BLUE),
+                SettingsMenuState::Volume     => ("Settings: Volume", Rgb565::YELLOW, Some(Rgb565::BLUE)),
+                SettingsMenuState::Brightness => ("Settings: Brightness", Rgb565::YELLOW, Some(Rgb565::BLUE)),
+                SettingsMenuState::Reset      => ("Settings: Reset", Rgb565::YELLOW, Some(Rgb565::BLUE)),
             };
-            draw_text(disp, msg, fg, bg, CENTER, CENTER, true);
+            draw_text(disp, msg, fg, bg, CENTER, CENTER, true, true);
         }
 
         Page::Omnitrix(omnitrix_state) => {
             // Removed per-alien clear; handled by page transition above
             if let Some((bytes, w, h)) = get_cached_image(omnitrix_state) {
-                draw_image_bytes(disp, bytes, w, h, false);
+                draw_image_bytes(disp, bytes, w, h, false, false);
                 // esp_println::println!("Omnitrix: drew cached image");
             } else if precache_one(omnitrix_state) {
                 if let Some((bytes, w, h)) = get_cached_image(omnitrix_state) {
-                    draw_image_bytes(disp, bytes, w, h, false);
+                    draw_image_bytes(disp, bytes, w, h, false, false);
                 }
             }
         }
         
         Page::Info => {
-            draw_text(disp, "Info Screen", Rgb565::CYAN, Rgb565::BLACK, CENTER, CENTER, true);
+            disp.clear(Rgb565::WHITE).ok();
+            draw_text(disp, "Info Screen", Rgb565::CYAN, None, CENTER, CENTER, false, true);
             // let lime = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
             // draw_hourglass_logo(disp, lime, Rgb565::BLACK, true);
             // draw_image(disp, MY_IMAGE, IMG_W, IMG_H, false);

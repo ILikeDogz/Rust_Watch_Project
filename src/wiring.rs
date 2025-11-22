@@ -20,7 +20,7 @@ use esp_hal::{
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 use esp_hal::{
-    peripherals::{GPIO10, GPIO11, GPIO47, GPIO48, DMA_CH0},
+    peripherals::{GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO47, GPIO48, DMA_CH0},
 };
 
 pub struct BoardPins<'a> {
@@ -67,9 +67,9 @@ pub struct DisplayPins<'a> {
     // pub do0: Output<'a>, 
     pub clk: GPIO10<'a>,    // GPIO10
     pub do0: GPIO11<'a>,    // GPIO11
-    // pub do1: GPIO12<'a>,     // GPIO12
-    // pub do2: GPIO13<'a>,    // GPIO13
-    // pub do3: GPIO14<'a>,    // GPIO14
+    pub do1: GPIO12<'a>,     // GPIO12
+    pub do2: GPIO13<'a>,    // GPIO13
+    pub do3: GPIO14<'a>,    // GPIO14
     pub rst: Output<'a>,    // GPIO21
     pub en:  Output<'a>,    // GPIO42
     pub tp_sda: GPIO47<'a>, // (unused here)
@@ -179,9 +179,9 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
 
     let clk = p.GPIO10; // GPIO10
     let do0 = p.GPIO11; // GPIO11
-    // let do1 = p.GPIO12; // GPIO12
-    // let do2 = p.GPIO13; // GPIO13 
-    // let do3 = p.GPIO14; // GPIO14 
+    let do1 = p.GPIO12; // GPIO12
+    let do2 = p.GPIO13; // GPIO13 
+    let do3 = p.GPIO14; // GPIO14 
 
     // Touch controller pins
     let tp_sda = p.GPIO47;
@@ -203,9 +203,9 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
                 cs,
                 clk,
                 do0,
-                // do1,
-                // do2,
-                // do3,
+                do1,
+                do2,
+                do3,
                 rst,
                 en,
                 tp_sda,
