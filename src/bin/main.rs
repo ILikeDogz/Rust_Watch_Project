@@ -20,7 +20,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 use esp32s3_tests::{
     display::setup_display,
-    imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
+    qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
     input::{handle_button_generic, handle_encoder_generic, handle_imu_int_generic, ButtonState, ImuIntState, RotaryState},
     ui::{precache_asset, update_ui, AssetId, MainMenuState, Page, UiState},
     wiring::{init_board_pins, BoardPins},
@@ -91,6 +91,7 @@ static ROTARY: RotaryState<'static> = RotaryState {
 
 static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState {
     page: Page::Main(MainMenuState::Home),
+    // page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1),
     dialog: None,
 }));
 
@@ -99,9 +100,6 @@ static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState {
 static IMU_INT: ImuIntState<'static> = ImuIntState {
     input: Mutex::new(RefCell::new(None)),
 };
-
-// // for debug, start on Alien page
-// static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien10), dialog: None }));
 
 // Current debounce time (milliseconds)
 const DEBOUNCE_MS: u64 = 240;
@@ -266,8 +264,12 @@ fn main() -> ! {
 
                 if let Some((addr, who)) = found {
                     match Qmi8658::new(i2c, addr) {
-                        Ok(dev) => {
+                        Ok(mut dev) => {
                             println!("IMU WHO_AM_I (driver): 0x{:02X}", who);
+                            match (dev.read_reg8(0x02), dev.read_reg8(0x09)) {
+                                (Ok(c1), Ok(c8)) => println!("IMU CTRL1=0x{:02X} CTRL8=0x{:02X}", c1, c8),
+                                _ => println!("IMU ctrl read failed"),
+                            }
                             Some(dev)
                         }
                         Err(e) => {
@@ -290,13 +292,20 @@ fn main() -> ! {
     #[cfg(feature = "esp32s3-disp143Oled")]
     let mut smash_detector = SmashDetector::default_rough();
     #[cfg(feature = "esp32s3-disp143Oled")]
-    let mut last_sample: Option<esp32s3_tests::imu::ImuSample> = None;
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    let mut next_log_ms: u64 = 0;
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    let mut log_hit = false;
+    let mut last_sample: Option<esp32s3_tests::qmi8658_imu::ImuSample> = None;
     #[cfg(feature = "esp32s3-disp143Oled")]
     let mut next_poll_ms: u64 = 0;
+
+    // count smash gestures while on Omnitrix page
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    let mut smash_count: u8 = 0;
+
+
+    // Debug output of IMU data
+    // #[cfg(feature = "esp32s3-disp143Oled")]
+    // let mut dbg_next_ms: u64 = 0;
+    // #[cfg(feature = "esp32s3-disp143Oled")]
+    // let mut _dbg_next_ms: u64 = 0;
 
 
     // // -------------------- UI Init --------------------
@@ -326,6 +335,128 @@ fn main() -> ! {
         // esp_println::println!("Precached {} Omnitrix images", n);
     }
 
+
+    // -------------------- Demo Sequence --------------------
+    // // Demo sequence timing
+    // let demo_start_ms = {
+    //     let t = SystemTimer::unit_value(Unit::Unit0);
+    //     t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    // };
+
+    // // Helper: ticks -> microseconds
+    // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
+    // let to_us = |t0: u64, t1: u64| -> u64 {
+    //     let dt = t1.saturating_sub(t0);
+    //     dt.saturating_mul(1_000_000) / ticks_per_s
+    // };
+
+    // enum DemoState {
+    //     Home,
+    //     Omnitrix,
+    //     Rotating { idx: usize, last_ms: u64 },
+    //     BackToHome { last_ms: u64 },
+    //     Done,
+    // }
+
+    // let mut demo_state = DemoState::Home;
+
+    // loop {
+    //     let now_ms = {
+    //         let t = SystemTimer::unit_value(Unit::Unit0);
+    //         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    //     };
+    //     let rel = now_ms - demo_start_ms; // relative elapsed
+
+    //     match demo_state {
+    //         DemoState::Home => {
+    //             if rel > 1000 {
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState {
+    //                         page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1),
+    //                         dialog: None,
+    //                     });
+    //                 });
+    //                 demo_state = DemoState::Omnitrix;
+    //             }
+    //         }
+    //         DemoState::Omnitrix => {
+    //             if rel > 1500 {
+    //                 demo_state = DemoState::Rotating {
+    //                     idx: 1,
+    //                     last_ms: rel,
+    //                 };
+    //             }
+    //         }
+    //         DemoState::Rotating { idx, last_ms } => {
+    //             // Rotate every 3000 ms (comment and code agree now)
+    //             if rel > last_ms + 3000 {
+    //                 let next_state = match idx {
+    //                     1 => esp32s3_tests::ui::OmnitrixState::Alien2,
+    //                     2 => esp32s3_tests::ui::OmnitrixState::Alien3,
+    //                     3 => esp32s3_tests::ui::OmnitrixState::Alien4,
+    //                     4 => esp32s3_tests::ui::OmnitrixState::Alien5,
+    //                     5 => esp32s3_tests::ui::OmnitrixState::Alien6,
+    //                     6 => esp32s3_tests::ui::OmnitrixState::Alien7,
+    //                     7 => esp32s3_tests::ui::OmnitrixState::Alien8,
+    //                     8 => esp32s3_tests::ui::OmnitrixState::Alien9,
+    //                     9 => esp32s3_tests::ui::OmnitrixState::Alien10,
+    //                     _ => esp32s3_tests::ui::OmnitrixState::Alien1,
+    //                 };
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState {
+    //                         page: Page::Omnitrix(next_state),
+    //                         dialog: None,
+    //                     });
+    //                 });
+    //                 if idx < 9 {
+    //                     demo_state = DemoState::Rotating {
+    //                         idx: idx + 1,
+    //                         last_ms: rel,
+    //                     };
+    //                 } else {
+    //                     demo_state = DemoState::BackToHome { last_ms: rel };
+    //                 }
+    //             }
+    //         }
+    //         DemoState::BackToHome { last_ms } => {
+    //             if rel > last_ms + 1500 {
+    //                 // critical_section::with(|cs| {
+    //                 //     UI_STATE.borrow(cs).set(UiState { page: Page::Main(MainMenuState::Home), dialog: None });
+    //                 // });
+
+    //                 // set to info page instead
+    //                 critical_section::with(|cs| {
+    //                     UI_STATE.borrow(cs).set(UiState {
+    //                         page: Page::Info,
+    //                         dialog: None,
+    //                     });
+    //                 });
+    //                 demo_state = DemoState::Done;
+    //             }
+    //         }
+    //         DemoState::Done => { /* stop or loop again */ }
+    //     }
+
+    //     let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
+    //     if ui_state != last_ui_state {
+    //         last_ui_state = ui_state;
+    //         needs_redraw = true;
+    //     }
+    //     let t0 = SystemTimer::unit_value(Unit::Unit0);
+    //     update_ui(&mut my_display, last_ui_state, needs_redraw);
+    //     if needs_redraw {
+    //         let t1 = SystemTimer::unit_value(Unit::Unit0);
+    //         esp_println::println!("UI update: {} us", to_us(t0, t1));
+    //     }
+    //     needs_redraw = false;
+
+    //     for _ in 0..10000 {
+    //         core::hint::spin_loop();
+    //     }
+    // }
+
+
+    // -------------------- Main loop --------------------
     
     // Main loop: handle UI, buttons, rotary, and IMU-triggered smash input
     loop {
@@ -340,24 +471,48 @@ fn main() -> ! {
             last_ui_state = ui_state;
             needs_redraw = true;
         }
+        let in_omnitrix = matches!(ui_state.page, Page::Omnitrix(_));
+        if !in_omnitrix {
+            smash_count = 0;
+        }
         update_ui(&mut my_display, last_ui_state, needs_redraw);
         needs_redraw = false;
 
         // IMU smash detection
         #[cfg(feature = "esp32s3-disp143Oled")]
         if let Some(dev) = imu.as_mut() {
-            // Only read when IMU INT fired; fall back to periodic reads if INT never comes.
+            // Only read when IMU INT fired, additional fall back to periodic reads if INT never comes.
             let timed = now_ms >= next_poll_ms;
-            let should_read = IMU_INT_FLAG.swap(false, Ordering::Relaxed) || last_sample.is_none() || timed;
+            let pin_level_trig = critical_section::with(|cs| {
+                IMU_INT
+                    .input
+                    .borrow_ref(cs)
+                    .as_ref()
+                    .map(|p| p.is_low())
+                    .unwrap_or(false)
+            });
+            let should_read = IMU_INT_FLAG.swap(false, Ordering::Relaxed)
+                || pin_level_trig
+                || last_sample.is_none()
+                || timed;
             if should_read {
                 // Read sample
                 match dev.read_sample() {
                     Ok(sample) => {
                         // Process sample for smash detection
                         if smash_detector.update(now_ms, &sample) {
-                            println!("IMU smash hit at {} ms", now_ms);
-                            BUTTON3_PRESSED.store(true, Ordering::Relaxed);
-                            // log_hit = true;
+                            // println!("IMU smash hit:");
+
+                            // the omnitrix page is the only one that uses this input
+                            if in_omnitrix {
+                                smash_count = smash_count.saturating_add(1);
+                                // 2 smashes as it will count both the pop up and the down slam
+                                if smash_count >= 2 {
+                                    // reset count after triggering
+                                    smash_count = 0;
+                                    BUTTON3_PRESSED.store(true, Ordering::Relaxed);
+                                }
+                            }
                         }
                         last_sample = Some(sample);
                     }
@@ -370,25 +525,35 @@ fn main() -> ! {
             }
         }
 
-        // debug logging
+
+        // Debug output of IMU data
         // #[cfg(feature = "esp32s3-disp143Oled")]
-        // if now_ms >= next_log_ms {
+        // if now_ms >= dbg_next_ms {
         //     if let Some(s) = last_sample {
         //         let mag_sq = s.accel_mag_sq();
+        //         let dot = smash_detector.gravity_dot(&s);
         //         println!(
-        //             // "IMU a=[{}, {}, {}] |a|^2={} g=[{}, {}, {}] hit={}",
+        //             "DBG a=[{}, {}, {}] |a|^2={} dot={} gyro=[{}, {}, {}] int_flag={} pin_low={}",
         //             s.accel[0],
         //             s.accel[1],
         //             s.accel[2],
         //             mag_sq,
+        //             dot,
         //             s.gyro[0],
         //             s.gyro[1],
         //             s.gyro[2],
-        //             log_hit
+        //             IMU_INT_FLAG.load(Ordering::Relaxed),
+        //             critical_section::with(|cs| {
+        //                 IMU_INT
+        //                     .input
+        //                     .borrow_ref(cs)
+        //                     .as_ref()
+        //                     .map(|p| p.is_low())
+        //                     .unwrap_or(false)
+        //             })
         //         );
-        //         log_hit = false;
         //     }
-        //     next_log_ms = now_ms.saturating_add(500);
+        //     dbg_next_ms = now_ms.saturating_add(200);
         // }
 
         // Button 1 = Back (go up a layer)
@@ -411,7 +576,7 @@ fn main() -> ! {
             needs_redraw = true;
         }
 
-        // Button 3 = Transform (includes IMU "smash" trigger)
+        // Button 3 = Transform (IMU will actually trigger this, electrically this will be disconnected)
         if BUTTON3_PRESSED.swap(false, Ordering::Acquire) {
             critical_section::with(|cs| {
                 let state = UI_STATE.borrow(cs).get();

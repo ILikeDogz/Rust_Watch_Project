@@ -776,7 +776,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 MainMenuState::WatchApp => {
                     draw_text(
                         disp,
-                        "Watch App",
+                        "Watch App (WIP)",
                         Rgb565::WHITE,
                         Some(Rgb565::BLACK),
                         CENTER,
@@ -788,7 +788,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 MainMenuState::SettingsApp => {
                     draw_text(
                         disp,
-                        "Settings",
+                        "Settings (WIP)",
                         Rgb565::WHITE,
                         Some(Rgb565::BLUE),
                         CENTER,
@@ -800,9 +800,9 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 MainMenuState::InfoApp => {
                     draw_text(
                         disp,
-                        "Info",
+                        "Easter Egg",
                         Rgb565::WHITE,
-                        Some(Rgb565::CYAN),
+                        Some(Rgb565::BLACK),
                         CENTER,
                         CENTER,
                         true,
@@ -833,8 +833,9 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
             draw_text(disp, msg, fg, bg, CENTER, CENTER, true, true);
         }
 
+        // one layer below main menu home is Omnitrix page
         Page::Omnitrix(omnitrix_state) => {
-            // Removed per-alien clear; handled by page transition above
+            // Note that we do not clear here, but before entering a clear happens, it is handled above for efficiency
             let aid = asset_id_for_state(omnitrix_state);
             if let Some((bytes, w, h)) = get_cached_asset(aid) {
                 draw_image_bytes(disp, bytes, w, h, false, false);

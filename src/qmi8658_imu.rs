@@ -11,7 +11,11 @@ const REG_CTRL1: u8 = 0x02; // accel config
 const REG_CTRL2: u8 = 0x03; // gyro config
 const REG_CTRL7: u8 = 0x08; // power / enable
 const REG_CTRL8: u8 = 0x09; // reset/power settings
+// const REG_STATUS_INT: u8 = 0x2D;
+// const REG_STATUS0: u8 = 0x2E;
 const REG_ACC_START: u8 = 0x35; // AX_L .. GZ_H
+const INT_ENABLE_BITS: u8 = 0x18; // INT1_ENABLE (0x08) | INT2_ENABLE (0x10) per qmi8658c.h
+const CTRL8_DATAVALID_INT1: u8 = 0x40; // route data-ready to INT1
 
 // Expected chip ID for QMI8658. Some revisions report 0x05 or 0x0F; keep it loose.
 const WHO_AM_I_FALLBACK: u8 = 0x05;
@@ -47,37 +51,44 @@ impl ImuSample {
     }
 }
 
+// IMU error type
 #[derive(Debug)]
 pub enum ImuError<E> {
     Bus(E),
     BadWhoAmI(u8),
 }
 
+// Allow automatic conversion from I2C errors
 impl<E> From<E> for ImuError<E> {
     fn from(e: E) -> Self {
         ImuError::Bus(e)
     }
 }
 
+// QMI8658 IMU driver
 pub struct Qmi8658<I2C> {
     i2c: I2C,
     address: u8,
 }
 
+// Implement driver methods
 impl<I2C> Qmi8658<I2C>
 where
     I2C: i2c::ErrorType + i2c::I2c,
 {
+    // Create a new instance and initialize the IMU
     pub fn new(i2c: I2C, address: u8) -> Result<Self, ImuError<I2C::Error>> {
         let mut this = Self { i2c, address };
         this.init()?;
         Ok(this)
     }
 
+    // Read WHO_AM_I register
     pub fn who_am_i(&mut self) -> Result<u8, ImuError<I2C::Error>> {
         self.read_reg(REG_WHO_AM_I)
     }
 
+    // Initialize the IMU with default settings
     fn init(&mut self) -> Result<(), ImuError<I2C::Error>> {
         let who = self.who_am_i()?;
         if who != WHO_AM_I_FALLBACK && who != WHO_AM_I_ALT {
@@ -89,23 +100,33 @@ where
         // Ignore errors here to avoid blocking subsequent config steps.
         let _ = self.write_reg(REG_CTRL8, 0x10);
 
-        // Accelerometer: +/-8g, ~1 kHz ODR (0x60 per datasheet examples)
-        let _ = self.write_reg(REG_CTRL1, 0x60);
+        // Accelerometer: +/-8g, ~1 kHz ODR (0x60 per datasheet examples), enable INT1/INT2
+        let _ = self.write_reg(REG_CTRL1, 0x60 | INT_ENABLE_BITS);
         // Gyro: +/-512 dps, ~1 kHz ODR (0x64 per datasheet examples)
         let _ = self.write_reg(REG_CTRL2, 0x64);
 
         // Enable accel + gyro, set to Active
         self.write_reg(REG_CTRL7, 0x03)?;
 
+        // Route data-ready to INT1 (GPIO8) so we get an interrupt per sample.
+        let _ = self.write_reg(REG_CTRL8, CTRL8_DATAVALID_INT1);
+
         Ok(())
     }
 
+    // Read an 8-bit register
+    pub fn read_reg8(&mut self, reg: u8) -> Result<u8, ImuError<I2C::Error>> {
+        self.read_reg(reg)
+    }
+
+    // Write an 8-bit register
     fn write_reg(&mut self, reg: u8, val: u8) -> Result<(), ImuError<I2C::Error>> {
         self.i2c
             .write(self.address, &[reg, val])
             .map_err(ImuError::Bus)
     }
 
+    // Read an 8-bit register
     fn read_reg(&mut self, reg: u8) -> Result<u8, ImuError<I2C::Error>> {
         let mut out = [0u8];
         self.i2c
@@ -114,6 +135,7 @@ where
         Ok(out[0])
     }
 
+    // Read a sample (accel + gyro)
     pub fn read_sample(&mut self) -> Result<ImuSample, ImuError<I2C::Error>> {
         let mut buf = [0u8; 12];
         self.i2c
@@ -134,11 +156,14 @@ where
         Ok(ImuSample { accel, gyro })
     }
 
+    // Consume the driver and return the underlying I2C bus
     pub fn into_inner(self) -> I2C {
         self.i2c
     }
 }
 
+
+// Simple smash detector using acceleration magnitude and rise detection
 pub struct SmashDetector {
     threshold_sq: i64,
     rise_threshold_sq: i64,
@@ -147,7 +172,6 @@ pub struct SmashDetector {
     // Require one axis to dominate others (to reject swings that are multi-axis noisy)
     axis_ratio_num: i32,
     axis_ratio_den: i32,
-    axis_bias_min_dot: i64,
     cooldown_ms: u32,
     last_mag_sq: i64,
     last_freefall: bool,
@@ -155,8 +179,12 @@ pub struct SmashDetector {
     gravity_dir: [i32; 3],
     gravity_samples: u16,
     baseline_mag_sq: i64,
+    gravity_mag_sq: i64,
+    baseline_dot: i64,
+    last_dot: i64,
 }
 
+// Implement smash detector methods
 impl SmashDetector {
     pub fn new(threshold_raw: i32, rise_raw: i32, gyro_limit_raw: i32, freefall_raw: i32, cooldown_ms: u32) -> Self {
         Self {
@@ -166,7 +194,6 @@ impl SmashDetector {
             gyro_limit_sq: (gyro_limit_raw as i64) * (gyro_limit_raw as i64),
             axis_ratio_num: 0,
             axis_ratio_den: 1,
-            axis_bias_min_dot: 0, // disabled until we learn gravity
             cooldown_ms,
             last_mag_sq: 0,
             last_freefall: false,
@@ -174,9 +201,13 @@ impl SmashDetector {
             gravity_dir: [0; 3],
             gravity_samples: 0,
             baseline_mag_sq: 0,
+            gravity_mag_sq: 0,
+            baseline_dot: 0,
+            last_dot: 0,
         }
     }
 
+    // Default rough smash detector profile
     pub fn default_rough() -> Self {
         // Raw units tuned for observed ~1000 counts per 1g on the Waveshare board (8g range).
         // Re-tighten slightly: ~1.8g threshold, ~0.7g rise, gyro gate ~60k, cooldown 160 ms.
@@ -184,11 +215,10 @@ impl SmashDetector {
         // Require a dominant axis (at least ~2:1 over others) once enabled.
         s.axis_ratio_num = 2;
         s.axis_ratio_den = 1;
-        // After we lock gravity, require smash to align at least ~70% with gravity direction.
-        s.axis_bias_min_dot = 0;
         s
     }
 
+    // Update with a new sample, return true if a smash event is detected
     pub fn update(&mut self, now_ms: u64, sample: &ImuSample) -> bool {
         let mag_sq = sample.accel_mag_sq();
         let gyro_sq = sample.gyro_mag_sq();
@@ -201,23 +231,20 @@ impl SmashDetector {
         let rising_fast = mag_sq.saturating_sub(self.last_mag_sq) >= self.rise_threshold_sq;
         self.last_mag_sq = mag_sq;
 
-        // Learn gravity direction during early samples (first 256 reads) when movement is small.
+        // Learn gravity direction quickly when movement is small.
         if self.gravity_samples < u16::MAX {
-            // Simple low-pass: average until we reach 256 samples, but only if mag is near 1g-2g.
             if mag_sq > 600_000 && mag_sq < 4_000_000 {
                 let k = (self.gravity_samples as i64).saturating_add(1);
                 for i in 0..3 {
-                    // incremental average
                     self.gravity_dir[i] = (((self.gravity_dir[i] as i64) * self.gravity_samples as i64
                         + sample.accel[i] as i64)
                         / k) as i32;
                 }
-                if self.gravity_samples < 256 {
+                if self.gravity_samples < 64 {
                     self.gravity_samples += 1;
                 }
-                if self.gravity_samples == 256 && self.axis_bias_min_dot == 0 {
-                    // enable axis bias: require at least ~60% alignment with gravity vector
-                    let gmag_sq: i64 = self
+                if self.gravity_samples >= 8 && self.gravity_mag_sq == 0 {
+                    self.gravity_mag_sq = self
                         .gravity_dir
                         .iter()
                         .map(|v| {
@@ -225,19 +252,25 @@ impl SmashDetector {
                             vv * vv
                         })
                         .sum();
-                    // 0.7 * |g|^2 approximate as 0.49 * gmag_sq
-                    self.axis_bias_min_dot = (gmag_sq as i128 * 49 / 100) as i64;
+                    self.baseline_dot = self.gravity_mag_sq;
+                    self.last_dot = self.baseline_dot;
                 }
             }
         }
 
-        // Axis bias check: dot(sample, gravity_dir) should be large and same direction.
+        // Axis bias check: projection should move further along gravity than the baseline (smash down).
         let mut axis_ok = true;
-        if self.axis_bias_min_dot > 0 {
+        if self.gravity_mag_sq > 0 {
             let dot: i64 = (sample.accel[0] as i64 * self.gravity_dir[0] as i64)
                 + (sample.accel[1] as i64 * self.gravity_dir[1] as i64)
                 + (sample.accel[2] as i64 * self.gravity_dir[2] as i64);
-            axis_ok = dot >= self.axis_bias_min_dot;
+            let delta = dot.saturating_sub(self.baseline_dot); // positive if more along gravity
+            let rise_min = self.gravity_mag_sq / 2; // need ~0.5g^2 additional projection
+            let dot_rise_min = self.rise_threshold_sq / 2;
+            axis_ok = (dot * self.baseline_dot) > 0 // same general direction as gravity
+                && delta >= rise_min
+                && (dot - self.last_dot) >= dot_rise_min;
+            self.last_dot = dot;
         }
 
         // Baseline magnitude (|a|^2) EMA for shake rejection: only update when gyro is quiet.
@@ -277,8 +310,8 @@ impl SmashDetector {
         // Require a sharp jump over baseline to reject slow wiggles.
         let mut jump_ok = true;
         if self.baseline_mag_sq > 0 {
-            // need mag_sq at least 3x baseline to count as smash
-            jump_ok = mag_sq.saturating_mul(1) > self.baseline_mag_sq.saturating_mul(3);
+            // need mag_sq at least 4x baseline to count as smash
+            jump_ok = mag_sq.saturating_mul(1) > self.baseline_mag_sq.saturating_mul(4);
         }
 
         let hit = !in_cooldown
@@ -295,5 +328,12 @@ impl SmashDetector {
         }
 
         hit
+    }
+
+    // Compute the dot product of the sample acceleration with the learned gravity direction
+    pub fn gravity_dot(&self, sample: &ImuSample) -> i64 {
+        (sample.accel[0] as i64 * self.gravity_dir[0] as i64)
+            + (sample.accel[1] as i64 * self.gravity_dir[1] as i64)
+            + (sample.accel[2] as i64 * self.gravity_dir[2] as i64)
     }
 }

@@ -169,19 +169,7 @@ mod co5300_backend {
         en.set_high();
         delay.delay_ms(100); // give panel power rails time to stabilise
 
-        // // SPI @ 40 MHz in datasheet, Mode 0, known stable, up to 80 MHz overclock might work but is unstable
-        // let spi = Spi::new(
-        //     spi2,
-        //     Config::default()
-        //         .with_frequency(Rate::from_hz(80_000_000))
-        //         .with_mode(Mode::_0),
-        // )
-        // .unwrap()
-        // .with_sck(clk)
-        // .with_mosi(do0)
-        // // .with_miso(do1)
-        // .with_dma(dma_ch0);
-
+        // SPI @ 40 MHz in datasheet, Mode 0, known stable, up to 80 MHz overclock might work but is unstable
         let spi = Spi::new(
             spi2,
             Config::default()
