@@ -156,8 +156,6 @@ mod co5300_backend {
             do3,
             rst,
             mut en,
-            tp_sda: _,
-            tp_scl: _,
             dma_ch0,
         } = display_pins;
 

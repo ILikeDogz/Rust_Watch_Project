@@ -4,6 +4,7 @@ pub mod display;
 pub mod input;
 pub mod ui;
 pub mod wiring;
+pub mod imu;
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 pub mod co5300;

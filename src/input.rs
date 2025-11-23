@@ -12,6 +12,7 @@ use esp_backtrace as _;
 
 use core::cell::{Cell, RefCell};
 use critical_section::Mutex;
+use core::sync::atomic::AtomicBool;
 
 // ESP-HAL imports
 use esp_hal::gpio::Input;
@@ -33,6 +34,11 @@ pub struct RotaryState<'a> {
     pub position: Mutex<Cell<i32>>,
     pub last_qstate: Mutex<Cell<u8>>,
     pub last_step: Mutex<Cell<i8>>,
+}
+
+// Generic IMU interrupt state (active-low)
+pub struct ImuIntState<'a> {
+    pub input: Mutex<RefCell<Option<Input<'a>>>>,
 }
 
 // Handle button press events
@@ -74,6 +80,7 @@ pub fn handle_button_generic(
     });
 }
 
+// Handle rotary encoder events
 #[esp_hal::ram]
 pub fn handle_encoder_generic(encoder: &RotaryState) {
     // Access encoder state within critical section
@@ -127,5 +134,21 @@ pub fn handle_encoder_generic(encoder: &RotaryState) {
         }
         // Save current state for next transition
         encoder.last_qstate.borrow(cs).set(current);
+    });
+}
+
+// Handle IMU interrupt events
+#[esp_hal::ram]
+pub fn handle_imu_int_generic(state: &ImuIntState, flag: &AtomicBool) {
+    critical_section::with(|cs| {
+        let mut binding = state.input.borrow_ref_mut(cs);
+        let pin = match binding.as_mut() {
+            Some(p) => p,
+            None => return,
+        };
+        if pin.is_interrupt_set() {
+            pin.clear_interrupt();
+            flag.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
     });
 }

@@ -8,7 +8,7 @@ use esp_backtrace as _;
 // ESP-HAL imports
 use esp_hal::{
     gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig, Pull},
-    peripherals::{Peripherals, SPI2},
+    peripherals::{I2C0, Peripherals, SPI2},
 };
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
@@ -30,6 +30,10 @@ pub struct BoardPins<'a> {
     // Rotary encoder pins
     pub enc_clk: Input<'a>,
     pub enc_dt: Input<'a>,
+
+    // IMU interrupt (active-low on GPIO8 per Waveshare schematic)
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    pub imu_int: Input<'a>,
     // pub enc_sw:  Input<'a>,  // not used in this example
 
     // display-related pins are feature gated
@@ -37,6 +41,9 @@ pub struct BoardPins<'a> {
     pub display_pins: DisplayPins<'a>,
     #[cfg(any(feature = "esp32s3-disp143Oled"))]
     pub display_pins: DisplayPins<'a>,
+    // shared I2C bus for touch/IMU
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    pub imu_i2c: ImuI2cPins<'a>,
 }
 
 // nested, feature-only struct for LCD/SPI pins
@@ -66,15 +73,20 @@ pub struct DisplayPins<'a> {
     pub do3: GPIO14<'a>,      // GPIO14
     pub rst: Output<'a>,      // GPIO21
     pub en: Output<'a>,       // GPIO42
-    pub tp_sda: GPIO47<'a>,   // (unused here)
-    pub tp_scl: GPIO48<'a>,   // (unused here)
     pub dma_ch0: DMA_CH0<'a>, // <- DMA channel for SPI2
+}
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub struct ImuI2cPins<'a> {
+    pub sda: GPIO47<'a>,
+    pub scl: GPIO48<'a>,
 }
 
 // Default profile
 #[cfg(feature = "devkit-esp32s3-disp128")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) {
     let io = Io::new(p.IO_MUX);
+    let i2c0 = p.I2C0;
 
     // LEDs
     // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
@@ -127,15 +139,17 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
                 lcd_bl,
             },
         },
+        i2c0,
     )
 }
 
 // OLED profile
 #[cfg(feature = "esp32s3-disp143Oled")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) {
     // use esp_hal::gpio::DriveStrength;
 
     let io = Io::new(p.IO_MUX);
+    let i2c0 = p.I2C0;
 
     // LEDs
     // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
@@ -182,9 +196,11 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
     let do2 = p.GPIO13; // GPIO13
     let do3 = p.GPIO14; // GPIO14
 
-    // Touch controller pins
-    let tp_sda = p.GPIO47;
-    let tp_scl = p.GPIO48;
+    // Touch/IMU shared I2C pins (QMI8658 + touch controller sit here on the Waveshare board)
+    let imu_sda = p.GPIO47;
+    let imu_scl = p.GPIO48;
+    let mut imu_int = Input::new(p.GPIO8, InputConfig::default().with_pull(Pull::Up));
+    imu_int.listen(Event::AnyEdge);
 
     // DMA peripheral
     let dma_ch0 = p.DMA_CH0;
@@ -199,6 +215,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
             btn3,
             enc_clk,
             enc_dt,
+            imu_int,
             display_pins: DisplayPins {
                 spi2,
                 cs,
@@ -209,18 +226,22 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
                 do3,
                 rst,
                 en,
-                tp_sda,
-                tp_scl,
                 dma_ch0,
             },
+            imu_i2c: ImuI2cPins {
+                sda: imu_sda,
+                scl: imu_scl,
+            },
         },
+        i2c0,
     )
 }
 
 // Example alternate profile (enable with --features allinone)
 #[cfg(feature = "allinone")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) {
     let io = Io::new(p.IO_MUX);
+    let i2c0 = p.I2C0;
 
     // LEDs
     // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
@@ -268,12 +289,13 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>) {
             lcd_rst,
             lcd_bl,
         },
+        i2c0,
     )
 }
 
 // Yet another profile (enable with --features alt)
 #[cfg(feature = "alt")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io, BoardPins<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) {
     let mut io = Io::new(p.IO_MUX);
     // …map different pins here…
     unimplemented!()
