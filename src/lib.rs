@@ -1,9 +1,9 @@
 #![no_std]
 
-pub mod wiring;
+pub mod display;
 pub mod input;
 pub mod ui;
-pub mod display;
+pub mod wiring;
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 pub mod co5300;

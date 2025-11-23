@@ -259,61 +259,72 @@ where
 
     // TODO LETS TEST THESE, also I want brightness control
     // //---- Power control ---- all untested:
-    // // Quick blank/unblank without sleep
-    // pub fn display_off(&mut self) -> Result<(), Co5300Error<SPI::Error, RST::Error>> {
-    //     self.cmd(0x28, &[])?; // DISP OFF
-    //     Ok(())
-    // }
+    // Quick blank/unblank without sleep
+    pub fn display_off(&mut self) -> Result<(), Co5300Error<(), RST::Error>> {
+        self.qspi_exit_single();
+        let res = self.cmd(0x28, &[]); // DISP OFF
+        self.qspi_enter_quad();
+        res
+    }
 
-    // pub fn display_on(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    // {
-    //     self.cmd(0x29, &[])?; // DISP ON
-    //     delay.delay_ms(10);   // small settle before first RAMWR
-    //     Ok(())
-    // }
+    pub fn display_on(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+        -> Result<(), Co5300Error<(), RST::Error>>
+    {
+        self.qspi_exit_single();
+        let res = self.cmd(0x29, &[]); // DISP ON
+        self.qspi_enter_quad();
+        delay.delay_ms(10);
+        res
+    }
 
-    // // Deep sleep control
-    // pub fn sleep_in(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    // {
-    //     self.cmd(0x10, &[])?; // SLP IN
-    //     delay.delay_ms(120);
-    //     Ok(())
-    // }
+    // Deep sleep control
+    pub fn sleep_in(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+        -> Result<(), Co5300Error<(), RST::Error>>
+    {
+        self.qspi_exit_single();
+        let res = self.cmd(0x10, &[]); // SLP IN
+        self.qspi_enter_quad();
+        delay.delay_ms(120);
+        res
+    }
 
-    // pub fn sleep_out(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    // {
-    //     self.cmd(0x11, &[])?; // SLP OUT
-    //     delay.delay_ms(120);
-    //     Ok(())
-    // }
+    pub fn sleep_out(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+        -> Result<(), Co5300Error<(), RST::Error>>
+    {
+        self.qspi_exit_single();
+        let res = self.cmd(0x11, &[]); // SLP OUT
+        self.qspi_enter_quad();
+        delay.delay_ms(120);
+        res
+    }
 
-    //     // Convenience: full disable (blank + sleep)
-    // pub fn disable(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    // {
-    //     self.display_off()?;
-    //     self.sleep_in(delay)?;
-    //     Ok(())
-    // }
+    // Convenience wrappers
+    pub fn disable(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+        -> Result<(), Co5300Error<(), RST::Error>>
+    {
+        self.display_off()?;
+        self.sleep_in(delay)?;
+        Ok(())
+    }
 
-    // // Convenience: full enable (wake + on + re-assert opts if needed)
-    // pub fn enable(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-    //     -> Result<(), Co5300Error<SPI::Error, RST::Error>>
-    // {
-    //     self.sleep_out(delay)?;
+    pub fn enable(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
+        -> Result<(), Co5300Error<(), RST::Error>>
+    {
+        self.sleep_out(delay)?;
+        // Re-assert format/orientation if needed
+        self.qspi_exit_single();
+        self.cmd(0x3A, &[0x55])?; // RGB565
+        self.cmd(0x36, &[0x00])?; // MADCTL
+        // Optionally restore brightness
+        self.set_brightness(0xFF)?;
+        self.qspi_enter_quad();
 
-    //     // Some panels lose format/orientation in sleep; re-assert if needed
-    //     self.cmd(0x3A, &[0x55])?; // RGB565
-    //     self.cmd(0x36, &[0x00])?; // MADCTL (adjust if you rotate)
+        self.display_on(delay)?;
+        Ok(())
+    }
 
-    //     self.display_on(delay)?;
-    //     // Optionally restore brightness
-    //     // self.cmd(0x51, &[0xFF])?;
-    //     Ok(())
-    // }
+    // --- end of untested power control ---
+
 
     // adjustable brightness (0-255)
     pub fn set_brightness(&mut self, bright: u8)
@@ -579,56 +590,6 @@ where
         Ok(())
     }
 
-
-    // // Full-frame blit from BE bytes, using direct slices.
-    // pub fn blit_full_frame_be_bounced(&mut self, data: &[u8])
-    //     -> Result<(), Co5300Error<(), RST::Error>>
-    // {
-    //     let needed = (self.w as usize) * (self.h as usize) * 2;
-    //     if data.len() != needed { return Err(Co5300Error::OutOfBounds); }
-
-    //     self.set_window_raw(0, 0, self.w - 1, self.h - 1)?;
-
-    //     // manually chunk to respect the DMA buffer size.
-    //     let mut off = 0usize;
-    //     let mut first = true;
-    //     while off < data.len() {
-    //         // Use our new large chunk size
-    //         let take = core::cmp::min(DMA_CHUNK_SIZE, data.len() - off);
-    //         let cmd = if first { RAMWR_OPCODE } else { RAMWRC_OPCODE };
-    //         first = false;
-    //         let hdr: [u8; 4] = [0x02, 0x00, cmd, 0x00];
-    //         let chunk = &data[off..off + take];
-    //         let _ = self.spi.cs.set_low();
-    //         let _ = self.spi.bus.half_duplex_write(
-    //             DataMode::Single,
-    //             Command::None,
-    //             Address::None,
-    //             0,
-    //             &hdr,
-    //         );
-    //         let res = self.spi.bus.half_duplex_write(
-    //             DataMode::Single,
-    //             Command::None,
-    //             Address::None,
-    //             0,
-    //             chunk,
-    //         );
-    //         let _ = self.spi.cs.set_high();
-    //         res.map_err(|_| Co5300Error::Spi(()))?;
-    //         off += take;
-    //     }
-    //     // ---- END OF CHANGE ----
-
-    //     // Update FB
-    //     let mut si = 0usize;
-    //     for px in self.fb.iter_mut() {
-    //         let hi = data[si]; let lo = data[si + 1];
-    //         *px = u16::from_be_bytes([hi, lo]);
-    //         si += 2;
-    //     }
-    //     Ok(())
-    // }
 
     // ---- Low-level helpers ----
     // Low-level command send (with data)

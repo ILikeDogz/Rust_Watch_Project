@@ -18,7 +18,6 @@ use esp_hal::{
 
 use crate::wiring::DisplayPins;
 
-
 // A delay provider that uses the ESP32-S3's high-resolution SystemTimer.
 pub struct TimerDelay;
 
@@ -26,12 +25,11 @@ impl embedded_hal::delay::DelayNs for TimerDelay {
     #[inline]
     fn delay_ns(&mut self, ns: u32) {
         let ticks_per_sec = SystemTimer::ticks_per_second();
-        let start = SystemTimer::unit_value(Unit::Unit0); // <-- FIXED
-        // Calculate required ticks, rounding up to ensure at least minimum delay
+        let start = SystemTimer::unit_value(Unit::Unit0); // Calculate required ticks, rounding up to ensure at least minimum delay
         let delta_ticks = (ns as u64 * ticks_per_sec).div_ceil(1_000_000_000);
         let end_ticks = start.saturating_add(delta_ticks);
 
-        while SystemTimer::unit_value(Unit::Unit0) < end_ticks { // <-- FIXED
+        while SystemTimer::unit_value(Unit::Unit0) < end_ticks {
             core::hint::spin_loop();
         }
     }
@@ -39,11 +37,11 @@ impl embedded_hal::delay::DelayNs for TimerDelay {
     #[inline]
     fn delay_us(&mut self, us: u32) {
         let ticks_per_sec = SystemTimer::ticks_per_second();
-        let start = SystemTimer::unit_value(Unit::Unit0); // <-- FIXED
+        let start = SystemTimer::unit_value(Unit::Unit0); 
         let delta_ticks = (us as u64 * ticks_per_sec).div_ceil(1_000_000);
         let end_ticks = start.saturating_add(delta_ticks);
 
-        while SystemTimer::unit_value(Unit::Unit0) < end_ticks { // <-- FIXED
+        while SystemTimer::unit_value(Unit::Unit0) < end_ticks {
             core::hint::spin_loop();
         }
     }
@@ -51,11 +49,11 @@ impl embedded_hal::delay::DelayNs for TimerDelay {
     #[inline]
     fn delay_ms(&mut self, ms: u32) {
         let ticks_per_sec = SystemTimer::ticks_per_second();
-        let start = SystemTimer::unit_value(Unit::Unit0); // <-- FIXED
+        let start = SystemTimer::unit_value(Unit::Unit0); 
         let delta_ticks = (ms as u64 * ticks_per_sec).div_ceil(1_000);
         let end_ticks = start.saturating_add(delta_ticks);
 
-        while SystemTimer::unit_value(Unit::Unit0) < end_ticks { // <-- FIXED
+        while SystemTimer::unit_value(Unit::Unit0) < end_ticks {
             core::hint::spin_loop();
         }
     }
@@ -69,16 +67,13 @@ mod gc9a01_backend {
     use super::*;
     use mipidsi::interface::SpiInterface;
     use mipidsi::{
-        Builder as DisplayBuilder,
         models::GC9A01,
-        options::{ColorOrder, Orientation, Rotation, ColorInversion},
+        options::{ColorInversion, ColorOrder, Orientation, Rotation},
+        Builder as DisplayBuilder,
     };
 
     pub type DisplayType<'a> = mipidsi::Display<
-        SpiInterface<'a,
-            ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>,
-            Output<'a>,
-        >,
+        SpiInterface<'a, ExclusiveDevice<Spi<'a, Blocking>, Output<'a>, NoDelay>, Output<'a>>,
         GC9A01,
         Output<'a>,
     >;
@@ -86,8 +81,7 @@ mod gc9a01_backend {
     pub fn setup_display<'a>(
         display_pins: DisplayPins<'a>,
         display_buf: &'a mut [u8],
-    ) -> DisplayType<'a>
-    {
+    ) -> DisplayType<'a> {
         // Destructure pins
         let DisplayPins {
             spi2,
@@ -101,7 +95,9 @@ mod gc9a01_backend {
 
         // Hardware reset & backlight
         lcd_rst.set_low();
-        for _ in 0..10000 { core::hint::spin_loop(); }
+        for _ in 0..10000 {
+            core::hint::spin_loop();
+        }
         lcd_rst.set_high();
         lcd_bl.set_high();
 
@@ -110,7 +106,8 @@ mod gc9a01_backend {
             .with_frequency(Rate::from_hz(40_000_000))
             .with_mode(Mode::_0);
 
-        let spi = Spi::new(spi2, spi_cfg).unwrap()
+        let spi = Spi::new(spi2, spi_cfg)
+            .unwrap()
             .with_sck(spi_sck)
             .with_mosi(spi_mosi);
 
@@ -138,27 +135,24 @@ mod gc9a01_backend {
 #[cfg(feature = "esp32s3-disp143Oled")]
 mod co5300_backend {
     use super::*;
+    use crate::co5300::{self, Co5300Display, RawSpiDev};
     use embedded_hal::delay::DelayNs;
     use esp_hal::{
         dma::{DmaRxBuf, DmaTxBuf},
         dma_buffers,
         spi::master::Spi,
     };
-    use crate::co5300::{self, Co5300Display, RawSpiDev};
 
     pub type DisplayType<'a> = Co5300Display<'a, Output<'a>>;
 
-    pub fn setup_display<'a>(
-        display_pins: DisplayPins<'a>,
-        fb: &'a mut [u16],
-    ) -> DisplayType<'a> {
+    pub fn setup_display<'a>(display_pins: DisplayPins<'a>, fb: &'a mut [u16]) -> DisplayType<'a> {
         let DisplayPins {
             spi2,
             cs,
             clk,
             do0,
             do1,
-            do2 ,
+            do2,
             do3,
             rst,
             mut en,
@@ -167,15 +161,15 @@ mod co5300_backend {
             dma_ch0,
         } = display_pins;
 
-        let mut delay = TimerDelay; 
+        let mut delay = TimerDelay;
 
         // Power up panel
 
         // quick toggle EN pin
         en.set_low();
-        delay.delay_ms(10);     // ensure it’s really off
+        delay.delay_ms(10); // ensure it’s really off
         en.set_high();
-        delay.delay_ms(100);    // give panel power rails time to stabilise
+        delay.delay_ms(100); // give panel power rails time to stabilise
 
         // // SPI @ 40 MHz in datasheet, Mode 0, known stable, up to 80 MHz overclock might work but is unstable
         // let spi = Spi::new(
@@ -189,7 +183,6 @@ mod co5300_backend {
         // .with_mosi(do0)
         // // .with_miso(do1)
         // .with_dma(dma_ch0);
-
 
         let spi = Spi::new(
             spi2,
@@ -205,7 +198,6 @@ mod co5300_backend {
         .with_sio3(do3)
         .with_dma(dma_ch0);
 
-
         let (rx_buf, rx_desc, tx_buf, tx_desc) = dma_buffers!(4096, 65536);
         let rx = DmaRxBuf::new(rx_desc, rx_buf).unwrap();
         let tx = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
@@ -213,12 +205,9 @@ mod co5300_backend {
         let spi_bus = spi.with_buffers(rx, tx);
         let raw = RawSpiDev { bus: spi_bus, cs };
 
-        co5300::new_with_defaults(raw, Some(rst), &mut delay, fb)
-            .expect("CO5300 init failed")
-
+        co5300::new_with_defaults(raw, Some(rst), &mut delay, fb).expect("CO5300 init failed")
     }
 }
-
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
 pub use gc9a01_backend::{setup_display, DisplayType};

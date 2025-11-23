@@ -13,37 +13,34 @@
 #![no_std]
 #![no_main]
 
-// Define the application description, which is placed in a special section of the binary. 
-// This is used by the bootloader to verify the application. 
-// The macro automatically fills in the fields. 
+// Define the application description, which is placed in a special section of the binary.
+// This is used by the bootloader to verify the application.
+// The macro automatically fills in the fields.
 esp_bootloader_esp_idf::esp_app_desc!();
 
 use esp32s3_tests::{
     display::setup_display,
+    input::{handle_button_generic, handle_encoder_generic, ButtonState, RotaryState},
+    ui::{precache_asset, update_ui, AssetId, MainMenuState, Page, UiState},
     wiring::{init_board_pins, BoardPins},
-    input::{ButtonState, RotaryState, handle_button_generic, handle_encoder_generic},
-    ui::{MainMenuState, Page, UiState, update_ui, precache_asset, AssetId},
 };
 
-use esp_backtrace as _;
 use core::cell::{Cell, RefCell};
 use critical_section::Mutex;
+use esp_backtrace as _;
 
 // ESP-HAL imports
 use esp_hal::{
-    Config, delay, handler, main, psram, ram, timer::systimer::{SystemTimer, Unit}
+    delay, handler, main, psram, ram,
+    timer::systimer::{SystemTimer, Unit},
+    Config,
 };
 
 extern crate alloc;
 use alloc::{boxed::Box, vec};
 
 // Embedded-graphics
-use embedded_graphics::{
-    pixelcolor::Rgb565, 
-    prelude::RgbColor,
-    draw_target::DrawTarget, 
-};
-
+// use embedded_graphics::{draw_target::DrawTarget, pixelcolor::Rgb565, prelude::RgbColor};
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
 #[ram]
@@ -82,22 +79,22 @@ static BUTTON3: ButtonState<'static> = ButtonState {
 // Shared resources for rotary encoder
 static ROTARY: RotaryState<'static> = RotaryState {
     clk: Mutex::new(RefCell::new(None)),
-    dt:  Mutex::new(RefCell::new(None)),
-    position:    Mutex::new(Cell::new(0)),
+    dt: Mutex::new(RefCell::new(None)),
+    position: Mutex::new(Cell::new(0)),
     last_qstate: Mutex::new(Cell::new(0)), // bits: [CLK<<1 | DT]
-    last_step: Mutex::new(Cell::new(0)), // +1 or -1 from last transition
+    last_step: Mutex::new(Cell::new(0)),   // +1 or -1 from last transition
 };
 
-
-static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState { page: Page::Main(MainMenuState::Home), dialog: None }));
+static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState {
+    page: Page::Main(MainMenuState::Home),
+    dialog: None,
+}));
 
 // // for debug, start on Alien page
 // static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien10), dialog: None }));
 
-
 // Current debounce time (milliseconds)
 const DEBOUNCE_MS: u64 = 240;
-
 
 // Interrupt handler
 #[handler]
@@ -107,7 +104,7 @@ fn handler() {
         let t = SystemTimer::unit_value(Unit::Unit0);
         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
     };
-    
+
     // Button 1: JUST SET THE FLAG
     handle_button_generic(&BUTTON1, now_ms, DEBOUNCE_MS, || {
         BUTTON1_PRESSED.store(true, Ordering::Relaxed);
@@ -129,23 +126,22 @@ fn handler() {
 
 #[main]
 fn main() -> ! {
-
     // rotary encoder detent tracking
     const DETENT_STEPS: i32 = 4; // set to 4 if your encoder is 4 steps per detent
     let mut last_detent: Option<i32> = None;
 
     // initial UI state
-    let mut last_ui_state = UiState { page: Page::Main(MainMenuState::Home), dialog: None };
+    let mut last_ui_state = UiState {
+        page: Page::Main(MainMenuState::Home),
+        dialog: None,
+    };
 
     let mut needs_redraw = true;
     // // for debug, start on Alien page
     // let mut last_ui_state = UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien10), dialog: None };
 
-    
-    
     // Initialize peripherals
     let peripherals = esp_hal::init(Config::default());
-
 
     esp_alloc::psram_allocator!(&peripherals.PSRAM, psram);
 
@@ -164,10 +160,8 @@ fn main() -> ! {
     let dt_initial = enc_dt.is_high() as u8;
     let qstate_initial = (clk_initial << 1) | dt_initial;
 
-
     // Stash pins in global state
     critical_section::with(|cs| {
-        
         BUTTON1.input.borrow_ref_mut(cs).replace(btn1);
         BUTTON1.last_level.borrow(cs).set(true);
 
@@ -187,11 +181,11 @@ fn main() -> ! {
     io.set_interrupt_handler(handler);
 
     let mut my_display = {
-         #[cfg(feature = "devkit-esp32s3-disp128")]
-         {
+        #[cfg(feature = "devkit-esp32s3-disp128")]
+        {
             // Safe because DISPLAY_BUF is only used here
             unsafe { setup_display(display_pins, &mut DISPLAY_BUF) }
-         }
+        }
 
         #[cfg(feature = "esp32s3-disp143Oled")]
         {
@@ -201,7 +195,6 @@ fn main() -> ! {
             setup_display(display_pins, fb)
         }
     };
-
 
     // my_display.clear(Rgb565::WHITE).ok();
 
@@ -213,10 +206,7 @@ fn main() -> ! {
     // my_display.debug_half_duplex_brightness(0x50);
     // my_display.set_brightness(0x80);
 
-
     // my_display.qspi_test_fullscreen(true);
-
-
 
     // // -------------------- UI Init --------------------
 
@@ -226,18 +216,12 @@ fn main() -> ! {
         t.saturating_mul(1000) / SystemTimer::ticks_per_second()
     };
 
-    
     // Helper: ticks -> microseconds
     let ticks_per_s = SystemTimer::ticks_per_second() as u64;
     let to_us = |t0: u64, t1: u64| -> u64 {
         let dt = t1.saturating_sub(t0);
         dt.saturating_mul(1_000_000) / ticks_per_s
     };
-
-    // let t0 = SystemTimer::unit_value(Unit::Unit0);
-    // my_display.fill_rect_solid_no_fb(0, 0, 466, 466, Rgb565::BLACK);
-    // let t1 = SystemTimer::unit_value(Unit::Unit0);
-    // esp_println::println!("Initial fill_rect_solid_no_fb: {} us", to_us(t0, t1));
 
     #[cfg(feature = "esp32s3-disp143Oled")]
     {
@@ -247,14 +231,14 @@ fn main() -> ! {
 
     // Initial UI draw (timed)
     {
-        let t0 = SystemTimer::unit_value(Unit::Unit0);
+        // let t0 = SystemTimer::unit_value(Unit::Unit0);
         update_ui(&mut my_display, last_ui_state, needs_redraw);
-        let t1 = SystemTimer::unit_value(Unit::Unit0);
-        esp_println::println!("Initial UI draw: {} us", to_us(t0, t1));
+        // let t1 = SystemTimer::unit_value(Unit::Unit0);
+        // esp_println::println!("Initial UI draw: {} us", to_us(t0, t1));
     }
 
     needs_redraw = false;
-    
+
     #[cfg(feature = "esp32s3-disp143Oled")]
     {
         // Pre-cache all Omnitrix images
@@ -263,7 +247,7 @@ fn main() -> ! {
         let _n = precache_all();
         // esp_println::println!("Precached {} Omnitrix images", n);
     }
-    
+
     // -------------------- Demo Sequence --------------------
     // // Demo sequence timing
     // let demo_start_ms = {
@@ -271,7 +255,6 @@ fn main() -> ! {
     //     t.saturating_mul(1000) / SystemTimer::ticks_per_second()
     // };
 
-    
     // // Helper: ticks -> microseconds
     // let ticks_per_s = SystemTimer::ticks_per_second() as u64;
     // let to_us = |t0: u64, t1: u64| -> u64 {
@@ -300,14 +283,20 @@ fn main() -> ! {
             DemoState::Home => {
                 if rel > 1000 {
                     critical_section::with(|cs| {
-                        UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1), dialog: None });
+                        UI_STATE.borrow(cs).set(UiState {
+                            page: Page::Omnitrix(esp32s3_tests::ui::OmnitrixState::Alien1),
+                            dialog: None,
+                        });
                     });
                     demo_state = DemoState::Omnitrix;
                 }
             }
             DemoState::Omnitrix => {
                 if rel > 1500 {
-                    demo_state = DemoState::Rotating { idx: 1, last_ms: rel };
+                    demo_state = DemoState::Rotating {
+                        idx: 1,
+                        last_ms: rel,
+                    };
                 }
             }
             DemoState::Rotating { idx, last_ms } => {
@@ -326,10 +315,16 @@ fn main() -> ! {
                         _ => esp32s3_tests::ui::OmnitrixState::Alien1,
                     };
                     critical_section::with(|cs| {
-                        UI_STATE.borrow(cs).set(UiState { page: Page::Omnitrix(next_state), dialog: None });
+                        UI_STATE.borrow(cs).set(UiState {
+                            page: Page::Omnitrix(next_state),
+                            dialog: None,
+                        });
                     });
                     if idx < 9 {
-                        demo_state = DemoState::Rotating { idx: idx + 1, last_ms: rel };
+                        demo_state = DemoState::Rotating {
+                            idx: idx + 1,
+                            last_ms: rel,
+                        };
                     } else {
                         demo_state = DemoState::BackToHome { last_ms: rel };
                     }
@@ -343,8 +338,11 @@ fn main() -> ! {
 
                     // set to info page instead
                     critical_section::with(|cs| {
-                        UI_STATE.borrow(cs).set(UiState { page: Page::Info, dialog: None });
-                    }); 
+                        UI_STATE.borrow(cs).set(UiState {
+                            page: Page::Info,
+                            dialog: None,
+                        });
+                    });
                     demo_state = DemoState::Done;
                 }
             }
@@ -364,7 +362,9 @@ fn main() -> ! {
         }
         needs_redraw = false;
 
-        for _ in 0..10000 { core::hint::spin_loop(); }
+        for _ in 0..10000 {
+            core::hint::spin_loop();
+        }
     }
 
     // -------------------- Main Sequence --------------------
@@ -410,7 +410,7 @@ fn main() -> ! {
     //     // Rotary encoder handling
     //     let pos = critical_section::with(|cs| ROTARY.position.borrow(cs).get());
     //     let detent = pos / DETENT_STEPS; // use division (works well for negatives too)
-        
+
     //     // If detent changed, update UI state
     //     if Some(detent) != last_detent {
     //         if let Some(prev) = last_detent {
