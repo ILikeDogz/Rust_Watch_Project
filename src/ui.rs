@@ -9,21 +9,13 @@
 //! All drawing is centered on a 240x240 display, but can be adapted for other sizes.
 
 extern crate alloc;
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::vec::Vec;
 use core::cell::RefCell;
-use core::slice;
 use critical_section::Mutex;
 
 use esp_backtrace as _;
 
-// ESP-HAL imports
-// use esp_hal::{
-//     gpio::Output,
-//     spi::master::Spi,
-//     Blocking,
-// };
-
-// Embedded-graphics
+// Embedded-graphics, a ton are unused but this is a work in progress
 use embedded_graphics::{
     draw_target::DrawTarget,
     image::{Image, ImageRaw, ImageRawBE},

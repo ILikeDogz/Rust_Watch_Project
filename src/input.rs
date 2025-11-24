@@ -87,8 +87,10 @@ pub fn handle_encoder_generic(encoder: &RotaryState) {
     critical_section::with(|cs| {
         let mut clk_binding = encoder.clk.borrow_ref_mut(cs);
         let mut dt_binding = encoder.dt.borrow_ref_mut(cs);
-        let clk = clk_binding.as_mut().unwrap();
-        let dt = dt_binding.as_mut().unwrap();
+        let (Some(clk), Some(dt)) = (clk_binding.as_mut(), dt_binding.as_mut()) else {
+            // encoder pins not yet installed, skip
+            return;
+        };
 
         // Check if interrupt is actually pending on either pin
         if !clk.is_interrupt_set() && !dt.is_interrupt_set() {

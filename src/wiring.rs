@@ -2,6 +2,8 @@
 // Different profiles can be selected via Cargo features.
 // Alternate profiles can be defined for different boards by enabling
 // features like "devkit" or "alt" in Cargo.toml.
+// OLED is the only one fully supported here, others are wip or templates.
+
 
 use esp_backtrace as _;
 
