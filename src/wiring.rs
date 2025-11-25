@@ -160,16 +160,16 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) 
     // led2.set_high();
 
     // buttons
-    let mut btn1 = Input::new(p.GPIO45, InputConfig::default().with_pull(Pull::Up));
-    let mut btn2 = Input::new(p.GPIO46, InputConfig::default().with_pull(Pull::Up));
-    let mut btn3 = Input::new(p.GPIO1, InputConfig::default().with_pull(Pull::Up));
+    let mut btn1 = Input::new(p.GPIO7, InputConfig::default().with_pull(Pull::Up)); //was 45
+    let mut btn2 = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::Up)); //was 46
+    let mut btn3 = Input::new(p.GPIO1, InputConfig::default().with_pull(Pull::Up)); //was 1
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);
     btn3.listen(Event::AnyEdge);
 
     // rotary encoder pins
-    let mut enc_clk = Input::new(p.GPIO2, InputConfig::default().with_pull(Pull::None));
-    let mut enc_dt = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::None));
+    let mut enc_clk = Input::new(p.GPIO16, InputConfig::default().with_pull(Pull::None)); //was 2
+    let mut enc_dt = Input::new(p.GPIO17, InputConfig::default().with_pull(Pull::None)); //was 3
     enc_clk.listen(Event::AnyEdge);
     enc_dt.listen(Event::AnyEdge);
 
