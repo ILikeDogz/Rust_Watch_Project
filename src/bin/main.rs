@@ -25,6 +25,8 @@ use esp32s3_tests::{
     ui::{precache_asset, update_ui, AssetId, MainMenuState, Page, UiState},
     wiring::{init_board_pins, BoardPins},
 };
+#[cfg(feature = "esp32s3-disp143Oled")]
+use esp32s3_tests::display::TimerDelay;
 
 use core::cell::{Cell, RefCell};
 use critical_section::Mutex;
@@ -103,6 +105,8 @@ static IMU_INT: ImuIntState<'static> = ImuIntState {
 
 // Current debounce time (milliseconds)
 const DEBOUNCE_MS: u64 = 240;
+const COMBO_WINDOW_MS: u64 = 300;
+const COMBO_HOLD_MS: u64 = 1000;
 
 // Interrupt handler
 #[handler]
@@ -172,6 +176,11 @@ fn main() -> ! {
     // rotary encoder detent tracking
     const DETENT_STEPS: i32 = 4; // set to 4 if your encoder is 4 steps per detent
     let mut last_detent: Option<i32> = None;
+    let mut last_btn1_press: Option<u64> = None;
+    let mut last_btn2_press: Option<u64> = None;
+    let mut combo_start: Option<u64> = None;
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    let mut display_on = true;
 
     // Read encoder pin states BEFORE moving them
     let clk_initial = enc_clk.is_high() as u8;
@@ -558,8 +567,71 @@ fn main() -> ! {
         //     dbg_next_ms = now_ms.saturating_add(200);
         // }
 
+        let b1_event = BUTTON1_PRESSED.swap(false, Ordering::Acquire);
+        let b2_event = BUTTON2_PRESSED.swap(false, Ordering::Acquire);
+
+        #[cfg(feature = "esp32s3-disp143Oled")]
+        {
+            if b1_event {
+                last_btn1_press = Some(now_ms);
+            }
+            if b2_event {
+                last_btn2_press = Some(now_ms);
+            }
+
+            let both_down = critical_section::with(|cs| {
+                let b1 = BUTTON1
+                    .input
+                    .borrow_ref(cs)
+                    .as_ref()
+                    .map(|p| p.is_low())
+                    .unwrap_or(false);
+                let b2 = BUTTON2
+                    .input
+                    .borrow_ref(cs)
+                    .as_ref()
+                    .map(|p| p.is_low())
+                    .unwrap_or(false);
+                b1 && b2
+            });
+
+            let combo_ready = matches!(
+                (last_btn1_press, last_btn2_press),
+                (Some(t1), Some(t2)) if t1.abs_diff(t2) <= COMBO_WINDOW_MS
+            );
+
+            if both_down && combo_ready && combo_start.is_none() {
+                combo_start = Some(now_ms);
+            }
+            if !both_down {
+                combo_start = None;
+            }
+
+            if let Some(t0) = combo_start {
+                if now_ms.saturating_sub(t0) >= COMBO_HOLD_MS && both_down {
+                    let mut delay = TimerDelay;
+                    let home = UiState {
+                        page: Page::Main(MainMenuState::Home),
+                        dialog: None,
+                    };
+                    if display_on {
+                        let _ = my_display.disable(&mut delay);
+                        display_on = false;
+                    } else {
+                        let _ = my_display.enable(&mut delay);
+                        critical_section::with(|cs| UI_STATE.borrow(cs).set(home));
+                        last_ui_state = home;
+                        needs_redraw = true;
+                        display_on = true;
+                    }
+                    combo_start = None;
+                    continue;
+                }
+            }
+        }
+
         // Button 1 = Back (go up a layer)
-        if BUTTON1_PRESSED.swap(false, Ordering::Acquire) {
+        if b1_event {
             critical_section::with(|cs| {
                 let state = UI_STATE.borrow(cs).get();
                 let new_state = state.back();
@@ -569,7 +641,7 @@ fn main() -> ! {
         }
 
         // Button 2 = Select (enter/confirm)
-        if BUTTON2_PRESSED.swap(false, Ordering::Acquire) {
+        if b2_event {
             critical_section::with(|cs| {
                 let state = UI_STATE.borrow(cs).get();
                 let new_state = state.select();
