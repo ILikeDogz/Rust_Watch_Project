@@ -18,6 +18,7 @@
 // The macro automatically fills in the fields.
 esp_bootloader_esp_idf::esp_app_desc!();
 
+use embedded_graphics::pixelcolor::Rgb565;
 use esp32s3_tests::{
     display::setup_display,
     qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
@@ -346,7 +347,6 @@ fn main() -> ! {
         // esp_println::println!("Precached {} Omnitrix images", n);
     }
 
-
     // // -------------------- Demo Sequence --------------------
     // // Demo sequence timing (for display driver benchmarking)
     // let demo_start_ms = {
@@ -518,7 +518,7 @@ fn main() -> ! {
                             if in_omnitrix {
                                 smash_count = smash_count.saturating_add(1);
                                 // 2 smashes as it will count both the pop up and the down slam
-                                if smash_count >= 2 {
+                                if smash_count >= 1 {
                                     // reset count after triggering
                                     smash_count = 0;
                                     BUTTON3_PRESSED.store(true, Ordering::Relaxed);
@@ -657,7 +657,9 @@ fn main() -> ! {
                 let new_state = state.transform(); // use Omnitrix-only dialog
                 UI_STATE.borrow(cs).set(new_state);
             });
-            needs_redraw = true;
+            if in_omnitrix {
+                needs_redraw = true;
+            }
         }
 
         // Rotary encoder handling

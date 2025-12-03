@@ -110,7 +110,7 @@ static ALIEN10_IMAGE: &[u8] =
 static ALIEN_LOGO: &[u8] =
     include_bytes!(concat!("assets/omnitrix_logo_466x466_rgb565_be.raw.zlib"));
 static INFO_PAGE_IMAGE: &[u8] =
-    include_bytes!(concat!("assets/debug_image_466x466_rgb565_be.raw.zlib"));
+    include_bytes!(concat!("assets/debug_image2_466x466_rgb565_be.raw.zlib"));
 
 // Generic asset cache
 static ASSETS: Mutex<RefCell<[AssetSlot; ASSET_MAX]>> = Mutex::new(RefCell::new(

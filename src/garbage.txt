@@ -83,41 +83,17 @@
     // );
 
 
-    // --- Image 3: blit_rect_be_fast (alien4) ---
-    let t6 = SystemTimer::unit_value(Unit::Unit0);
-
-    let z3: &[u8] = include_bytes!("../assets/alien4_466x466_rgb565_be.raw.zlib");
-    let raw3 = decompress_to_vec_zlib_with_limit(z3, (W * H * 2) as usize).unwrap_or_default();
-
-    let t7 = SystemTimer::unit_value(Unit::Unit0);
-
-    if raw3.len() == (W * H * 2) as usize {
-        // Full-screen rect at (0,0). Change x,y,w,h to test sub-rect throughput.
-        let _ = my_display.blit_rect_be_fast(0, 0, W as u16, H as u16, &raw3);
-    }
-
-    let t8 = SystemTimer::unit_value(Unit::Unit0);
-
-    let decomp_us3 = to_us(t6, t7);
-    let draw_us3   = to_us(t7, t8);
-    let kbps3 = (bytes1.saturating_mul(1_000_000) / draw_us3) / 1024;
-
-    esp_println::println!(
-        "Image3 (blit_rect_be_fast), data size {} decompress: {} us, draw: {} us ({} KiB/s)",
-        bytes1, decomp_us3, draw_us3, kbps3
-    );
-
     
     const IMG_W_OP: u32 = 308;
     const IMG_H_OP: u32 = 374;
 
-    let t0 = SystemTimer::unit_value(Unit::Unit0);
     // Raw (uncompressed) big-endian RGB565: length must be 240*240*2 = 115200 bytes
     let alien8: &[u8] = include_bytes!("../assets/alien1_308x374_rgb565_be.raw");
 
     if alien8.len() == (IMG_W_OP * IMG_H_OP * 2) as usize {
         // This helper centers automatically
-        draw_image_bytes(&mut my_display, alien8, IMG_W_OP, IMG_H_OP, false);
+        let t0 = SystemTimer::unit_value(Unit::Unit0);
+        draw_image_bytes(&mut my_display, alien8, IMG_W_OP, IMG_H_OP, false, true);
         let t1 = SystemTimer::unit_value(Unit::Unit0);
         esp_println::println!("Alien8 draw time: {} us", to_us(t0, t1));
     } else {
@@ -202,5 +178,4 @@
         esp_println::println!("Text '{}' draw: {} us @ ({},{})", label, to_us(t0, t1), x, y);
     }
 
-
-    
+    loop{}

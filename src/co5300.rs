@@ -1,12 +1,14 @@
 
-// Minimal CO5300 panel driver (Standard SPI mode, no D/C pin).
+// Minimal CO5300 panel driver (QSPI mode).
 // Works with esp-hal (no_std) and embedded-graphics.
 //
 // Wiring on Waveshare ESP32-S3 Touch AMOLED 1.43” (CO5300):
 //   CS  = GPIO9
 //   SCK = GPIO10
 //   IO0/MOSI = GPIO11
-//   (IO1..IO3 unused in Standard SPI mode)
+//   IO1/MISO = GPIO12
+//   IO2 = GPIO13
+//   IO3 = GPIO14
 //   RST = GPIO21
 //
 // Protocol (Standard SPI):
@@ -15,7 +17,7 @@
 //            [0x02, 0x3A, 0x55] -> Pixel Format = 16bpp (RGB565)
 // Geometry: panel is 466 x 466 logical pixels (square).
 
-use core::{fmt, mem};
+use core::fmt;
 
 use embedded_graphics::{
     primitives::Rectangle,
@@ -31,7 +33,6 @@ use esp_hal::{
     gpio::Output,
 };
 
-// use embedded_hal::spi::Operation;
 use embedded_graphics::prelude::IntoStorage;
 
 use esp_hal::spi::master::{DataMode, Command, Address, SpiDmaBus};
@@ -39,7 +40,7 @@ use esp_hal::spi::master::{DataMode, Command, Address, SpiDmaBus};
 
 
 extern crate alloc;
-use alloc::vec;
+use bytemuck::cast_slice;
 
 // Public constants so the rest of your code can adopt 466×466 easily.
 pub const CO5300_WIDTH: u16 = 466;
@@ -343,10 +344,13 @@ where
         &mut self,
         x0: u16, y0: u16, x1: u16, y1: u16,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
+
+        // Bounds check
         if x0 > x1 || y0 > y1 || x0 >= self.w || y0 >= self.h {
             return Ok(());
         }
 
+        // Expand to even boundaries
         let ax0 = x0 & !1;
         let ay0 = y0 & !1;
         let ax1 = (x1 | 1).min(self.w - 1);
@@ -363,14 +367,26 @@ where
         let data_mode = DataMode::Quad;
         let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
 
-        // Move stage out, use it locally, then restore to self at end
-        let mut stage = mem::replace(&mut self.stage, alloc::vec![].into_boxed_slice());
+        // Use staging buffer directly; no realloc per call
+        let stage = &mut self.stage;
         let mut filled = 0usize;
 
         for y in ay0..=ay1 {
+            // get row slice from FB
             let row_base = (y as usize) * fbw + (ax0 as usize);
-            for x in 0..ew {
-                if filled + 2 > stage.len() {
+            let row = &self.fb[row_base..row_base + ew];
+            let row_bytes = cast_slice(row);
+            let mut off = 0usize;
+
+            // stream row bytes into staging buffer and send when full
+            while off < row_bytes.len() {
+                let space = stage.len().saturating_sub(filled);
+                let take = core::cmp::min(space, row_bytes.len() - off);
+                stage[filled..filled + take].copy_from_slice(&row_bytes[off..off + take]);
+                filled += take;
+                off += take;
+
+                if filled == stage.len() {
                     // send current chunk over quad
                     let ad: u32 = (current_cmd as u32) << 8;
                     let address = Address::_24Bit(ad, address_mode);
@@ -387,13 +403,10 @@ where
                     current_cmd = RAMWRC_OPCODE;
                     filled = 0;
                 }
-                let be = self.fb[row_base + x].to_be_bytes();
-                stage[filled] = be[0];
-                stage[filled + 1] = be[1];
-                filled += 2;
             }
         }
 
+        // send any remaining data
         if filled > 0 {
             let ad: u32 = (current_cmd as u32) << 8;
             let address = Address::_24Bit(ad, address_mode);
@@ -409,8 +422,6 @@ where
             res.map_err(|_| Co5300Error::Spi(()))?;
         }
 
-        // Restore stage buffer to self
-        self.stage = stage;
         Ok(())
     }
     
@@ -442,10 +453,11 @@ where
             return Err(Co5300Error::OutOfBounds); }
         let (x1, y1) = ((x0 + w32 - 1) as u16, (y0 + h32 - 1) as u16);
 
+        // Set window
         self.qspi_set_window_raw(x, y, x1, y1)?;
 
-        // Move stage out, fill pattern, send in chunks, then restore
-        let mut stage = mem::replace(&mut self.stage, vec![].into_boxed_slice());
+        // Prepare staging buffer with color pattern
+        let stage = &mut self.stage;
 
         // Prepare BE pattern once
         let c = color.into_storage().to_be_bytes();
@@ -454,12 +466,15 @@ where
             if i + 1 < stage.len() { stage[i + 1] = c[1]; }
         }
 
+        // Send in chunks
         let mut remaining = (w as usize) * (h as usize) * 2;
         let instruction = Command::_8Bit(0x32, DataMode::Quad);
         let data_mode = DataMode::Quad;
         let address_mode = DataMode::Quad;
         let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
         let mut current_cmd = RAMWR_OPCODE;
+
+        // Stream full chunks
         while remaining > 0 {
             let take = core::cmp::min(stage.len(), remaining);
             let ad: u32 = (current_cmd as u32) << 8;
@@ -478,16 +493,13 @@ where
             current_cmd = RAMWRC_OPCODE;
         }
 
-        // Restore stage buffer
-        self.stage = stage;
-
         // Mirror into FB
         if update_fb {
             let fbw = self.w as usize;
             let row_w = w as usize;
             let col_start = x as usize;
             let row_start = y as usize;
-            let color16 = color.into_storage();
+            let color16 = color.into_storage().to_be();
             for ry in 0..(h as usize) {
                 let base = (row_start + ry) * fbw + col_start;
                 let dst = &mut self.fb[base..base + row_w];
@@ -530,6 +542,8 @@ where
         data: &[u8],
         update_fb: bool,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
+
+        // early out
         if w == 0 || h == 0 { return Ok(()); }
 
         // overflow-safe bounds
@@ -540,13 +554,20 @@ where
            y32.checked_add(h32).unwrap_or(u32::MAX) > ph {
             return Err(Co5300Error::OutOfBounds);
         }
+
+        // calculate bottom-right
         let (x1, y1) = ((x32 + w32 - 1) as u16, (y32 + h32 - 1) as u16);
 
+        // validate data length
         let expected = (w as usize) * (h as usize) * 2;
+
+        // each pixel is 2 bytes (RGB565 BE)
         if data.len() != expected { return Err(Co5300Error::OutOfBounds); }
 
+        // Set window
         self.qspi_set_window_raw(x0, y0, x1, y1)?;
 
+        // Stream in chunks
         let mut off = 0usize;
         let mut current_cmd = RAMWR_OPCODE;
         let instruction = Command::_8Bit(0x32, DataMode::Quad);
@@ -554,6 +575,7 @@ where
         let data_mode = DataMode::Quad;
         let bus: &mut SpiDmaBus<'fb, Blocking> = &mut self.spi.bus;
 
+        // Stream full chunks
         while off < data.len() {
             let take = core::cmp::min(DMA_CHUNK_SIZE, data.len() - off);
             let ad: u32 = (current_cmd as u32) << 8;
@@ -582,7 +604,7 @@ where
                 let row = &mut self.fb[base..base + (w as usize)];
                 for px in row.iter_mut() {
                     let hi = data[si]; let lo = data[si + 1];
-                    *px = u16::from_be_bytes([hi, lo]);
+                    *px = u16::from_be_bytes([hi, lo]).to_be();
                     si += 2;
                 }
             }
@@ -635,6 +657,7 @@ impl<'fb, RST> OriginDimensions for Co5300Display<'fb, RST>
 where
     RST: OutputPin,
 {
+    // Return the size of the display.
     fn size(&self) -> Size {
         Size::new(self.w as u32, self.h as u32)
     }
@@ -647,6 +670,7 @@ where
     type Color = embedded_graphics::pixelcolor::Rgb565;
     type Error = core::convert::Infallible;
 
+    // SLOW PATH: per-pixel drawing (inefficient, but simple)
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = embedded_graphics::Pixel<Rgb565>>,
@@ -665,7 +689,7 @@ where
             if p.x < 0 || p.y < 0 { continue; }
             let (x, y) = (p.x as u16, p.y as u16);
             if x >= self.w || y >= self.h { continue; }
-            self.fb[(y as usize) * (self.w as usize) + (x as usize)] = c.into_storage();
+            self.fb[(y as usize) * (self.w as usize) + (x as usize)] = c.into_storage().to_be();
 
             if !any {
                 any = true;
@@ -739,7 +763,7 @@ where
             let dst_off = dst_row + (x0 as usize);
             for cx in 0..take {
                 if let Some(c) = it.next() {
-                    self.fb[dst_off + cx] = c.into_storage();
+                    self.fb[dst_off + cx] = c.into_storage().to_be();
                 }
             }
 
@@ -762,7 +786,7 @@ where
     }
 
     fn clear(&mut self, color: embedded_graphics::pixelcolor::Rgb565) -> Result<(), Self::Error> {
-        // Use fast fill rect
+        // Use fast fill rect, framebuffer will be updated too, call fill_rect_solid_no_fb to skip FB update
         let _ = self.fill_rect_solid(0, 0, self.w, self.h, color);
         Ok(())
     }

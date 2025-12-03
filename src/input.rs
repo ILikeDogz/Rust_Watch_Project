@@ -115,9 +115,12 @@ pub fn handle_encoder_generic(encoder: &RotaryState) {
         // curr order: 00, 01, 10, 11 ; prev blocks: 00, 01, 10, 11
         const TRANS: [i8; 16] = [
             // prev=00: 00, 01, 10, 11
-            0, -1, 1, 0, // prev=01: 00, 01, 10, 11
-            1, 0, 0, -1, // prev=10: 00, 01, 10, 11
-            -1, 0, 0, 1, // prev=11: 00, 01, 10, 11
+            0, -1, 1, 0, 
+            // prev=01: 00, 01, 10, 11
+            1, 0, 0, -1,
+            // prev=10: 00, 01, 10, 11
+            -1, 0, 0, 1, 
+            // prev=11: 00, 01, 10, 11
             0, 1, -1, 0,
         ];
 
@@ -142,7 +145,9 @@ pub fn handle_encoder_generic(encoder: &RotaryState) {
 // Handle IMU interrupt events
 #[esp_hal::ram]
 pub fn handle_imu_int_generic(state: &ImuIntState, flag: &AtomicBool) {
+    // Access IMU interrupt state within critical section
     critical_section::with(|cs| {
+        // Check and clear interrupt
         let mut binding = state.input.borrow_ref_mut(cs);
         let pin = match binding.as_mut() {
             Some(p) => p,
