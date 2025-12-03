@@ -18,7 +18,6 @@
 // The macro automatically fills in the fields.
 esp_bootloader_esp_idf::esp_app_desc!();
 
-use embedded_graphics::pixelcolor::Rgb565;
 use esp32s3_tests::{
     display::setup_display,
     qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
@@ -535,7 +534,6 @@ fn main() -> ! {
                 }
             }
         }
-
 
         // Debug output of IMU data
         // #[cfg(feature = "esp32s3-disp143Oled")]

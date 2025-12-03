@@ -1,24 +1,7 @@
-    // --tests--
-    // let t0 = SystemTimer::unit_value(Unit::Unit0);
-    // my_display.qspi_fill_solid(Rgb565::RED);
-    // let t1 = SystemTimer::unit_value(Unit::Unit0);
-    // esp_println::println!("Initial fill blue: {} us", to_us(t0, t1));
-
-    // let t0 = SystemTimer::unit_value(Unit::Unit0);
-    // my_display.clear(Rgb565::BLUE).ok();
-    // let t1 = SystemTimer::unit_value(Unit::Unit0);
-    // esp_println::println!("Initial clear blue: {} us", to_us(t0, t1));
-    // // Quad fill rect test: centered white box (200x200)
-    // let rect_w = 199;
-    // let rect_h = 199;
-    // let rect_x = (466 - rect_w) / 2;
-    // let rect_y = (466 - rect_h) / 2;
-    // let t0 = SystemTimer::unit_value(Unit::Unit0);
-    // my_display.fill_rect_solid(rect_x as u16, rect_y as u16, rect_w as u16, rect_h as u16, Rgb565::WHITE).ok();
-    // let t1 = SystemTimer::unit_value(Unit::Unit0);
-    // esp_println::println!("Quad fill_rect_solid 200x200: {} us", to_us(t0, t1));
 
     //-- other tests --
+
+    use embedded_graphics::pixelcolor::Rgb565;
 
     use embedded_graphics::{
     prelude::*,
@@ -55,32 +38,6 @@
     const W: u32 = 466;
     const H: u32 = 466;
     let bytes1: u64 = (W as u64) * (H as u64) * 2;
-
-    // // --- Image 1 ---
-    // let t0 = SystemTimer::unit_value(Unit::Unit0);
-
-    // let z1: &[u8] = include_bytes!("../assets/alien2_466x466_rgb565_be.raw.zlib");
-    // let raw1 = decompress_to_vec_zlib_with_limit(z1, (W * H * 2) as usize).unwrap_or_default();
-
-    // let t1 = SystemTimer::unit_value(Unit::Unit0);
-
-    // if raw1.len() == (W * H * 2) as usize {
-    //     // Draw (embedded-graphics will prefer fill_contiguous)
-    //     let raw_img: ImageRawBE<Rgb565> = ImageRawBE::new(&raw1, W);
-    //     let _ = Image::new(&raw_img, Point::new(0, 0)).draw(&mut my_display);
-    //     // // Direct one-shot blit without building a scratch Vec or using e-g.
-    // }
-
-    // let t2 = SystemTimer::unit_value(Unit::Unit0);
-
-    // let decomp_us1 = to_us(t0, t1);
-    // let draw_us1   = to_us(t1, t2);
-    // let kbps1 = (bytes1.saturating_mul(1_000_000) / draw_us1) / 1024;
-
-    // esp_println::println!(
-    //     "Image1 (ImageRawBE), data size {} decompress: {} us, draw: {} us ({} KiB/s)",
-    //     bytes1, decomp_us1, draw_us1, kbps1
-    // );
 
 
     

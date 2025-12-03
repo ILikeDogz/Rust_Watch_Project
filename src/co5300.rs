@@ -258,7 +258,6 @@ where
         Ok(())
     }
 
-    // TODO LETS TEST THESE, also I want brightness control
     // //---- Power control ---- all untested:
     // Quick blank/unblank without sleep
     pub fn display_off(&mut self) -> Result<(), Co5300Error<(), RST::Error>> {
@@ -323,8 +322,6 @@ where
         self.display_on(delay)?;
         Ok(())
     }
-
-    // --- end of untested power control ---
 
 
     // adjustable brightness (0-255)
