@@ -21,14 +21,16 @@ use embedded_graphics::{
     image::{Image, ImageRawBE},
     mono_font::{
         ascii::{FONT_10X20, FONT_6X10},
-        MonoTextStyle, MonoTextStyleBuilder,
+        MonoFont, MonoTextStyle, MonoTextStyleBuilder,
     },
     pixelcolor::Rgb565,
     prelude::{IntoStorage, OriginDimensions, Point, Primitive, RgbColor, Size},
-    primitives::{Circle, PrimitiveStyle, Rectangle, Triangle},
+    primitives::{Circle, Line, PrimitiveStyle, Rectangle, Triangle},
     text::{Alignment, Baseline, Text},
     Drawable,
 };
+use esp_hal::timer::systimer::{SystemTimer, Unit};
+use libm::{cosf, sinf};
 
 use core::any::Any;
 use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
@@ -111,6 +113,8 @@ static ALIEN_LOGO: &[u8] =
     include_bytes!(concat!("assets/omnitrix_logo_466x466_rgb565_be.raw.zlib"));
 static INFO_PAGE_IMAGE: &[u8] =
     include_bytes!(concat!("assets/debug_image3_466x466_rgb565_be.raw.zlib"));
+static WATCH_BG_IMAGE: &[u8] =
+    include_bytes!("assets/watch_background_466x466_rgb565_be.raw.zlib");
 
 // Generic asset cache
 static ASSETS: Mutex<RefCell<[AssetSlot; ASSET_MAX]>> = Mutex::new(RefCell::new(
@@ -137,6 +141,12 @@ static LAST_OMNI_TRANSFORM_ACTIVE: Mutex<RefCell<bool>> = Mutex::new(RefCell::ne
 
 // Navigation history management
 static NAV_HISTORY: Mutex<RefCell<Vec<Page>>> = Mutex::new(RefCell::new(Vec::new()));
+static LAST_WATCH_STATE: Mutex<RefCell<Option<WatchAppState>>> = Mutex::new(RefCell::new(None));
+static CLOCK_EDIT: Mutex<RefCell<Option<ClockEditState>>> = Mutex::new(RefCell::new(None));
+static LAST_WATCH_EDIT_ACTIVE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
+static HAND_CACHE: Mutex<RefCell<HandCache>> = Mutex::new(RefCell::new(HandCache::new()));
+static WATCH_BG: Mutex<RefCell<Option<alloc::vec::Vec<u8>>>> = Mutex::new(RefCell::new(None));
+static WATCH_FACE_DIRTY: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 
 // uses a simple stack for navigation history
 fn nav_push(p: Page) {
@@ -153,6 +163,29 @@ fn nav_pop() -> Option<Page> {
 pub struct UiState {
     pub page: Page,
     pub dialog: Option<Dialog>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+struct ClockEditState {
+    digits: [u8; 4], // HHMM digits
+    idx: u8,         // active digit 0-3
+}
+
+#[derive(Copy, Clone, Default)]
+struct HandCache {
+    sec: Option<Point>,
+    min: Option<Point>,
+    hour: Option<Point>,
+}
+
+impl HandCache {
+    const fn new() -> Self {
+        Self {
+            sec: None,
+            min: None,
+            hour: None,
+        }
+    }
 }
 
 // Different pages in the UI
@@ -191,6 +224,122 @@ pub enum MainMenuState {
 pub enum WatchAppState {
     Analog,
     Digital,
+}
+
+// Simple software clock: base seconds and ticks when set.
+static CLOCK_BASE_SECS: Mutex<RefCell<u64>> = Mutex::new(RefCell::new(0));
+static CLOCK_BASE_TICKS: Mutex<RefCell<u64>> = Mutex::new(RefCell::new(0));
+
+pub fn set_clock_seconds(seconds: u32) {
+    let now = SystemTimer::unit_value(Unit::Unit0);
+    critical_section::with(|cs| {
+        *CLOCK_BASE_SECS.borrow(cs).borrow_mut() = seconds as u64;
+        *CLOCK_BASE_TICKS.borrow(cs).borrow_mut() = now;
+        *HAND_CACHE.borrow(cs).borrow_mut() = HandCache::new();
+        *WATCH_FACE_DIRTY.borrow(cs).borrow_mut() = true;
+    });
+}
+
+pub fn watch_edit_active() -> bool {
+    critical_section::with(|cs| CLOCK_EDIT.borrow(cs).borrow().is_some())
+}
+
+pub fn watch_edit_start() {
+    let now = clock_now_seconds();
+    let total_mins = now / 60;
+    let h = ((total_mins / 60) % 24) as u8;
+    let m = (total_mins % 60) as u8;
+    let digits = [
+        h / 10,
+        h % 10,
+        m / 10,
+        m % 10,
+    ];
+    critical_section::with(|cs| {
+        *CLOCK_EDIT.borrow(cs).borrow_mut() = Some(ClockEditState { digits, idx: 0 });
+    });
+}
+
+pub fn watch_edit_cancel() {
+    critical_section::with(|cs| {
+        *CLOCK_EDIT.borrow(cs).borrow_mut() = None;
+    });
+}
+
+pub fn watch_edit_advance() {
+    critical_section::with(|cs| {
+        let mut guard = CLOCK_EDIT.borrow(cs).borrow_mut();
+        if let Some(mut ed) = *guard {
+            if ed.idx < 3 {
+                ed.idx += 1;
+                *guard = Some(ed);
+            } else {
+                // Commit
+                let hours = (ed.digits[0] as u32) * 10 + (ed.digits[1] as u32);
+                let mins = (ed.digits[2] as u32) * 10 + (ed.digits[3] as u32);
+                let secs = (hours * 60 + mins) * 60;
+                set_clock_seconds(secs);
+                *HAND_CACHE.borrow(cs).borrow_mut() = HandCache::new();
+                *WATCH_FACE_DIRTY.borrow(cs).borrow_mut() = true;
+                *guard = None;
+            }
+        }
+    });
+}
+
+pub fn watch_edit_adjust(delta: i32) {
+    if delta == 0 {
+        return;
+    }
+    critical_section::with(|cs| {
+        let mut guard = CLOCK_EDIT.borrow(cs).borrow_mut();
+        // Adjust active digit
+        if let Some(mut ed) = *guard {
+            let idx = ed.idx as usize;
+            let mut digit = ed.digits[idx] as i32;
+            // Determine min/max for digit
+            let (min_d, max_d) = match idx {
+                0 => (0, 2),
+                1 => {
+                    if ed.digits[0] == 2 { (0, 3) } else { (0, 9) }
+                }
+                2 => (0, 5),
+                _ => (0, 9),
+            };
+            // Adjust digit
+            digit += delta;
+            // Wrap around
+            if digit > max_d { digit = min_d; }
+            if digit < min_d { digit = max_d; }
+
+            // Update digit
+            ed.digits[idx] = digit as u8;
+            *guard = Some(ed);
+        }
+    });
+}
+
+
+fn clock_now_seconds() -> u64 {
+    critical_section::with(|cs| {
+        let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow();
+        let base_ticks = *CLOCK_BASE_TICKS.borrow(cs).borrow();
+        let now = SystemTimer::unit_value(Unit::Unit0);
+        let tps = SystemTimer::ticks_per_second();
+        let elapsed = now.saturating_sub(base_ticks) / tps;
+        base_secs.saturating_add(elapsed)
+    })
+}
+
+fn clock_now_seconds_f32() -> f32 {
+    critical_section::with(|cs| {
+        let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow() as f32;
+        let base_ticks = *CLOCK_BASE_TICKS.borrow(cs).borrow();
+        let now = SystemTimer::unit_value(Unit::Unit0);
+        let tps = SystemTimer::ticks_per_second() as f32;
+        let elapsed = (now.saturating_sub(base_ticks)) as f32 / tps;
+        base_secs + elapsed
+    })
 }
 
 // States for Settings Menu
@@ -406,6 +555,7 @@ fn draw_text(
     y_point: i32,
     clear: bool,
     update_fb: bool,
+    font: Option<&'static MonoFont<'static>>,
 ) {
     if clear {
         // Prefer no-FB clear if available and requested
@@ -427,7 +577,8 @@ fn draw_text(
             let _ = disp.clear(Rgb565::BLACK);
         }
     }
-    let mut builder = MonoTextStyleBuilder::new().font(&FONT_10X20).text_color(fg);
+    let font = font.unwrap_or(&FONT_10X20);
+    let mut builder = MonoTextStyleBuilder::new().font(font).text_color(fg);
     if let Some(b) = bg {
         builder = builder.background_color(b);
     }
@@ -435,6 +586,252 @@ fn draw_text(
     Text::with_alignment(text, Point::new(x_point, y_point), style, Alignment::Center)
         .draw(disp)
         .ok();
+}
+
+// Format current clock as HH:MM into the provided 5-byte buffer and return it as &str.
+fn format_clock_hm(buf: &mut [u8; 5]) -> &str {
+    let total_secs = clock_now_seconds();
+    let total_mins = total_secs / 60;
+    let h = (total_mins / 60) % 24;
+    let m = total_mins % 60;
+
+    buf[0] = b'0' + (h / 10) as u8;
+    buf[1] = b'0' + (h % 10) as u8;
+    buf[2] = b':';
+    buf[3] = b'0' + (m / 10) as u8;
+    buf[4] = b'0' + (m % 10) as u8;
+
+    core::str::from_utf8(buf).unwrap_or("??:??")
+}
+
+fn rgb565_from_888(r: u8, g: u8, b: u8) -> Rgb565 {
+    Rgb565::new((r >> 3) as u8, (g >> 2) as u8, (b >> 3) as u8)
+}
+
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    let v = (a as f32) + ((b as f32) - (a as f32)) * t;
+    let v = if v < 0.0 { 0.0 } else if v > 255.0 { 255.0 } else { v };
+    libm::roundf(v) as u8
+}
+
+fn hand_end(cx: i32, cy: i32, angle_deg: f32, length: i32) -> Point {
+    let ang = angle_deg.to_radians();
+    let dx = (cosf(ang) * length as f32) as i32;
+    let dy = (sinf(ang) * length as f32) as i32;
+    Point::new(cx + dx, cy + dy)
+}
+
+fn draw_hand_line(
+    disp: &mut impl PanelRgb565,
+    cx: i32,
+    cy: i32,
+    end: Point,
+    color: Rgb565,
+    stroke: u8,
+) {
+    let style = PrimitiveStyle::with_stroke(color, stroke.into());
+    let _ = Line::new(Point::new(cx, cy), end)
+        .into_styled(style)
+        .draw(disp);
+}
+
+fn draw_analog_clock(disp: &mut impl PanelRgb565) {
+    let center = (RESOLUTION as i32 / 2, RESOLUTION as i32 / 2);
+    let cx = center.0;
+    let cy = center.1;
+
+    let total_secs_f = clock_now_seconds_f32();
+    let s = total_secs_f % 60.0;
+    let m_total = total_secs_f / 60.0;
+    let m = (m_total % 60.0) + s / 60.0;
+    let h_total = m_total / 60.0;
+    let h = (h_total % 12.0) + m / 60.0;
+
+    // Angles: 0 deg at 12 o'clock, increasing clockwise
+    let sec_ang = (s / 60.0) * 360.0 - 90.0;
+    let min_ang = (m / 60.0) * 360.0 - 90.0;
+    let hour_ang = (h / 12.0) * 360.0 - 90.0;
+
+    let radius = RESOLUTION as i32 / 2 - 10;
+    let sec_len = radius - 10;
+    let min_len = radius - 25;
+    let hour_len = radius - 50;
+
+    // Compute new endpoints
+    let sec_end = hand_end(cx, cy, sec_ang, sec_len);
+    let min_end = hand_end(cx, cy, min_ang, min_len);
+    let hour_end = hand_end(cx, cy, hour_ang, hour_len);
+
+    // Fast path: draw into FB only and flush once.
+    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
+    {
+        let (bbox, _) = critical_section::with(|cs| {
+            let mut cache = HAND_CACHE.borrow(cs).borrow_mut();
+            let bg_ref = WATCH_BG.borrow(cs).borrow();
+            let bgdata = bg_ref.as_ref();
+
+            // Bounding box of old + new hands with padding
+            let mut minx = cx;
+            let mut miny = cy;
+            let mut maxx = cx;
+            let mut maxy = cy;
+            let mut add_pt = |p: Point, pad: i32| {
+                minx = minx.min(p.x - pad);
+                miny = miny.min(p.y - pad);
+                maxx = maxx.max(p.x + pad);
+                maxy = maxy.max(p.y + pad);
+            };
+
+            // Add previous hand endpoints
+            let sec_stroke = 4;
+            let min_stroke = 4;
+            let hour_stroke = 4;
+            let sec_pad = (sec_stroke * 2).max(6);
+            let min_pad = (min_stroke * 2).max(8);
+            let hour_pad = (hour_stroke * 2).max(10);
+
+            // Previous points
+            if let Some(p) = cache.sec { add_pt(p, sec_pad); }
+            if let Some(p) = cache.min { add_pt(p, min_pad); }
+            if let Some(p) = cache.hour { add_pt(p, hour_pad); }
+
+            // New points
+            add_pt(sec_end, sec_pad);
+            add_pt(min_end, min_pad);
+            add_pt(hour_end, hour_pad);
+
+            // Center dot padding
+            let dot_pad = 22; // covers enlarged center gradient
+            add_pt(Point::new(cx, cy), dot_pad);
+
+            // Clear region to background if available, else black
+            if let Some(bgdata) = bgdata {
+                let bx0 = minx.clamp(0, (RESOLUTION - 1) as i32) as usize;
+                let by0 = miny.clamp(0, (RESOLUTION - 1) as i32) as usize;
+                let bx1 = maxx.clamp(0, (RESOLUTION - 1) as i32) as usize;
+                let by1 = maxy.clamp(0, (RESOLUTION - 1) as i32) as usize;
+                let bw = RESOLUTION as usize;
+                let w = bx1 - bx0 + 1;
+                let h = by1 - by0 + 1;
+                let mut buf = alloc::vec::Vec::with_capacity(w * h * 2);
+                for row in by0..=by1 {
+                    let off = (row * bw + bx0) * 2;
+                    buf.extend_from_slice(&bgdata[off..off + w * 2]);
+                }
+                let _ = co.write_rect_fb(bx0 as u16, by0 as u16, w as u16, h as u16, &buf);
+            } else {
+                co.fill_rect_fb(minx, miny, maxx, maxy, Rgb565::BLACK);
+            }
+
+            // Draw all hands
+            // Hour hand
+            co.draw_line_fb(cx, cy, hour_end.x, hour_end.y, Rgb565::WHITE, hour_stroke as u8);
+            // Minute hand
+            co.draw_line_fb(cx, cy, min_end.x, min_end.y, Rgb565::YELLOW, min_stroke as u8);
+            // Second hand
+            co.draw_line_fb(cx, cy, sec_end.x, sec_end.y, Rgb565::CYAN, sec_stroke as u8);
+            // Center dot as solid circle
+            let r_outer: i32  = 8;
+            let r_outer2: i32 = r_outer * r_outer;
+            let c_solid = rgb565_from_888(0x52, 0xC6, 0x6B); // #52C66B
+            let x0 = cx - r_outer;
+            let y0 = cy - r_outer;
+            let x1 = cx + r_outer;
+            let y1 = cy + r_outer;
+            for yy in y0..=y1 {
+                for xx in x0..=x1 {
+                    let dx = xx - cx;
+                    let dy = yy - cy;
+                    let d2 = dx * dx + dy * dy;
+                    if d2 > r_outer2 { continue; }
+                    co.fill_rect_fb(xx, yy, xx, yy, c_solid);
+                }
+            }
+
+            cache.sec = Some(sec_end);
+            cache.min = Some(min_end);
+            cache.hour = Some(hour_end);
+            (
+                (
+                    minx.clamp(0, (RESOLUTION - 1) as i32),
+                    miny.clamp(0, (RESOLUTION - 1) as i32),
+                    maxx.clamp(0, (RESOLUTION - 1) as i32),
+                    maxy.clamp(0, (RESOLUTION - 1) as i32),
+                ),
+                (),
+            )
+        });
+
+        let (minx, miny, maxx, maxy) = bbox;
+        let _ = co.flush_rect_even(minx as u16, miny as u16, maxx as u16, maxy as u16);
+        return;
+    }
+
+    // Fallback: use embedded-graphics path (may flicker more).
+    draw_hand_line(disp, cx, cy, sec_end, Rgb565::RED, 2);
+    draw_hand_line(disp, cx, cy, min_end, Rgb565::GREEN, 3);
+    draw_hand_line(disp, cx, cy, hour_end, Rgb565::BLUE, 4);
+}
+
+fn draw_clock_edit(disp: &mut impl PanelRgb565, ed: ClockEditState) {
+    // Build HH:MM string from digits
+    let mut buf = [b'0'; 5];
+    buf[0] = b'0' + ed.digits[0];
+    buf[1] = b'0' + ed.digits[1];
+    buf[2] = b':';
+    buf[3] = b'0' + ed.digits[2];
+    buf[4] = b'0' + ed.digits[3];
+    let msg = core::str::from_utf8(&buf).unwrap_or("00:00");
+
+    let font = &FONT_10X20; // largest built-in mono ASCII font available
+
+    // Draw the time (use larger 10x20 font)
+    draw_text(
+        disp,
+        msg,
+        Rgb565::CYAN,
+        Some(Rgb565::BLACK),
+        CENTER,
+        CENTER,
+        false,
+        true,
+        Some(font),
+    );
+
+    // Underline the active digit only (skip the colon)
+    let char_w = font.character_size.width as i32;
+    let char_h = font.character_size.height as i32;
+    let chars_total = 5;
+    let box_w = char_w * chars_total;
+    let start_x = CENTER - box_w / 2;
+    let base_y = CENTER + char_h / 2 + 2;
+    let idx = ed.idx.min(3) as i32;
+    let visual_idx = if idx >= 2 { idx + 1 } else { idx }; // skip colon slot
+    let underline_x = start_x + visual_idx * char_w;
+    let rect = Rectangle::new(
+        Point::new(underline_x, base_y),
+        Size::new(char_w as u32, 2),
+    );
+    rect.into_styled(PrimitiveStyle::with_fill(Rgb565::CYAN))
+        .draw(disp)
+        .ok();
+}
+
+fn ensure_watch_background_loaded() -> bool {
+    critical_section::with(|cs| {
+        if WATCH_BG.borrow(cs).borrow().is_some() {
+            return true;
+        }
+        if let Ok(decompressed) = decompress_to_vec_zlib_with_limit(
+            WATCH_BG_IMAGE,
+            (RESOLUTION * RESOLUTION * 2) as usize,
+        ) {
+            *WATCH_BG.borrow(cs).borrow_mut() = Some(decompressed);
+            true
+        } else {
+            false
+        }
+    })
 }
 
 // Draw from already-decompressed bytes (used by cache on OLED)
@@ -693,6 +1090,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 CENTER,
                 true,
                 true,
+                None,
             ),
             Dialog::BrightnessAdjust => draw_text(
                 disp,
@@ -703,6 +1101,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 CENTER,
                 true,
                 true,
+                None,
             ),
             Dialog::ResetSelector => draw_text(
                 disp,
@@ -713,6 +1112,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 CENTER,
                 true,
                 true,
+                None,
             ),
             Dialog::HomePage => draw_text(
                 disp,
@@ -723,6 +1123,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 CENTER,
                 true,
                 true,
+                None,
             ),
             Dialog::StartPage => draw_text(
                 disp,
@@ -733,6 +1134,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 CENTER,
                 true,
                 true,
+                None,
             ),
             Dialog::AboutPage => draw_text(
                 disp,
@@ -743,6 +1145,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 CENTER,
                 true,
                 true,
+                None,
             ),
             Dialog::TransformPage => {
                 // show transform overlay, next frame (when dismissed) will clear due to logic above, maybe play an animation if I figure how to do that later
@@ -750,6 +1153,15 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
             }
         }
         return;
+    }
+
+    // Reset watch-state tracker if we’re not on the Watch page.
+    if !matches!(state.page, Page::Watch(_)) {
+        critical_section::with(|cs| {
+            *LAST_WATCH_STATE.borrow(cs).borrow_mut() = None;
+            *WATCH_BG.borrow(cs).borrow_mut() = None; // free background when leaving watch page
+            *LAST_WATCH_EDIT_ACTIVE.borrow(cs).borrow_mut() = false;
+        });
     }
 
     match state.page {
@@ -768,13 +1180,14 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 MainMenuState::WatchApp => {
                     draw_text(
                         disp,
-                        "Watch App (WIP)",
+                        "Watch App",
                         Rgb565::WHITE,
                         Some(Rgb565::BLACK),
                         CENTER,
                         CENTER,
                         true,
                         true,
+                        None,
                     );
                 }
                 MainMenuState::SettingsApp => {
@@ -787,6 +1200,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                         CENTER,
                         true,
                         true,
+                        None,
                     );
                 }
                 MainMenuState::InfoApp => {
@@ -799,6 +1213,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                         CENTER,
                         true,
                         true,
+                        None,
                     );
                 }
             }
@@ -814,15 +1229,91 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 }
                 SettingsMenuState::Reset => ("Settings: Reset", Rgb565::YELLOW, Some(Rgb565::BLUE)),
             };
-            draw_text(disp, msg, fg, bg, CENTER, CENTER, true, true);
+            draw_text(disp, msg, fg, bg, CENTER, CENTER, true, true, None);
         }
 
         Page::Watch(watch_state) => {
-            let (msg, fg, bg) = match watch_state {
-                WatchAppState::Analog => ("Watch: Analog", Rgb565::GREEN, Some(Rgb565::BLACK)),
-                WatchAppState::Digital => ("Watch: Digital", Rgb565::CYAN, Some(Rgb565::BLACK)),
-            };
-            draw_text(disp, msg, fg, bg, CENTER, CENTER, true, true);
+            let should_clear_watch = critical_section::with(|cs| {
+                let mut last = LAST_WATCH_STATE.borrow(cs).borrow_mut();
+                let changed = *last != Some(watch_state);
+                *last = Some(watch_state);
+                changed
+            });
+
+            if should_clear_watch {
+                if ensure_watch_background_loaded() {
+                    critical_section::with(|cs| {
+                        if let Some(bg) = WATCH_BG.borrow(cs).borrow().as_ref() {
+                            draw_image_bytes(disp, bg, RESOLUTION, RESOLUTION, false, true);
+                        }
+                    });
+                }
+                critical_section::with(|cs| {
+                    *HAND_CACHE.borrow(cs).borrow_mut() = HandCache::new();
+                });
+            }
+
+            // If time was changed, repaint face and reset cache.
+            let face_dirty = critical_section::with(|cs| {
+                let mut f = WATCH_FACE_DIRTY.borrow(cs).borrow_mut();
+                let dirty = *f;
+                if dirty {
+                    *f = false;
+                }
+                dirty
+            });
+            if face_dirty {
+                if ensure_watch_background_loaded() {
+                    critical_section::with(|cs| {
+                        if let Some(bg) = WATCH_BG.borrow(cs).borrow().as_ref() {
+                            draw_image_bytes(disp, bg, RESOLUTION, RESOLUTION, false, true);
+                        }
+                    });
+                }
+                critical_section::with(|cs| {
+                    *HAND_CACHE.borrow(cs).borrow_mut() = HandCache::new();
+                });
+            }
+
+            match watch_state {
+                WatchAppState::Analog => {
+                    draw_analog_clock(disp);
+                }
+                WatchAppState::Digital => {
+                    let edit = critical_section::with(|cs| *CLOCK_EDIT.borrow(cs).borrow());
+                    let should_clear_after_edit = critical_section::with(|cs| {
+                        let mut last = LAST_WATCH_EDIT_ACTIVE.borrow(cs).borrow_mut();
+                        let was = *last;
+                        let now = edit.is_some();
+                        *last = now;
+                        was && !now
+                    });
+                    if should_clear_after_edit {
+                        if ensure_watch_background_loaded() {
+                            if let Some(bg) = critical_section::with(|cs| WATCH_BG.borrow(cs).borrow().as_ref().cloned()) {
+                                draw_image_bytes(disp, &bg, RESOLUTION, RESOLUTION, false, true);
+                            }
+                        }
+                    }
+                    if let Some(ed) = edit {
+                        draw_clock_edit(disp, ed);
+                    } else {
+                        let mut buf = [b'0'; 5];
+                        let msg = format_clock_hm(&mut buf);
+                        draw_text(
+                            disp,
+                            msg,
+                            Rgb565::CYAN,
+                            Some(Rgb565::BLACK),
+                            CENTER,
+                            CENTER,
+                            false,
+                            true,
+                            None,
+                        );
+                    }
+                }
+            }
         }
 
         // one layer below main menu home is Omnitrix page
@@ -858,6 +1349,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                     CENTER,
                     false,
                     true,
+                    None,
                 );
             }
         }

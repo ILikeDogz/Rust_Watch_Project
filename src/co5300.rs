@@ -83,6 +83,43 @@ impl<'fb, RST> Co5300Display<'fb, RST>
 where
     RST: OutputPin,
 {
+    // Write a BE RGB565 rectangle into the framebuffer only (no flush).
+    pub fn write_rect_fb(
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        data: &[u8],
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
+        if data.len() != (w as usize) * (h as usize) * 2 {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        let x0 = x as usize;
+        let y0 = y as usize;
+        let w_us = w as usize;
+        let h_us = h as usize;
+        if x0 >= self.w as usize || y0 >= self.h as usize {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        if x0 + w_us > self.w as usize || y0 + h_us > self.h as usize {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        let fbw = self.w as usize;
+        let mut src_off = 0usize;
+        for row in 0..h_us {
+            let dst_base = (y0 + row) * fbw + x0;
+            let dst = &mut self.fb[dst_base..dst_base + w_us];
+            for px in dst.iter_mut() {
+                let b0 = data[src_off];
+                let b1 = data[src_off + 1];
+                *px = u16::from_be_bytes([b0, b1]).to_be();
+                src_off += 2;
+            }
+        }
+        Ok(())
+    }
+
     // Create + init the panel. Call once at startup.
     //
     // * `spi` - an SPI device with CS control (e.g., `embedded_hal_bus::spi::ExclusiveDevice`)
@@ -420,6 +457,123 @@ where
         }
 
         Ok(())
+    }
+
+    // Public wrapper to flush an FB rectangle.
+    pub fn flush_rect_even(&mut self, x0: u16, y0: u16, x1: u16, y1: u16)
+        -> Result<(), Co5300Error<(), RST::Error>>
+    {
+        self.flush_fb_rect_even(x0, y0, x1, y1)
+    }
+
+    // Draw a line directly into the framebuffer (no flush). Returns the drawn bounding box.
+    pub fn draw_line_fb(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        color: Rgb565,
+        stroke: u8,
+    ) -> Option<(u16, u16, u16, u16)> {
+        let w = self.w as i32;
+        let h = self.h as i32;
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let mut x0 = x0;
+        let mut y0 = y0;
+        let x1 = x1;
+        let y1 = y1;
+
+        // Bresenham with clipping by skipping off-screen pixels.
+        let dx = (x1 - x0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let dy = -(y1 - y0).abs();
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+
+        let mut minx = i32::MAX;
+        let mut miny = i32::MAX;
+        let mut maxx = i32::MIN;
+        let mut maxy = i32::MIN;
+
+        let cbe = color.into_storage().to_be();
+        let stroke_span = stroke.max(1) as i32;
+        let half = stroke_span / 2;
+
+        loop {
+            if x0 >= -half && x0 < w + half && y0 >= -half && y0 < h + half {
+                let start_x = (x0 - half).max(0);
+                let start_y = (y0 - half).max(0);
+                let end_x = (x0 + (stroke_span - half - 1)).min(w - 1);
+                let end_y = (y0 + (stroke_span - half - 1)).min(h - 1);
+                for yy in start_y..=end_y {
+                    let base = (yy as usize) * (self.w as usize);
+                    for xx in start_x..=end_x {
+                        self.fb[base + xx as usize] = cbe;
+                    }
+                }
+                minx = minx.min(start_x);
+                miny = miny.min(start_y);
+                maxx = maxx.max(end_x);
+                maxy = maxy.max(end_y);
+            }
+
+            if x0 == x1 && y0 == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x0 += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y0 += sy;
+            }
+        }
+
+        if minx == i32::MAX {
+            None
+        } else {
+            Some((minx as u16, miny as u16, maxx as u16, maxy as u16))
+        }
+    }
+
+    // Fill a rectangle in the framebuffer with a solid color (no flush).
+    pub fn fill_rect_fb(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        color: Rgb565,
+    ) {
+        let w = self.w as i32;
+        let h = self.h as i32;
+        if w == 0 || h == 0 {
+            return;
+        }
+        let (mut x0, mut x1) = (x0.min(x1), x0.max(x1));
+        let (mut y0, mut y1) = (y0.min(y1), y0.max(y1));
+        x0 = x0.max(0);
+        y0 = y0.max(0);
+        x1 = x1.min(w - 1);
+        y1 = y1.min(h - 1);
+        if x0 > x1 || y0 > y1 {
+            return;
+        }
+        let fbw = self.w as usize;
+        let cbe = color.into_storage().to_be();
+        for yy in y0..=y1 {
+            let base = (yy as usize) * fbw + (x0 as usize);
+            let width = (x1 - x0 + 1) as usize;
+            let row = &mut self.fb[base..base + width];
+            for px in row.iter_mut() {
+                *px = cbe;
+            }
+        }
     }
     
     // Convenience: fill a rectangle with a solid color, using staging buffer.
