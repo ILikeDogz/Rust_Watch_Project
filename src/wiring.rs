@@ -160,8 +160,8 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) 
     // led2.set_high();
 
     // buttons
-    let mut btn1 = Input::new(p.GPIO7, InputConfig::default().with_pull(Pull::Up)); //was 45
-    let mut btn2 = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::Up)); //was 46
+    let mut btn1 = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::Up)); //was 45
+    let mut btn2 = Input::new(p.GPIO7, InputConfig::default().with_pull(Pull::Up)); //was 46
     let mut btn3 = Input::new(p.GPIO1, InputConfig::default().with_pull(Pull::Up)); //was 1
     btn1.listen(Event::AnyEdge);
     btn2.listen(Event::AnyEdge);

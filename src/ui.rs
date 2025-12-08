@@ -18,7 +18,7 @@ use esp_backtrace as _;
 // Embedded-graphics, a ton are unused but this is a work in progress
 use embedded_graphics::{
     draw_target::DrawTarget,
-    image::{Image, ImageRaw, ImageRawBE},
+    image::{Image, ImageRawBE},
     mono_font::{
         ascii::{FONT_10X20, FONT_6X10},
         MonoTextStyle, MonoTextStyleBuilder,
@@ -110,7 +110,7 @@ static ALIEN10_IMAGE: &[u8] =
 static ALIEN_LOGO: &[u8] =
     include_bytes!(concat!("assets/omnitrix_logo_466x466_rgb565_be.raw.zlib"));
 static INFO_PAGE_IMAGE: &[u8] =
-    include_bytes!(concat!("assets/debug_image2_466x466_rgb565_be.raw.zlib"));
+    include_bytes!(concat!("assets/debug_image3_466x466_rgb565_be.raw.zlib"));
 
 // Generic asset cache
 static ASSETS: Mutex<RefCell<[AssetSlot; ASSET_MAX]>> = Mutex::new(RefCell::new(
