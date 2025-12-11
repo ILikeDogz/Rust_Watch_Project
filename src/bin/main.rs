@@ -23,7 +23,7 @@ use esp32s3_tests::{
     display::setup_display,
     qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
     input::{handle_button_generic, handle_encoder_generic, handle_imu_int_generic, ButtonState, ImuIntState, RotaryState},
-    ui::{precache_asset, update_ui, AssetId, MainMenuState, Page, UiState},
+    ui::{precache_asset, update_ui, AssetId, Dialog, MainMenuState, Page, UiState, WatchAppState},
     wiring::{init_board_pins, BoardPins},
 };
 
@@ -489,10 +489,15 @@ fn main() -> ! {
             smash_count = 0;
         }
 
-        if matches!(ui_state.page, Page::Watch(esp32s3_tests::ui::WatchAppState::Digital))
-            || matches!(ui_state.page, Page::Watch(esp32s3_tests::ui::WatchAppState::Analog))
+        if matches!(ui_state.page, Page::Watch(WatchAppState::Digital))
+            || matches!(ui_state.page, Page::Watch(WatchAppState::Analog))
         {
             // Keep redrawing to refresh the clock hands/digits while in watch modes.
+            needs_redraw = true;
+        }
+
+        // Keep redrawing while the Transform dialog is visible so the helix animates.
+        if matches!(ui_state.dialog, Some(Dialog::TransformPage)) {
             needs_redraw = true;
         }
         

@@ -20,13 +20,13 @@ use embedded_graphics::{
     draw_target::DrawTarget,
     image::{Image, ImageRawBE},
     mono_font::{
-        ascii::{FONT_10X20, FONT_6X10},
-        MonoFont, MonoTextStyle, MonoTextStyleBuilder,
+        ascii::FONT_10X20,
+        MonoFont, MonoTextStyleBuilder,
     },
     pixelcolor::Rgb565,
-    prelude::{IntoStorage, OriginDimensions, Point, Primitive, RgbColor, Size},
-    primitives::{Circle, Line, PrimitiveStyle, Rectangle, Triangle},
-    text::{Alignment, Baseline, Text},
+    prelude::{OriginDimensions, Point, Primitive, RgbColor, Size},
+    primitives::{Line, PrimitiveStyle, Rectangle},
+    text::{Alignment, Text},
     Drawable,
 };
 use esp_hal::timer::systimer::{SystemTimer, Unit};
@@ -86,6 +86,7 @@ macro_rules! res {
 } // just a convenience macro for asset paths, a lot have this resolution
 
 // Custom colors
+#[allow(dead_code)]
 const OMNI_LIME: Rgb565 = Rgb565::new(0x11, 0x38, 0x01); // #8BE308
 
 // Feature-picked assets (compressed, zlib)
@@ -131,7 +132,7 @@ enum PageKind {
     Main,
     Settings,
     Omnitrix,
-    Info,
+    EasterEgg,
     Watch,
 }
 static LAST_PAGE_KIND: Mutex<RefCell<Option<PageKind>>> = Mutex::new(RefCell::new(None));
@@ -147,6 +148,7 @@ static LAST_WATCH_EDIT_ACTIVE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(fa
 static HAND_CACHE: Mutex<RefCell<HandCache>> = Mutex::new(RefCell::new(HandCache::new()));
 static WATCH_BG: Mutex<RefCell<Option<alloc::vec::Vec<u8>>>> = Mutex::new(RefCell::new(None));
 static WATCH_FACE_DIRTY: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
+static LAST_TRANSFORM_ACTIVE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 
 // uses a simple stack for navigation history
 fn nav_push(p: Page) {
@@ -195,18 +197,12 @@ pub enum Page {
     Watch(WatchAppState),
     Settings(SettingsMenuState),
     Omnitrix(OmnitrixState),
-    Info,
+    EasterEgg,
 }
 
 // Dialogs that can overlay on top of pages
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Dialog {
-    VolumeAdjust,
-    BrightnessAdjust,
-    ResetSelector,
-    HomePage,
-    StartPage,
-    AboutPage,
     TransformPage,
 }
 
@@ -216,7 +212,7 @@ pub enum MainMenuState {
     Home,        // just show home
     WatchApp,    // enter watch app (analog/digital)
     SettingsApp, // enter Settings
-    InfoApp,     // enter Info
+    EasterEggApp,     // enter Easter Egg
 }
 
 // States for Watch App
@@ -231,6 +227,7 @@ static CLOCK_BASE_SECS: Mutex<RefCell<u64>> = Mutex::new(RefCell::new(0));
 static CLOCK_BASE_TICKS: Mutex<RefCell<u64>> = Mutex::new(RefCell::new(0));
 
 pub fn set_clock_seconds(seconds: u32) {
+    // Set the software clock to the specified seconds since epoch
     let now = SystemTimer::unit_value(Unit::Unit0);
     critical_section::with(|cs| {
         *CLOCK_BASE_SECS.borrow(cs).borrow_mut() = seconds as u64;
@@ -241,10 +238,12 @@ pub fn set_clock_seconds(seconds: u32) {
 }
 
 pub fn watch_edit_active() -> bool {
+    // Check if clock edit mode is active
     critical_section::with(|cs| CLOCK_EDIT.borrow(cs).borrow().is_some())
 }
 
 pub fn watch_edit_start() {
+    // Initialize edit state with current time
     let now = clock_now_seconds();
     let total_mins = now / 60;
     let h = ((total_mins / 60) % 24) as u8;
@@ -255,18 +254,22 @@ pub fn watch_edit_start() {
         m / 10,
         m % 10,
     ];
+
+    // Set edit state
     critical_section::with(|cs| {
         *CLOCK_EDIT.borrow(cs).borrow_mut() = Some(ClockEditState { digits, idx: 0 });
     });
 }
 
 pub fn watch_edit_cancel() {
+    // Clear edit state without committing changes
     critical_section::with(|cs| {
         *CLOCK_EDIT.borrow(cs).borrow_mut() = None;
     });
 }
 
 pub fn watch_edit_advance() {
+    // Move to next digit or commit changes if on last digit
     critical_section::with(|cs| {
         let mut guard = CLOCK_EDIT.borrow(cs).borrow_mut();
         if let Some(mut ed) = *guard {
@@ -288,6 +291,7 @@ pub fn watch_edit_advance() {
 }
 
 pub fn watch_edit_adjust(delta: i32) {
+    // Adjust the active digit by delta (+1 or -1)
     if delta == 0 {
         return;
     }
@@ -321,6 +325,7 @@ pub fn watch_edit_adjust(delta: i32) {
 
 
 fn clock_now_seconds() -> u64 {
+    // Get current software clock time in seconds since epoch
     critical_section::with(|cs| {
         let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow();
         let base_ticks = *CLOCK_BASE_TICKS.borrow(cs).borrow();
@@ -332,6 +337,7 @@ fn clock_now_seconds() -> u64 {
 }
 
 fn clock_now_seconds_f32() -> f32 {
+    // Get current software clock time in seconds since epoch as f32
     critical_section::with(|cs| {
         let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow() as f32;
         let base_ticks = *CLOCK_BASE_TICKS.borrow(cs).borrow();
@@ -376,8 +382,8 @@ impl UiState {
                 let next = match state {
                     MainMenuState::Home => MainMenuState::WatchApp,
                     MainMenuState::WatchApp => MainMenuState::SettingsApp,
-                    MainMenuState::SettingsApp => MainMenuState::InfoApp,
-                    MainMenuState::InfoApp => MainMenuState::Home,
+                    MainMenuState::SettingsApp => MainMenuState::EasterEggApp,
+                    MainMenuState::EasterEggApp => MainMenuState::Home,
                 };
                 Page::Main(next)
             }
@@ -411,7 +417,7 @@ impl UiState {
                 };
                 Page::Omnitrix(next)
             }
-            Page::Info => Page::Info,
+            Page::EasterEgg => Page::EasterEgg,
         };
         Self {
             page: next_page,
@@ -427,10 +433,10 @@ impl UiState {
         let prev_page = match self.page {
             Page::Main(state) => {
                 let prev = match state {
-                    MainMenuState::Home => MainMenuState::InfoApp,
+                    MainMenuState::Home => MainMenuState::EasterEggApp,
                     MainMenuState::WatchApp => MainMenuState::Home,
                     MainMenuState::SettingsApp => MainMenuState::WatchApp,
-                    MainMenuState::InfoApp => MainMenuState::SettingsApp,
+                    MainMenuState::EasterEggApp => MainMenuState::SettingsApp,
                 };
                 Page::Main(prev)
             }
@@ -464,7 +470,7 @@ impl UiState {
                 };
                 Page::Omnitrix(prev)
             }
-            Page::Info => Page::Info,
+            Page::EasterEgg => Page::EasterEgg,
         };
         Self {
             page: prev_page,
@@ -502,16 +508,16 @@ impl UiState {
             };
         }
         match self.page {
-            Page::Main(state) => {
-                nav_push(Page::Main(state));
-                let page = match state {
-                    MainMenuState::Home => Page::Omnitrix(OmnitrixState::Alien1),
-                    MainMenuState::WatchApp => Page::Watch(WatchAppState::Analog),
-                    MainMenuState::SettingsApp => Page::Settings(SettingsMenuState::Volume),
-                    MainMenuState::InfoApp => Page::Info,
-                };
-                Self { page, dialog: None }
-            }
+        Page::Main(state) => {
+            nav_push(Page::Main(state));
+            let page = match state {
+                MainMenuState::Home => Page::Omnitrix(OmnitrixState::Alien1),
+                MainMenuState::WatchApp => Page::Watch(WatchAppState::Analog),
+                MainMenuState::SettingsApp => Page::Settings(SettingsMenuState::Volume),
+                MainMenuState::EasterEggApp => Page::EasterEgg,
+            };
+            Self { page, dialog: None }
+        }
             Page::Watch(_) => Self {
                 page: self.page,
                 dialog: None,
@@ -524,7 +530,7 @@ impl UiState {
                 page: self.page,
                 dialog: None,
             }, // changed
-            Page::Info => Self {
+            Page::EasterEgg => Self {
                 page: self.page,
                 dialog: None,
             },
@@ -608,12 +614,6 @@ fn rgb565_from_888(r: u8, g: u8, b: u8) -> Rgb565 {
     Rgb565::new((r >> 3) as u8, (g >> 2) as u8, (b >> 3) as u8)
 }
 
-fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
-    let v = (a as f32) + ((b as f32) - (a as f32)) * t;
-    let v = if v < 0.0 { 0.0 } else if v > 255.0 { 255.0 } else { v };
-    libm::roundf(v) as u8
-}
-
 fn hand_end(cx: i32, cy: i32, angle_deg: f32, length: i32) -> Point {
     let ang = angle_deg.to_radians();
     let dx = (cosf(ang) * length as f32) as i32;
@@ -640,7 +640,8 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
     let cx = center.0;
     let cy = center.1;
 
-    let total_secs_f = clock_now_seconds_f32();
+    // Current time in fractional hours, minutes, seconds
+    let total_secs_f = clock_now_seconds_f32(); // necessary for smooth second hand
     let s = total_secs_f % 60.0;
     let m_total = total_secs_f / 60.0;
     let m = (m_total % 60.0) + s / 60.0;
@@ -652,6 +653,7 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
     let min_ang = (m / 60.0) * 360.0 - 90.0;
     let hour_ang = (h / 12.0) * 360.0 - 90.0;
 
+    // Hand lengths
     let radius = RESOLUTION as i32 / 2 - 10;
     let sec_len = radius - 10;
     let min_len = radius - 25;
@@ -771,6 +773,161 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
     draw_hand_line(disp, cx, cy, sec_end, Rgb565::RED, 2);
     draw_hand_line(disp, cx, cy, min_end, Rgb565::GREEN, 3);
     draw_hand_line(disp, cx, cy, hour_end, Rgb565::BLUE, 4);
+}
+
+fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
+    // Simple lime DNA-like helix animation for the transform dialog.
+    let t = clock_now_seconds_f32() * 2.0; // speed multiplier
+    let amp_max = (RESOLUTION as f32) * 0.26;
+    let step = 18;
+    let cx = CENTER;
+    let y_start = 12;
+    let y_end = RESOLUTION as i32 - 12;
+    // Use front/back shades to sell spin (swap per phase).
+    let strand_a_front = rgb565_from_888(0xB8, 0xFF, 0x6A);
+    let strand_a_back = rgb565_from_888(0x5F, 0xC5, 0x1C);
+    let strand_b_front = rgb565_from_888(0x9F, 0xFF, 0x4A);
+    let strand_b_back = rgb565_from_888(0x56, 0xB8, 0x12);
+    let rung_front = rgb565_from_888(0xA8, 0xFF, 0x5A);
+    let rung_back = rgb565_from_888(0x6C, 0xCC, 0x24);
+    let strand_thick = 7u8;
+    let rung_thick = 3u8;
+
+    // Bounding box for the helix drawing (reuse for clear/flush).
+    let pad = (amp_max as i32 + 20).min(CENTER);
+    let x0 = (cx - pad).clamp(0, (RESOLUTION - 1) as i32);
+    let x1 = (cx + pad).clamp(0, (RESOLUTION - 1) as i32);
+    let y0 = (y_start - 8).clamp(0, (RESOLUTION - 1) as i32);
+    let y1 = (y_end + 8).clamp(0, (RESOLUTION - 1) as i32);
+
+    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
+    {
+        // Clear only the helix region in the framebuffer each frame.
+        co.fill_rect_fb(x0, y0, x1, y1, Rgb565::BLACK);
+
+        let mut prev_a: Option<Point> = None;
+        let mut prev_b: Option<Point> = None;
+
+        for (i, y) in (y_start..=y_end).step_by(step).enumerate() {
+            let phase = t + (i as f32) * 0.35;
+            // Uniform amplitude for cylindrical look.
+            let amp = amp_max * 0.75;
+            let off = (sinf(phase) * amp) as i32;
+            let xa = cx + off;
+            let xb = cx - off;
+            let pa = Point::new(xa, y);
+            let pb = Point::new(xb, y);
+            let front_side = sinf(phase) >= 0.0;
+            let col_a = if front_side { strand_a_front } else { strand_a_back };
+            let col_b = if front_side { strand_b_back } else { strand_b_front };
+            let col_a_sh = rgb565_from_888(
+                (col_a.r().saturating_mul(3) / 4) as u8,
+                (col_a.g().saturating_mul(3) / 4) as u8,
+                (col_a.b().saturating_mul(3) / 4) as u8,
+            );
+            let col_b_sh = rgb565_from_888(
+                (col_b.r().saturating_mul(3) / 4) as u8,
+                (col_b.g().saturating_mul(3) / 4) as u8,
+                (col_b.b().saturating_mul(3) / 4) as u8,
+            );
+
+            // Connect strands smoothly
+            if let Some(p) = prev_a {
+                // Hint depth with a darker trail
+                let _ = co.draw_line_fb(p.x, p.y, pa.x, pa.y, col_a_sh, strand_thick);
+                let _ = co.draw_line_fb(p.x, p.y, pa.x, pa.y, col_a, strand_thick.saturating_sub(2));
+            }
+            if let Some(p) = prev_b {
+                let _ = co.draw_line_fb(p.x, p.y, pb.x, pb.y, col_b_sh, strand_thick);
+                let _ = co.draw_line_fb(p.x, p.y, pb.x, pb.y, col_b, strand_thick.saturating_sub(2));
+            }
+
+            // Curved rung: bend slightly using a midpoint offset for a faux spin effect.
+            let mid_phase = phase + core::f32::consts::FRAC_PI_2;
+            let mid_bend = (sinf(mid_phase) * amp * 0.18) as i32;
+            let mid_x = cx + mid_bend;
+            let mid_y = y + step as i32 / 2;
+            let pm = Point::new(mid_x, mid_y);
+            let col_rung = if front_side { rung_front } else { rung_back };
+
+            let _ = co.draw_line_fb(pa.x, pa.y, pm.x, pm.y, col_rung, rung_thick);
+            let _ = co.draw_line_fb(pm.x, pm.y, pb.x, pb.y, col_rung, rung_thick);
+
+            prev_a = Some(pa);
+            prev_b = Some(pb);
+        }
+
+        // Flush only the helix region to avoid needless panel churn.
+        let _ = co.flush_rect_even(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+    } else {
+        // Fallback path using embedded-graphics primitives.
+        let _ = Rectangle::new(Point::new(x0, y0), Size::new((x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32))
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+            .draw(disp);
+        let mut prev_a: Option<Point> = None;
+        let mut prev_b: Option<Point> = None;
+        for (i, y) in (y_start..=y_end).step_by(step).enumerate() {
+            let phase = t + (i as f32) * 0.35;
+            let amp = amp_max * 0.75;
+            let off = (sinf(phase) * amp) as i32;
+            let xa = cx + off;
+            let xb = cx - off;
+            let pa = Point::new(xa, y);
+            let pb = Point::new(xb, y);
+            let front_side = sinf(phase) >= 0.0;
+            let col_a = if front_side { strand_a_front } else { strand_a_back };
+            let col_b = if front_side { strand_b_back } else { strand_b_front };
+            let col_a_sh = rgb565_from_888(
+                (col_a.r().saturating_mul(3) / 4) as u8,
+                (col_a.g().saturating_mul(3) / 4) as u8,
+                (col_a.b().saturating_mul(3) / 4) as u8,
+            );
+            let col_b_sh = rgb565_from_888(
+                (col_b.r().saturating_mul(3) / 4) as u8,
+                (col_b.g().saturating_mul(3) / 4) as u8,
+                (col_b.b().saturating_mul(3) / 4) as u8,
+            );
+
+            if let Some(p) = prev_a {
+                let _ = Line::new(p, pa)
+                    .into_styled(PrimitiveStyle::with_stroke(col_a_sh, strand_thick.into()))
+                    .draw(disp);
+                let _ = Line::new(p, pa)
+                    .into_styled(PrimitiveStyle::with_stroke(
+                        col_a,
+                        strand_thick.saturating_sub(2).into(),
+                    ))
+                    .draw(disp);
+            }
+            if let Some(p) = prev_b {
+                let _ = Line::new(p, pb)
+                    .into_styled(PrimitiveStyle::with_stroke(col_b_sh, strand_thick.into()))
+                    .draw(disp);
+                let _ = Line::new(p, pb)
+                    .into_styled(PrimitiveStyle::with_stroke(
+                        col_b,
+                        strand_thick.saturating_sub(2).into(),
+                    ))
+                    .draw(disp);
+            }
+            let mid_phase = phase + core::f32::consts::FRAC_PI_2;
+            let mid_bend = (sinf(mid_phase) * amp * 0.18) as i32;
+            let mid_x = cx + mid_bend;
+            let mid_y = y + step as i32 / 2;
+            let pm = Point::new(mid_x, mid_y);
+            let col_rung = if front_side { rung_front } else { rung_back };
+
+            let _ = Line::new(pa, pm)
+                .into_styled(PrimitiveStyle::with_stroke(col_rung, rung_thick.into()))
+                .draw(disp);
+            let _ = Line::new(pm, pb)
+                .into_styled(PrimitiveStyle::with_stroke(col_rung, rung_thick.into()))
+                .draw(disp);
+
+            prev_a = Some(pa);
+            prev_b = Some(pb);
+        }
+    }
 }
 
 fn draw_clock_edit(disp: &mut impl PanelRgb565, ed: ClockEditState) {
@@ -981,58 +1138,6 @@ pub fn get_cached_asset(id: AssetId) -> Option<(&'static [u8], u32, u32)> {
     })
 }
 
-// pub fn draw_hourglass_logo(
-//     disp: &mut impl PanelRgb565,
-//     color: Rgb565,
-//     bg: Rgb565,
-//     clear: bool,
-// ) {
-//     if clear {
-//         // Clear the display with background color
-//         let _ = disp.clear(Rgb565::BLACK);
-//     }
-//     let size = RESOLUTION as usize;
-//     let center = size / 2;
-//     // This is a magic number, calculated from the original image this drawing is based on
-//     let waist = 80;
-//     let drop = (size - waist) as f32;
-
-//     // Prepare buffer: RGB565 big-endian, size*size*2 bytes
-//     let mut buf = vec![0u8; size * size * 2];
-
-//     // Precompute color bytes
-//     let fg = color.into_storage().to_be_bytes();
-//     let bgc = bg.into_storage().to_be_bytes();
-
-//     for y in 0..size {
-//         // Compute width at this y (float math for smooth edges)
-//         let width = if y < center {
-//             size as f32 - drop * (y as f32 / center as f32)
-//         } else {
-//             waist as f32 + drop * ((y - center) as f32 / center as f32)
-//         };
-
-//         // Compute width at this y (float math for smooth edges)
-//         let width = (width + 0.5) as usize;
-//         let left = ((size - width) / 2).max(0);
-//         let right = (left + width).min(size);
-
-//         // Fill pixels
-//         for x in 0..size {
-//             let off = (y * size + x) * 2;
-//             let px = if x >= left && x < right { fg } else { bgc };
-//             buf[off] = px[0];
-//             buf[off + 1] = px[1];
-//         }
-//     }
-//     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>() {
-//         let _ = co.blit_rect_be_fast(0, 0, RESOLUTION as u16, RESOLUTION as u16, &buf);
-//         return;
-//     }
-//     let raw = ImageRawBE::<Rgb565>::new(&buf, size as u32);
-//     let _ = Image::new(&raw, Point::new(0, 0)).draw(disp);
-// }
-
 // helper function to update the display based on UI_STATE
 pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
     // If caller does not want a redraw this cycle, bail out early.
@@ -1046,7 +1151,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
         Page::Main(_) => PageKind::Main,
         Page::Settings(_) => PageKind::Settings,
         Page::Omnitrix(_) => PageKind::Omnitrix,
-        Page::Info => PageKind::Info,
+        Page::EasterEgg => PageKind::EasterEgg,
         Page::Watch(_) => PageKind::Watch,
     };
     let current_transform_active = matches!(state.page, Page::Omnitrix(_))
@@ -1081,75 +1186,38 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
 
     if let Some(dialog) = state.dialog {
         match dialog {
-            Dialog::VolumeAdjust => draw_text(
-                disp,
-                "Adjust Volume (TEMP)",
-                Rgb565::WHITE,
-                Some(Rgb565::RED),
-                CENTER,
-                CENTER,
-                true,
-                true,
-                None,
-            ),
-            Dialog::BrightnessAdjust => draw_text(
-                disp,
-                "Adjust Brightness (TEMP)",
-                Rgb565::WHITE,
-                Some(Rgb565::MAGENTA),
-                CENTER,
-                CENTER,
-                true,
-                true,
-                None,
-            ),
-            Dialog::ResetSelector => draw_text(
-                disp,
-                "Reset? (TEMP)",
-                Rgb565::WHITE,
-                Some(Rgb565::YELLOW),
-                CENTER,
-                CENTER,
-                true,
-                true,
-                None,
-            ),
-            Dialog::HomePage => draw_text(
-                disp,
-                "Home Page (TEMP)",
-                Rgb565::GREEN,
-                Some(Rgb565::BLACK),
-                CENTER,
-                CENTER,
-                true,
-                true,
-                None,
-            ),
-            Dialog::StartPage => draw_text(
-                disp,
-                "Start Page (TEMP)",
-                Rgb565::BLUE,
-                Some(Rgb565::BLACK),
-                CENTER,
-                CENTER,
-                true,
-                true,
-                None,
-            ),
-            Dialog::AboutPage => draw_text(
-                disp,
-                "About Page (TEMP)",
-                Rgb565::CYAN,
-                Some(Rgb565::BLACK),
-                CENTER,
-                CENTER,
-                true,
-                true,
-                None,
-            ),
             Dialog::TransformPage => {
-                // show transform overlay, next frame (when dismissed) will clear due to logic above, maybe play an animation if I figure how to do that later
-                disp.clear(OMNI_LIME).ok();
+                // On first entry into Transform dialog, hard clear the whole screen.
+                let entering = critical_section::with(|cs| {
+                    let mut last = LAST_TRANSFORM_ACTIVE.borrow(cs).borrow_mut();
+                    let was = *last;
+                    *last = true;
+                    !was
+                });
+                if entering {
+                    if let Some(co) =
+                        (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
+                    {
+                        let _ = co.fill_rect_solid_no_fb(
+                            0,
+                            0,
+                            RESOLUTION as u16,
+                            RESOLUTION as u16,
+                            Rgb565::BLACK,
+                        );
+                        co.fill_rect_fb(
+                            0,
+                            0,
+                            (RESOLUTION - 1) as i32,
+                            (RESOLUTION - 1) as i32,
+                            Rgb565::BLACK,
+                        );
+                    } else {
+                        let _ = disp.clear(Rgb565::BLACK);
+                    }
+                }
+
+                draw_transform_overlay(disp);
             }
         }
         return;
@@ -1163,6 +1231,10 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
             *LAST_WATCH_EDIT_ACTIVE.borrow(cs).borrow_mut() = false;
         });
     }
+    // Reset transform tracker when dialog is not active.
+    critical_section::with(|cs| {
+        *LAST_TRANSFORM_ACTIVE.borrow(cs).borrow_mut() = false;
+    });
 
     match state.page {
         Page::Main(menu_state) => {
@@ -1203,7 +1275,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                         None,
                     );
                 }
-                MainMenuState::InfoApp => {
+                MainMenuState::EasterEggApp => {
                     draw_text(
                         disp,
                         "Easter Egg",
@@ -1233,6 +1305,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
         }
 
         Page::Watch(watch_state) => {
+            // If watch mode changed, repaint face and reset cache.
             let should_clear_watch = critical_section::with(|cs| {
                 let mut last = LAST_WATCH_STATE.borrow(cs).borrow_mut();
                 let changed = *last != Some(watch_state);
@@ -1241,6 +1314,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
             });
 
             if should_clear_watch {
+                // Reload background
                 if ensure_watch_background_loaded() {
                     critical_section::with(|cs| {
                         if let Some(bg) = WATCH_BG.borrow(cs).borrow().as_ref() {
@@ -1262,6 +1336,8 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 }
                 dirty
             });
+
+            // If dirty, reload background and reset hand cache.
             if face_dirty {
                 if ensure_watch_background_loaded() {
                     critical_section::with(|cs| {
@@ -1280,6 +1356,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                     draw_analog_clock(disp);
                 }
                 WatchAppState::Digital => {
+                    // Draw either time or edit state
                     let edit = critical_section::with(|cs| *CLOCK_EDIT.borrow(cs).borrow());
                     let should_clear_after_edit = critical_section::with(|cs| {
                         let mut last = LAST_WATCH_EDIT_ACTIVE.borrow(cs).borrow_mut();
@@ -1288,6 +1365,8 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                         *last = now;
                         was && !now
                     });
+
+                    // If we were in edit mode last frame but not now, need to clear to bg
                     if should_clear_after_edit {
                         if ensure_watch_background_loaded() {
                             if let Some(bg) = critical_section::with(|cs| WATCH_BG.borrow(cs).borrow().as_ref().cloned()) {
@@ -1295,6 +1374,8 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                             }
                         }
                     }
+
+                    // Draw either edit UI or current time
                     if let Some(ed) = edit {
                         draw_clock_edit(disp, ed);
                     } else {
@@ -1319,6 +1400,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
         // one layer below main menu home is Omnitrix page
         Page::Omnitrix(omnitrix_state) => {
             // Note that we do not clear here, but before entering a clear happens, it is handled above for efficiency
+            // Clear is necessary as the alien images don't cover the full screen
             let aid = asset_id_for_state(omnitrix_state);
             if let Some((bytes, w, h)) = get_cached_asset(aid) {
                 draw_image_bytes(disp, bytes, w, h, false, false);
@@ -1330,7 +1412,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
             }
         }
 
-        Page::Info => {
+        Page::EasterEgg => {
             // Draw info page image; fallback to text if not cached
             if let Some((bytes, w, h)) = get_cached_asset(AssetId::InfoPage) {
                 draw_image_bytes(disp, bytes, w, h, false, false);
