@@ -730,10 +730,10 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
     // Current time in fractional hours, minutes, seconds
     let total_secs_f = clock_now_seconds_f32(); // necessary for smooth second hand
     let s = total_secs_f % 60.0;
-    let m_total = total_secs_f / 60.0;
-    let m = (m_total % 60.0) + s / 60.0;
-    let h_total = m_total / 60.0;
-    let h = (h_total % 12.0) + m / 60.0;
+    let m_total = total_secs_f / 60.0; // minutes including fractional seconds
+    let m = m_total % 60.0;
+    let h_total = m_total / 60.0; // hours including fractional minutes/seconds
+    let h = h_total % 12.0;
 
     // Angles: 0 deg at 12 o'clock, increasing clockwise
     let sec_ang = (s / 60.0) * 360.0 - 90.0;
@@ -859,11 +859,13 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
                 }
             }
 
+            // Update cache
             cache.sec = Some(sec_end);
             cache.min = Some(min_end);
             cache.hour = Some(hour_end);
             (
                 (
+                    // Return clamped bbox
                     minx.clamp(0, (RESOLUTION - 1) as i32),
                     miny.clamp(0, (RESOLUTION - 1) as i32),
                     maxx.clamp(0, (RESOLUTION - 1) as i32),
@@ -873,6 +875,7 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
             )
         });
 
+        // Flush the affected region
         let (minx, miny, maxx, maxy) = bbox;
         let _ = co.flush_rect_even(minx as u16, miny as u16, maxx as u16, maxy as u16);
         return;
@@ -909,22 +912,84 @@ fn fill_ring_arc_no_fb(
         ang1 = ang0 + 360.0;
     }
 
+    // For small arcs, compute a tighter bounding box based on the arc endpoints
+    // This dramatically speeds up incremental updates
+    let arc_span = ang1 - ang0;
+    let (minx, miny, maxx, maxy) = if arc_span < 350.0 {
+        // Compute bbox from arc endpoints for BOTH inner and outer radii
+        let a0_rad = ang0.to_radians();
+        let a1_rad = ang1.to_radians();
+
+        let cos_a0 = cosf(a0_rad);
+        let sin_a0 = sinf(a0_rad);
+        let cos_a1 = cosf(a1_rad);
+        let sin_a1 = sinf(a1_rad);
+
+        // Start with all 4 arc endpoints (inner/outer at start/end angles)
+        let outer_x0 = cos_a0 * r_outer as f32;
+        let outer_y0 = sin_a0 * r_outer as f32;
+        let outer_x1 = cos_a1 * r_outer as f32;
+        let outer_y1 = sin_a1 * r_outer as f32;
+        let inner_x0 = cos_a0 * r_inner as f32;
+        let inner_y0 = sin_a0 * r_inner as f32;
+        let inner_x1 = cos_a1 * r_inner as f32;
+        let inner_y1 = sin_a1 * r_inner as f32;
+
+        let mut x_min = outer_x0.min(outer_x1).min(inner_x0).min(inner_x1);
+        let mut x_max = outer_x0.max(outer_x1).max(inner_x0).max(inner_x1);
+        let mut y_min = outer_y0.min(outer_y1).min(inner_y0).min(inner_y1);
+        let mut y_max = outer_y0.max(outer_y1).max(inner_y0).max(inner_y1);
+
+        // Check if arc crosses cardinal directions (0°, 90°, 180°, 270°)
+        // and extend bbox accordingly using OUTER radius
+        let check_angle = |target: f32, ang0: f32, ang1: f32| -> bool {
+            let t = if target < ang0 {
+                target + 360.0
+            } else {
+                target
+            };
+            t >= ang0 && t <= ang1
+        };
+
+        if check_angle(0.0, ang0, ang1) {
+            x_max = r_outer as f32;
+        } // right
+        if check_angle(90.0, ang0, ang1) {
+            y_max = r_outer as f32;
+        } // bottom
+        if check_angle(180.0, ang0, ang1) {
+            x_min = -(r_outer as f32);
+        } // left
+        if check_angle(270.0, ang0, ang1) {
+            y_min = -(r_outer as f32);
+        } // top
+
+        // Convert to screen coords with small padding for rounding errors
+        let pad = 2;
+        let minx = ((cx + x_min as i32 - pad).max(0)) & !1;
+        let maxx = ((cx + x_max as i32 + pad).min((RESOLUTION - 1) as i32)) | 1;
+        let miny = ((cy + y_min as i32 - pad).max(0)) & !1;
+        let maxy = ((cy + y_max as i32 + pad).min((RESOLUTION - 1) as i32)) | 1;
+        (minx, miny, maxx, maxy)
+    } else {
+        // Full ring - use full bbox
+        let minx = ((cx - r_outer).max(0)) & !1;
+        let maxx = ((cx + r_outer).min((RESOLUTION - 1) as i32)) | 1;
+        let miny = ((cy - r_outer).max(0)) & !1;
+        let maxy = ((cy + r_outer).min((RESOLUTION - 1) as i32)) | 1;
+        (minx, miny, maxx, maxy)
+    };
+
     let r2_outer = r_outer * r_outer;
     let r2_inner = r_inner * r_inner;
 
-    // Full ring bbox (used only for return value)
-    let minx = ((cx - r_outer).max(0)) & !1;
-    let maxx = ((cx + r_outer).min((RESOLUTION - 1) as i32)) | 1;
-    let miny = ((cy - r_outer).max(0)) & !1;
-    let maxy = ((cy + r_outer).min((RESOLUTION - 1) as i32)) | 1;
-
     let mut bb: Option<(i32, i32, i32, i32)> = None;
-    // Scan rows in 2-pixel bands to satisfy even-write requirement, and batch
-    // contiguous spans per row to minimize QSPI window changes.
+
+    // Scan rows in 2-pixel bands to satisfy even-write requirement
     for y0 in (miny..=maxy).step_by(2) {
         let y_center = y0 + 1;
         let dy = y_center - cy;
-        // Quick reject if outside outer radius.
+        // Quick reject if outside outer radius
         if dy * dy > r2_outer {
             continue;
         }
@@ -954,7 +1019,7 @@ fn fill_ring_arc_no_fb(
                 }
                 run_end = x0;
             } else if let Some(rs) = run_start {
-                let width = (run_end - rs + 2) as u16; // inclusive span, 2px blocks
+                let width = (run_end - rs + 2) as u16;
                 let _ = drv.fill_rect_solid_no_fb(rs as u16, y0 as u16, width, 2, color);
                 bb = Some(match bb {
                     None => (rs, y0, rs + width as i32 - 1, y0 + 1),
@@ -995,14 +1060,19 @@ fn draw_ring_segment(
     end_deg: f32,
     color: Rgb565,
 ) {
+    // Draw radial lines at intervals to form ring segment
     let step = 3.0_f32;
     let r_inner = radius.saturating_sub(thickness.max(1) - 1);
+
+    // Fast path: draw into FB only and flush once.
     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
     {
         let mut minx = i32::MAX;
         let mut miny = i32::MAX;
         let mut maxx = i32::MIN;
         let mut maxy = i32::MIN;
+
+        // Draw line and update bbox
         let mut draw_line = |x0: i32, y0: i32, x1: i32, y1: i32| {
             if let Some((ax0, ay0, ax1, ay1)) =
                 co.draw_line_fb(x0, y0, x1, y1, color, thickness as u8)
@@ -1013,6 +1083,8 @@ fn draw_ring_segment(
                 maxy = maxy.max(ay1 as i32);
             }
         };
+
+        // Draw all radial lines
         let mut a = start_deg;
         while a <= end_deg + 0.1 {
             let ar = a.to_radians();
@@ -1023,6 +1095,8 @@ fn draw_ring_segment(
             draw_line(ox, oy, ix, iy);
             a += step;
         }
+
+        // Flush affected region
         if minx != i32::MAX {
             let _ = co.flush_rect_even(
                 minx.clamp(0, (RESOLUTION - 1) as i32) as u16,
@@ -1032,6 +1106,7 @@ fn draw_ring_segment(
             );
         }
     } else {
+        // Fallback: use embedded-graphics path (may flicker more).
         let mut a = start_deg;
         while a <= end_deg + 0.1 {
             let ar = a.to_radians();
@@ -1049,12 +1124,12 @@ fn draw_ring_segment(
 
 fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
     let pct = brightness_pct();
-    let radius = (RESOLUTION as i32 / 2) + 10; // extend past the visible circle
+    let radius = (RESOLUTION as i32 / 2) + 10;
     let thickness_fg = 20;
-    let thickness_bg = thickness_fg + 12; // thicker black base to smooth edges
+    let thickness_bg = thickness_fg + 12;
     let radius_fg_outer = radius;
     let radius_fg_inner = radius - thickness_fg;
-    let radius_bg_outer = radius + 2; // slightly over-clear
+    let radius_bg_outer = radius + 2;
     let radius_bg_inner = (radius - thickness_bg - 2).max(0);
     let start = -90.0_f32;
     let end_full = start + 360.0;
@@ -1075,13 +1150,11 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
         let do_full = prev_pct_opt.is_none();
         let prev_pct = prev_pct_opt.unwrap_or(pct);
 
-        // Convert percentages to angles (3.6 deg per percent)
         let prev_ang = start + (prev_pct as f32) * 3.6;
         let new_ang = start + (pct as f32) * 3.6;
 
-        // Draw base ring once when entering.
         if do_full {
-            // Full black ring background
+            // Full redraw: background then foreground
             let _ = fill_ring_arc_no_fb(
                 co,
                 CENTER,
@@ -1092,7 +1165,6 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
                 end_full + 5.0,
                 bg_ring,
             );
-            // Draw the current foreground span on entry
             if pct > 0 {
                 let fg_end = if pct == 100 { end_full + 5.0 } else { new_ang };
                 let _ = fill_ring_arc_no_fb(
@@ -1107,11 +1179,18 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
                 );
             }
         } else if pct != prev_pct {
-            // Incremental update: only draw the delta region in ONE pass
-            if pct > prev_pct {
-                // GROWING: paint from just before prev to new angle
-                let fg_start = prev_ang - 2.0; // small overlap to seal seams
-                let fg_end = if pct == 100 { end_full + 5.0 } else { new_ang };
+            // Incremental update - use SAME radii for both clear and paint
+            // Use the bg radii for everything to ensure consistent ring shape
+            let delta = (pct as i32) - (prev_pct as i32);
+
+            if delta > 0 {
+                // GROWING: paint the new segment with fg radii
+                let fg_start = (prev_ang - 2.0).max(start - 5.0);
+                let fg_end = if pct == 100 {
+                    end_full + 5.0
+                } else {
+                    new_ang + 2.0
+                };
                 let _ = fill_ring_arc_no_fb(
                     co,
                     CENTER,
@@ -1123,24 +1202,9 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
                     fg_ring,
                 );
             } else {
-                // SHRINKING: single-pass approach
-                // Paint foreground tip FIRST, then clear only beyond it
-                // This reverses the order to prevent bounce
-                if pct > 0 {
-                    // First: ensure the tip at new_ang is solid
-                    let _ = fill_ring_arc_no_fb(
-                        co,
-                        CENTER,
-                        CENTER,
-                        radius_fg_outer,
-                        radius_fg_inner,
-                        new_ang - 3.0,
-                        new_ang,
-                        fg_ring,
-                    );
-                }
-                // Second: clear ONLY from new_ang onwards (not overlapping the tip)
-                let clear_start = if pct == 0 { start - 5.0 } else { new_ang };
+                // SHRINKING:
+                // 1. First clear the entire area from new_ang to prev_ang using bg radii
+                let clear_start = if pct == 0 { start - 5.0 } else { new_ang - 2.0 };
                 let clear_end = prev_ang + 5.0;
                 let _ = fill_ring_arc_no_fb(
                     co,
@@ -1152,10 +1216,24 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
                     clear_end,
                     bg_ring,
                 );
+                // 2. Repaint the tip AND the outer/inner edges to restore clean boundary
+                if pct > 0 {
+                    // Repaint a small segment of the foreground to clean up the edge
+                    let _ = fill_ring_arc_no_fb(
+                        co,
+                        CENTER,
+                        CENTER,
+                        radius_fg_outer,
+                        radius_fg_inner,
+                        new_ang - 5.0,
+                        new_ang + 2.0,
+                        fg_ring,
+                    );
+                }
             }
         }
 
-        // Draw center text (always refreshed) and merge its bbox for flush.
+        // Update text
         let (tx0, ty0, tx1, ty1) = text_box;
         co.fill_rect_fb(tx0, ty0, tx1, ty1, Rgb565::BLACK);
         let pct_buf = alloc::format!("{}%", pct);
@@ -1171,17 +1249,16 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
             Some(&FONT_10X20),
         );
 
-        // Update last pct after drawing
         critical_section::with(|cs| {
             *BRIGHTNESS_LAST.borrow(cs).borrow_mut() = Some(pct);
         });
 
-        // Flush only the text box (ring is drawn straight to panel).
-        let x0 = (tx0.clamp(0, (RESOLUTION - 1) as i32)) & !1;
-        let y0 = (ty0.clamp(0, (RESOLUTION - 1) as i32)) & !1;
-        let x1 = (tx1.clamp(0, (RESOLUTION - 1) as i32) | 1).min((RESOLUTION - 1) as i32);
-        let y1 = (ty1.clamp(0, (RESOLUTION - 1) as i32) | 1).min((RESOLUTION - 1) as i32);
-        let _ = co.flush_rect_even(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+        // Flush only text box
+        let fx0 = (tx0.clamp(0, (RESOLUTION - 1) as i32)) & !1;
+        let fy0 = (ty0.clamp(0, (RESOLUTION - 1) as i32)) & !1;
+        let fx1 = (tx1.clamp(0, (RESOLUTION - 1) as i32) | 1).min((RESOLUTION - 1) as i32);
+        let fy1 = (ty1.clamp(0, (RESOLUTION - 1) as i32) | 1).min((RESOLUTION - 1) as i32);
+        let _ = co.flush_rect_even(fx0 as u16, fy0 as u16, fx1 as u16, fy1 as u16);
     } else {
         // Fallback: small clear and redraw (non-panel path).
         let _ = Rectangle::new(
@@ -1237,21 +1314,24 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
 }
 
 fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
-    // Simple lime DNA-like helix animation for the transform dialog.
-    let t = clock_now_seconds_f32() * 2.0; // speed multiplier
+    // DNA-like helix animation with depth sorting for proper 3D illusion
+    let t = clock_now_seconds_f32() * 1.6; // slower rotation for better 3D illusion
     let amp_max = (RESOLUTION as f32) * 0.26;
-    let step = 18;
+    let step = 16; // slightly tighter spacing for smoother curve
     let cx = CENTER;
     let y_start = 12;
     let y_end = RESOLUTION as i32 - 12;
-    // Use front/back shades to sell spin (swap per phase).
-    let strand_a_front = rgb565_from_888(0xB8, 0xFF, 0x6A);
-    let strand_a_back = rgb565_from_888(0x5F, 0xC5, 0x1C);
-    let strand_b_front = rgb565_from_888(0x9F, 0xFF, 0x4A);
-    let strand_b_back = rgb565_from_888(0x56, 0xB8, 0x12);
-    let rung_front = rgb565_from_888(0xA8, 0xFF, 0x5A);
-    let rung_back = rgb565_from_888(0x6C, 0xCC, 0x24);
-    let strand_thick = 7u8;
+
+    // Front/back color pairs with more contrast for depth
+    let strand_a_front = rgb565_from_888(0xC0, 0xFF, 0x70); // brighter front
+    let strand_a_back = rgb565_from_888(0x40, 0x90, 0x10); // darker back
+    let strand_b_front = rgb565_from_888(0xA8, 0xFF, 0x50);
+    let strand_b_back = rgb565_from_888(0x38, 0x80, 0x08);
+    let rung_front = rgb565_from_888(0xB0, 0xFF, 0x60);
+    let rung_back = rgb565_from_888(0x50, 0x90, 0x18);
+
+    // Base thickness values - will be modulated by depth
+    let strand_thick_base = 6u8;
     let rung_thick = 3u8;
 
     // Bounding box for the helix drawing (reuse for clear/flush).
@@ -1266,12 +1346,151 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
         // Clear only the helix region in the framebuffer each frame.
         co.fill_rect_fb(x0, y0, x1, y1, Rgb565::BLACK);
 
+        // Collect strand segments for depth-sorted drawing
+        // (y_pos, depth, is_strand_a, prev_point, curr_point)
+        let mut segments: heapless::Vec<(i32, f32, bool, Point, Point), 64> = heapless::Vec::new();
+
+        // Collect rungs with depth info for proper front/back coloring
+        // (y_pos, depth, point_a, point_b, is_front)
+        let mut rungs: heapless::Vec<(i32, f32, Point, Point, bool), 32> = heapless::Vec::new();
+
         let mut prev_a: Option<Point> = None;
         let mut prev_b: Option<Point> = None;
 
+        // Rung spacing - fixed positions along Y axis that don't change with time
+        let rung_spacing = step * 3;
+
+        for (i, y) in (y_start..=y_end).step_by(step).enumerate() {
+            let phase = t + (i as f32) * 0.32;
+            let amp = amp_max * 0.75;
+
+            let off_a = (sinf(phase) * amp) as i32;
+            let off_b = -off_a;
+
+            let xa = cx + off_a;
+            let xb = cx + off_b;
+            let pa = Point::new(xa, y);
+            let pb = Point::new(xb, y);
+
+            // Depth value: cosf gives z-depth (-1 = back, +1 = front)
+            let depth_a = cosf(phase);
+            let depth_b = -depth_a;
+
+            if let (Some(pa_prev), Some(pb_prev)) = (prev_a, prev_b) {
+                let prev_phase = t + ((i - 1) as f32) * 0.32;
+                let avg_depth_a = (depth_a + cosf(prev_phase)) / 2.0;
+                let avg_depth_b = -avg_depth_a;
+
+                let _ = segments.push((y, avg_depth_a, true, pa_prev, pa));
+                let _ = segments.push((y, avg_depth_b, false, pb_prev, pb));
+            }
+
+            // Draw rungs at fixed Y intervals
+            if i % 3 == 1 {
+                // Rung visibility based on rotation: when strands are at edges (|sinf| high),
+                // the rung is facing us or away. When |sinf| is low, rung is on the side.
+                // Use cosf to determine if rung faces front or back
+                let rung_facing_front = cosf(phase).abs() < 0.7; // rung visible when strands near edges
+                let rung_depth = if rung_facing_front { 0.1 } else { -0.5 };
+                let _ = rungs.push((y, rung_depth, pa, pb, rung_facing_front));
+            }
+
+            prev_a = Some(pa);
+            prev_b = Some(pb);
+        }
+
+        // Sort strands by depth (back-to-front)
+        for i in 0..segments.len() {
+            for j in 0..segments.len().saturating_sub(1 + i) {
+                if segments[j].1 > segments[j + 1].1 {
+                    segments.swap(j, j + 1);
+                }
+            }
+        }
+
+        // Sort rungs by depth too
+        for i in 0..rungs.len() {
+            for j in 0..rungs.len().saturating_sub(1 + i) {
+                if rungs[j].1 > rungs[j + 1].1 {
+                    rungs.swap(j, j + 1);
+                }
+            }
+        }
+
+        // Interleave drawing: back rungs, back strands, front rungs, front strands
+        // Draw back rungs first
+        for &(_y, depth, pa, pb, is_front) in rungs.iter() {
+            if depth < 0.0 {
+                let col = if is_front { rung_front } else { rung_back };
+                let _ = co.draw_line_fb(pa.x, pa.y, pb.x, pb.y, col, rung_thick);
+            }
+        }
+
+        // Draw sorted strand segments (back ones first due to sorting)
+        for &(_y, depth, is_a, p_prev, p_curr) in segments.iter() {
+            let depth_factor = (depth + 1.0) / 2.0;
+            let strand_thick = ((strand_thick_base as f32) * (0.5 + 0.7 * depth_factor)) as u8;
+            let strand_thick = strand_thick.max(3).min(9);
+
+            let front_side = depth >= 0.0;
+
+            let (col_main, col_shadow) = if is_a {
+                if front_side {
+                    (strand_a_front, rgb565_from_888(0x70, 0xB0, 0x30))
+                } else {
+                    (strand_a_back, rgb565_from_888(0x28, 0x60, 0x08))
+                }
+            } else {
+                if front_side {
+                    (strand_b_front, rgb565_from_888(0x60, 0xA0, 0x28))
+                } else {
+                    (strand_b_back, rgb565_from_888(0x20, 0x50, 0x04))
+                }
+            };
+
+            let _ = co.draw_line_fb(
+                p_prev.x,
+                p_prev.y,
+                p_curr.x,
+                p_curr.y,
+                col_shadow,
+                strand_thick + 2,
+            );
+            let _ = co.draw_line_fb(
+                p_prev.x,
+                p_prev.y,
+                p_curr.x,
+                p_curr.y,
+                col_main,
+                strand_thick,
+            );
+        }
+
+        // Draw front rungs last (on top of strands)
+        for &(_y, depth, pa, pb, is_front) in rungs.iter() {
+            if depth >= 0.0 {
+                let col = if is_front { rung_front } else { rung_back };
+                let _ = co.draw_line_fb(pa.x, pa.y, pb.x, pb.y, col, rung_thick);
+            }
+        }
+
+        // Flush only the helix region to avoid needless panel churn.
+        let _ = co.flush_rect_even(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+    } else {
+        // Fallback path using embedded-graphics primitives.
+        let strand_thick = strand_thick_base; // use base thickness for fallback
+        let _ = Rectangle::new(
+            Point::new(x0, y0),
+            Size::new((x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32),
+        )
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(disp);
+        let mut prev_a: Option<Point> = None;
+        let mut prev_b: Option<Point> = None;
+
+        // Draw helix strands
         for (i, y) in (y_start..=y_end).step_by(step).enumerate() {
             let phase = t + (i as f32) * 0.35;
-            // Uniform amplitude for cylindrical look.
             let amp = amp_max * 0.75;
             let off = (sinf(phase) * amp) as i32;
             let xa = cx + off;
@@ -1279,6 +1498,8 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
             let pa = Point::new(xa, y);
             let pb = Point::new(xb, y);
             let front_side = sinf(phase) >= 0.0;
+
+            // Choose colors based on front/back
             let col_a = if front_side {
                 strand_a_front
             } else {
@@ -1302,75 +1523,6 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
 
             // Connect strands smoothly
             if let Some(p) = prev_a {
-                // Hint depth with a darker trail
-                let _ = co.draw_line_fb(p.x, p.y, pa.x, pa.y, col_a_sh, strand_thick);
-                let _ =
-                    co.draw_line_fb(p.x, p.y, pa.x, pa.y, col_a, strand_thick.saturating_sub(2));
-            }
-            if let Some(p) = prev_b {
-                let _ = co.draw_line_fb(p.x, p.y, pb.x, pb.y, col_b_sh, strand_thick);
-                let _ =
-                    co.draw_line_fb(p.x, p.y, pb.x, pb.y, col_b, strand_thick.saturating_sub(2));
-            }
-
-            // Curved rung: bend slightly using a midpoint offset for a faux spin effect.
-            let mid_phase = phase + core::f32::consts::FRAC_PI_2;
-            let mid_bend = (sinf(mid_phase) * amp * 0.18) as i32;
-            let mid_x = cx + mid_bend;
-            let mid_y = y + step as i32 / 2;
-            let pm = Point::new(mid_x, mid_y);
-            let col_rung = if front_side { rung_front } else { rung_back };
-
-            let _ = co.draw_line_fb(pa.x, pa.y, pm.x, pm.y, col_rung, rung_thick);
-            let _ = co.draw_line_fb(pm.x, pm.y, pb.x, pb.y, col_rung, rung_thick);
-
-            prev_a = Some(pa);
-            prev_b = Some(pb);
-        }
-
-        // Flush only the helix region to avoid needless panel churn.
-        let _ = co.flush_rect_even(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
-    } else {
-        // Fallback path using embedded-graphics primitives.
-        let _ = Rectangle::new(
-            Point::new(x0, y0),
-            Size::new((x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32),
-        )
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-        .draw(disp);
-        let mut prev_a: Option<Point> = None;
-        let mut prev_b: Option<Point> = None;
-        for (i, y) in (y_start..=y_end).step_by(step).enumerate() {
-            let phase = t + (i as f32) * 0.35;
-            let amp = amp_max * 0.75;
-            let off = (sinf(phase) * amp) as i32;
-            let xa = cx + off;
-            let xb = cx - off;
-            let pa = Point::new(xa, y);
-            let pb = Point::new(xb, y);
-            let front_side = sinf(phase) >= 0.0;
-            let col_a = if front_side {
-                strand_a_front
-            } else {
-                strand_a_back
-            };
-            let col_b = if front_side {
-                strand_b_back
-            } else {
-                strand_b_front
-            };
-            let col_a_sh = rgb565_from_888(
-                (col_a.r().saturating_mul(3) / 4) as u8,
-                (col_a.g().saturating_mul(3) / 4) as u8,
-                (col_a.b().saturating_mul(3) / 4) as u8,
-            );
-            let col_b_sh = rgb565_from_888(
-                (col_b.r().saturating_mul(3) / 4) as u8,
-                (col_b.g().saturating_mul(3) / 4) as u8,
-                (col_b.b().saturating_mul(3) / 4) as u8,
-            );
-
-            if let Some(p) = prev_a {
                 let _ = Line::new(p, pa)
                     .into_styled(PrimitiveStyle::with_stroke(col_a_sh, strand_thick.into()))
                     .draw(disp);
@@ -1381,6 +1533,8 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
                     ))
                     .draw(disp);
             }
+
+            // Connect strands smoothly
             if let Some(p) = prev_b {
                 let _ = Line::new(p, pb)
                     .into_styled(PrimitiveStyle::with_stroke(col_b_sh, strand_thick.into()))
@@ -1392,6 +1546,8 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
                     ))
                     .draw(disp);
             }
+
+            // Curved rung: bend slightly using a midpoint offset for a faux spin effect.
             let mid_phase = phase + core::f32::consts::FRAC_PI_2;
             let mid_bend = (sinf(mid_phase) * amp * 0.18) as i32;
             let mid_x = cx + mid_bend;
@@ -1399,6 +1555,7 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
             let pm = Point::new(mid_x, mid_y);
             let col_rung = if front_side { rung_front } else { rung_back };
 
+            // Draw two segments to form a bent rung
             let _ = Line::new(pa, pm)
                 .into_styled(PrimitiveStyle::with_stroke(col_rung, rung_thick.into()))
                 .draw(disp);
@@ -1447,6 +1604,8 @@ fn draw_clock_edit(disp: &mut impl PanelRgb565, ed: ClockEditState) {
     let idx = ed.idx.min(3) as i32;
     let visual_idx = if idx >= 2 { idx + 1 } else { idx }; // skip colon slot
     let underline_x = start_x + visual_idx * char_w;
+
+    // Draw underline rectangle
     let rect = Rectangle::new(Point::new(underline_x, base_y), Size::new(char_w as u32, 2));
     rect.into_styled(PrimitiveStyle::with_fill(Rgb565::CYAN))
         .draw(disp)
@@ -1454,10 +1613,13 @@ fn draw_clock_edit(disp: &mut impl PanelRgb565, ed: ClockEditState) {
 }
 
 fn ensure_watch_background_loaded() -> bool {
+    // Decompress watch background into PSRAM if not already done
     critical_section::with(|cs| {
         if WATCH_BG.borrow(cs).borrow().is_some() {
             return true;
         }
+
+        // Decompress now
         if let Ok(decompressed) = decompress_to_vec_zlib_with_limit(
             WATCH_BG_IMAGE,
             (RESOLUTION * RESOLUTION * 2) as usize,
