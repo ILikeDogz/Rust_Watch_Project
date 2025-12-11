@@ -162,7 +162,6 @@ where
     }
 }
 
-
 // Simple smash detector using acceleration magnitude and rise detection
 pub struct SmashDetector {
     threshold_sq: i64,
@@ -186,7 +185,13 @@ pub struct SmashDetector {
 
 // Implement smash detector methods
 impl SmashDetector {
-    pub fn new(threshold_raw: i32, rise_raw: i32, gyro_limit_raw: i32, freefall_raw: i32, cooldown_ms: u32) -> Self {
+    pub fn new(
+        threshold_raw: i32,
+        rise_raw: i32,
+        gyro_limit_raw: i32,
+        freefall_raw: i32,
+        cooldown_ms: u32,
+    ) -> Self {
         Self {
             threshold_sq: (threshold_raw as i64) * (threshold_raw as i64),
             rise_threshold_sq: (rise_raw as i64) * (rise_raw as i64),
@@ -236,7 +241,8 @@ impl SmashDetector {
             if mag_sq > 600_000 && mag_sq < 4_000_000 {
                 let k = (self.gravity_samples as i64).saturating_add(1);
                 for i in 0..3 {
-                    self.gravity_dir[i] = (((self.gravity_dir[i] as i64) * self.gravity_samples as i64
+                    self.gravity_dir[i] = (((self.gravity_dir[i] as i64)
+                        * self.gravity_samples as i64
                         + sample.accel[i] as i64)
                         / k) as i32;
                 }

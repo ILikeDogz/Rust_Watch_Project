@@ -1,4 +1,3 @@
-
 // Minimal CO5300 panel driver (QSPI mode).
 // Works with esp-hal (no_std) and embedded-graphics.
 //
@@ -19,25 +18,15 @@
 
 use core::fmt;
 
-use embedded_graphics::{
-    primitives::Rectangle,
-    pixelcolor::Rgb565,
-    prelude::*,
-};
-use embedded_hal::{
-    digital::OutputPin,
-};
+use embedded_graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
+use embedded_hal::digital::OutputPin;
 
-use esp_hal::{
-    Blocking,
-    gpio::Output,
-};
+use esp_hal::{gpio::Output, Blocking};
 
 use embedded_graphics::prelude::IntoStorage;
 
-use esp_hal::spi::master::{DataMode, Command, Address, SpiDmaBus};
+use esp_hal::spi::master::{Address, Command, DataMode, SpiDmaBus};
 // use embedded_hal::delay::DelayNs;
-
 
 extern crate alloc;
 use bytemuck::cast_slice;
@@ -50,7 +39,7 @@ const RAMWRC_OPCODE: u8 = 0x3C;
 
 // Use a small CPU staging buffer per call (HAL will copy it into DMA TX buffer)
 const STAGE_BYTES: usize = 4096; // safe on stack; adjust if needed
-const DMA_CHUNK_SIZE: usize = 32*1023; // max DMA chunk size for ESP32-S3 SPI
+const DMA_CHUNK_SIZE: usize = 32 * 1023; // max DMA chunk size for ESP32-S3 SPI
 
 // Error type that wraps SPI and GPIO errors.
 #[derive(Debug)]
@@ -61,7 +50,9 @@ pub enum Co5300Error<SpiE, GpioE> {
 }
 
 impl<SpiE: fmt::Debug, GpioE: fmt::Debug> From<SpiE> for Co5300Error<SpiE, GpioE> {
-    fn from(e: SpiE) -> Self { Self::Spi(e) }
+    fn from(e: SpiE) -> Self {
+        Self::Spi(e)
+    }
 }
 
 // A very small CO5300 panel driver speaking the "0x02 + CMD + DATA" SPI framing.
@@ -74,10 +65,9 @@ pub struct Co5300Display<'fb, RST> {
     h: u16,
     x_off: u16,
     y_off: u16,
-    fb: &'fb mut [u16], // framebuffer storage
+    fb: &'fb mut [u16],             // framebuffer storage
     stage: alloc::boxed::Box<[u8]>, // staging buffer for writes
 }
-
 
 impl<'fb, RST> Co5300Display<'fb, RST>
 where
@@ -134,7 +124,6 @@ where
         height: u16,
         fb: &'fb mut [u16],
     ) -> Result<Self, Co5300Error<(), RST::Error>> {
-
         // Validate FB size matches WxH (RGB565)
         let expected = (width as usize) * (height as usize);
         if fb.len() != expected {
@@ -158,18 +147,18 @@ where
             r.set_high().map_err(Co5300Error::Gpio)?;
             delay.delay_ms(2);
             r.set_low().map_err(Co5300Error::Gpio)?;
-            delay.delay_ms(80);  
+            delay.delay_ms(80);
             r.set_high().map_err(Co5300Error::Gpio)?;
-            delay.delay_ms(200);  
+            delay.delay_ms(200);
         }
 
         // SW reset + settle
         this.cmd(0x01, &[])?; // SWRESET
-        delay.delay_ms(150);  // was 120
+        delay.delay_ms(150); // was 120
 
         // Sleep out + settle
         this.cmd(0x11, &[])?;
-        delay.delay_ms(180);  // was 150
+        delay.delay_ms(180); // was 150
 
         // Pixel format + small settle
         this.cmd(0x3A, &[0x55])?;
@@ -178,7 +167,7 @@ where
         // 0xC4 0x80
         this.cmd(0xC4, &[0x80])?;
 
-        this.cmd(0x13, &[])?;          // NORMAL DISPLAY MODE
+        this.cmd(0x13, &[])?; // NORMAL DISPLAY MODE
 
         // 0x53 0x20 (BCTRL), 1 ms delay
         this.cmd(0x53, &[0x20])?;
@@ -194,7 +183,7 @@ where
 
         // Display ON + longer settle before any RAMWR
         this.cmd(0x29, &[])?;
-        delay.delay_ms(200);  // was 80, give panel more time
+        delay.delay_ms(200); // was 80, give panel more time
 
         // 0x51 0xFF (brightness max)
         this.cmd(0x51, &[0xFF])?;
@@ -206,35 +195,58 @@ where
         // this.cmd(0x51, &[0x80])?;
 
         // Set memory access control (orientation)
-        this.cmd(0x36, &[0x00])?; 
+        this.cmd(0x36, &[0x00])?;
 
         // Set full window
-        this.cmd(0x2A, &[0x00, 0x00, ((width-1)>>8) as u8, ((width-1)&0xFF) as u8])?;
-        this.cmd(0x2B, &[0x00, 0x00, ((height-1)>>8) as u8, ((height-1)&0xFF) as u8])?;
-        
+        this.cmd(
+            0x2A,
+            &[
+                0x00,
+                0x00,
+                ((width - 1) >> 8) as u8,
+                ((width - 1) & 0xFF) as u8,
+            ],
+        )?;
+        this.cmd(
+            0x2B,
+            &[
+                0x00,
+                0x00,
+                ((height - 1) >> 8) as u8,
+                ((height - 1) & 0xFF) as u8,
+            ],
+        )?;
+
         this.fb.fill(0); // clear FB
-        
+
         Ok(this)
     }
 
     // Panel width in pixels.
     #[inline]
-    pub fn width(&self) -> u16 { self.w }
+    pub fn width(&self) -> u16 {
+        self.w
+    }
 
     // Panel height in pixels.
     #[inline]
-    pub fn height(&self) -> u16 { self.h }
+    pub fn height(&self) -> u16 {
+        self.h
+    }
 
     // Panel Size
-    pub fn size(&self) -> (u16, u16) { (self.w, self.h) }
+    pub fn size(&self) -> (u16, u16) {
+        (self.w, self.h)
+    }
 
     // Raw window set (no even expansion, still applies panel offsets)
     fn set_window_raw(
         &mut self,
-        x0: u16, y0: u16,
-        x1: u16, y1: u16,
+        x0: u16,
+        y0: u16,
+        x1: u16,
+        y1: u16,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
-
         // Bounds check
         if x0 > x1 || y0 > y1 || x1 >= self.w || y1 >= self.h {
             return Err(Co5300Error::OutOfBounds);
@@ -247,8 +259,18 @@ where
         let y1p = y1 + self.y_off;
 
         // Set column and row addresses
-        let ca = [(x0p >> 8) as u8, (x0p & 0xFF) as u8, (x1p >> 8) as u8, (x1p & 0xFF) as u8];
-        let ra = [(y0p >> 8) as u8, (y0p & 0xFF) as u8, (y1p >> 8) as u8, (y1p & 0xFF) as u8];
+        let ca = [
+            (x0p >> 8) as u8,
+            (x0p & 0xFF) as u8,
+            (x1p >> 8) as u8,
+            (x1p & 0xFF) as u8,
+        ];
+        let ra = [
+            (y0p >> 8) as u8,
+            (y0p & 0xFF) as u8,
+            (y1p >> 8) as u8,
+            (y1p & 0xFF) as u8,
+        ];
 
         // Send commands
         self.cmd(0x2A, &ca)?;
@@ -259,8 +281,10 @@ where
     // QSPI variant: send CASET/RASET using quad instruction/address/data while in QPI.
     fn qspi_set_window_raw(
         &mut self,
-        x0: u16, y0: u16,
-        x1: u16, y1: u16,
+        x0: u16,
+        y0: u16,
+        x1: u16,
+        y1: u16,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
         if x0 > x1 || y0 > y1 || x1 >= self.w || y1 >= self.h {
             return Err(Co5300Error::OutOfBounds);
@@ -271,21 +295,28 @@ where
         let y0p = y0 + self.y_off;
         let y1p = y1 + self.y_off;
 
-        let ca = [(x0p >> 8) as u8, (x0p & 0xFF) as u8, (x1p >> 8) as u8, (x1p & 0xFF) as u8];
-        let ra = [(y0p >> 8) as u8, (y0p & 0xFF) as u8, (y1p >> 8) as u8, (y1p & 0xFF) as u8];
+        let ca = [
+            (x0p >> 8) as u8,
+            (x0p & 0xFF) as u8,
+            (x1p >> 8) as u8,
+            (x1p & 0xFF) as u8,
+        ];
+        let ra = [
+            (y0p >> 8) as u8,
+            (y0p & 0xFF) as u8,
+            (y1p >> 8) as u8,
+            (y1p & 0xFF) as u8,
+        ];
 
         // Quad command writer: opcode 0x02, address on quad, data on quad
         let mut send_cmd_qspi = |cmd: u8, data: &[u8]| -> Result<(), Co5300Error<(), RST::Error>> {
             let instruction = Command::_8Bit(0x02, DataMode::Quad);
             let address = Address::_24Bit((cmd as u32) << 8, DataMode::Quad);
             let _ = self.spi.cs.set_low();
-            let res = self.spi.bus.half_duplex_write(
-                DataMode::Quad,
-                instruction,
-                address,
-                0,
-                data,
-            );
+            let res = self
+                .spi
+                .bus
+                .half_duplex_write(DataMode::Quad, instruction, address, 0, data);
             let _ = self.spi.cs.set_high();
             res.map_err(|_| Co5300Error::Spi(()))
         };
@@ -304,9 +335,10 @@ where
         res
     }
 
-    pub fn display_on(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-        -> Result<(), Co5300Error<(), RST::Error>>
-    {
+    pub fn display_on(
+        &mut self,
+        delay: &mut impl embedded_hal::delay::DelayNs,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.qspi_exit_single();
         let res = self.cmd(0x29, &[]); // DISP ON
         self.qspi_enter_quad();
@@ -315,9 +347,10 @@ where
     }
 
     // Deep sleep control
-    pub fn sleep_in(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-        -> Result<(), Co5300Error<(), RST::Error>>
-    {
+    pub fn sleep_in(
+        &mut self,
+        delay: &mut impl embedded_hal::delay::DelayNs,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.qspi_exit_single();
         let res = self.cmd(0x10, &[]); // SLP IN
         self.qspi_enter_quad();
@@ -325,9 +358,10 @@ where
         res
     }
 
-    pub fn sleep_out(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-        -> Result<(), Co5300Error<(), RST::Error>>
-    {
+    pub fn sleep_out(
+        &mut self,
+        delay: &mut impl embedded_hal::delay::DelayNs,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.qspi_exit_single();
         let res = self.cmd(0x11, &[]); // SLP OUT
         self.qspi_enter_quad();
@@ -336,23 +370,25 @@ where
     }
 
     // Convenience wrappers
-    pub fn disable(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-        -> Result<(), Co5300Error<(), RST::Error>>
-    {
+    pub fn disable(
+        &mut self,
+        delay: &mut impl embedded_hal::delay::DelayNs,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.display_off()?;
         self.sleep_in(delay)?;
         Ok(())
     }
 
-    pub fn enable(&mut self, delay: &mut impl embedded_hal::delay::DelayNs)
-        -> Result<(), Co5300Error<(), RST::Error>>
-    {
+    pub fn enable(
+        &mut self,
+        delay: &mut impl embedded_hal::delay::DelayNs,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.sleep_out(delay)?;
         // Re-assert format/orientation if needed
         self.qspi_exit_single();
         self.cmd(0x3A, &[0x55])?; // RGB565
         self.cmd(0x36, &[0x00])?; // MADCTL
-        // Optionally restore brightness
+                                  // Optionally restore brightness
         self.set_brightness(0xFF)?;
         self.qspi_enter_quad();
 
@@ -360,11 +396,8 @@ where
         Ok(())
     }
 
-
     // adjustable brightness (0-255)
-    pub fn set_brightness(&mut self, bright: u8)
-        -> Result<(), Co5300Error<(), RST::Error>>
-    {
+    pub fn set_brightness(&mut self, bright: u8) -> Result<(), Co5300Error<(), RST::Error>> {
         // exit qspi if needed
         self.qspi_exit_single();
         let res = self.cmd(0x51, &[bright]);
@@ -372,13 +405,14 @@ where
         res
     }
 
-
     // Flush an FB rectangle, forcing even start/end (2x2 tiles), using raw window.
     fn flush_fb_rect_even(
         &mut self,
-        x0: u16, y0: u16, x1: u16, y1: u16,
+        x0: u16,
+        y0: u16,
+        x1: u16,
+        y1: u16,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
-
         // Bounds check
         if x0 > x1 || y0 > y1 || x0 >= self.w || y0 >= self.h {
             return Ok(());
@@ -425,13 +459,8 @@ where
                     let ad: u32 = (current_cmd as u32) << 8;
                     let address = Address::_24Bit(ad, address_mode);
                     let _ = self.spi.cs.set_low();
-                    let res = bus.half_duplex_write(
-                        data_mode,
-                        instruction,
-                        address,
-                        0,
-                        &stage[..filled],
-                    );
+                    let res =
+                        bus.half_duplex_write(data_mode, instruction, address, 0, &stage[..filled]);
                     let _ = self.spi.cs.set_high();
                     res.map_err(|_| Co5300Error::Spi(()))?;
                     current_cmd = RAMWRC_OPCODE;
@@ -445,13 +474,7 @@ where
             let ad: u32 = (current_cmd as u32) << 8;
             let address = Address::_24Bit(ad, address_mode);
             let _ = self.spi.cs.set_low();
-            let res = bus.half_duplex_write(
-                data_mode,
-                instruction,
-                address,
-                0,
-                &stage[..filled],
-            );
+            let res = bus.half_duplex_write(data_mode, instruction, address, 0, &stage[..filled]);
             let _ = self.spi.cs.set_high();
             res.map_err(|_| Co5300Error::Spi(()))?;
         }
@@ -460,9 +483,13 @@ where
     }
 
     // Public wrapper to flush an FB rectangle.
-    pub fn flush_rect_even(&mut self, x0: u16, y0: u16, x1: u16, y1: u16)
-        -> Result<(), Co5300Error<(), RST::Error>>
-    {
+    pub fn flush_rect_even(
+        &mut self,
+        x0: u16,
+        y0: u16,
+        x1: u16,
+        y1: u16,
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.flush_fb_rect_even(x0, y0, x1, y1)
     }
 
@@ -542,14 +569,7 @@ where
     }
 
     // Fill a rectangle in the framebuffer with a solid color (no flush).
-    pub fn fill_rect_fb(
-        &mut self,
-        x0: i32,
-        y0: i32,
-        x1: i32,
-        y1: i32,
-        color: Rgb565,
-    ) {
+    pub fn fill_rect_fb(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgb565) {
         let w = self.w as i32;
         let h = self.h as i32;
         if w == 0 || h == 0 {
@@ -575,33 +595,55 @@ where
             }
         }
     }
-    
+
     // Convenience: fill a rectangle with a solid color, using staging buffer.
     pub fn fill_rect_solid(
-        &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565,
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        color: Rgb565,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.fill_rect_solid_opt(x, y, w, h, color, true)
     }
 
     // Same as `fill_rect_solid` but optionally skips framebuffer mirroring for speed.
     pub fn fill_rect_solid_no_fb(
-        &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565,
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        color: Rgb565,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.fill_rect_solid_opt(x, y, w, h, color, false)
     }
 
     fn fill_rect_solid_opt(
-        &mut self, x: u16, y: u16, w: u16, h: u16, color: Rgb565, update_fb: bool,
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        color: Rgb565,
+        update_fb: bool,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
-        if w == 0 || h == 0 { return Ok(()); }
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
 
         // overflow-safe bounds
         let (pw, ph) = (self.w as u32, self.h as u32);
         let (x0, y0, w32, h32) = (x as u32, y as u32, w as u32, h as u32);
-        if x0 >= pw || y0 >= ph { return Err(Co5300Error::OutOfBounds); }
-        if x0.checked_add(w32).unwrap_or(u32::MAX) > pw ||
-           y0.checked_add(h32).unwrap_or(u32::MAX) > ph {
-            return Err(Co5300Error::OutOfBounds); }
+        if x0 >= pw || y0 >= ph {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        if x0.checked_add(w32).unwrap_or(u32::MAX) > pw
+            || y0.checked_add(h32).unwrap_or(u32::MAX) > ph
+        {
+            return Err(Co5300Error::OutOfBounds);
+        }
         let (x1, y1) = ((x0 + w32 - 1) as u16, (y0 + h32 - 1) as u16);
 
         // Set window
@@ -614,7 +656,9 @@ where
         let c = color.into_storage().to_be_bytes();
         for i in (0..stage.len()).step_by(2) {
             stage[i] = c[0];
-            if i + 1 < stage.len() { stage[i + 1] = c[1]; }
+            if i + 1 < stage.len() {
+                stage[i + 1] = c[1];
+            }
         }
 
         // Send in chunks
@@ -631,13 +675,7 @@ where
             let ad: u32 = (current_cmd as u32) << 8;
             let address = Address::_24Bit(ad, address_mode);
             let _ = self.spi.cs.set_low();
-            let res = bus.half_duplex_write(
-                data_mode,
-                instruction,
-                address,
-                0,
-                &stage[..take],
-            );
+            let res = bus.half_duplex_write(data_mode, instruction, address, 0, &stage[..take]);
             let _ = self.spi.cs.set_high();
             res.map_err(|_| Co5300Error::Spi(()))?;
             remaining -= take;
@@ -654,7 +692,9 @@ where
             for ry in 0..(h as usize) {
                 let base = (row_start + ry) * fbw + col_start;
                 let dst = &mut self.fb[base..base + row_w];
-                for px in dst.iter_mut() { *px = color16; }
+                for px in dst.iter_mut() {
+                    *px = color16;
+                }
             }
         }
         Ok(())
@@ -662,11 +702,11 @@ where
 
     // Chunked rect blit from BE bytes; send slices directly using quad and mirror into FB.
     pub fn blit_rect_be_fast(
-        &mut self, 
-        x0: u16, 
-        y0: u16, 
-        w: u16, 
-        h: u16, 
+        &mut self,
+        x0: u16,
+        y0: u16,
+        w: u16,
+        h: u16,
         data: &[u8],
     ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.blit_rect_be_fast_opt(x0, y0, w, h, data, true)
@@ -674,35 +714,39 @@ where
 
     // Same as `blit_rect_be_fast` but optionally skips framebuffer mirroring for speed.
     pub fn blit_rect_be_fast_no_fb(
-        &mut self, 
-        x0: u16, 
-        y0: u16, 
-        w: u16, 
-        h: u16, 
+        &mut self,
+        x0: u16,
+        y0: u16,
+        w: u16,
+        h: u16,
         data: &[u8],
     ) -> Result<(), Co5300Error<(), RST::Error>> {
         self.blit_rect_be_fast_opt(x0, y0, w, h, data, false)
     }
 
     fn blit_rect_be_fast_opt(
-        &mut self, 
-        x0: u16, 
-        y0: u16, 
-        w: u16, 
-        h: u16, 
+        &mut self,
+        x0: u16,
+        y0: u16,
+        w: u16,
+        h: u16,
         data: &[u8],
         update_fb: bool,
     ) -> Result<(), Co5300Error<(), RST::Error>> {
-
         // early out
-        if w == 0 || h == 0 { return Ok(()); }
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
 
         // overflow-safe bounds
         let (pw, ph) = (self.w as u32, self.h as u32);
         let (x32, y32, w32, h32) = (x0 as u32, y0 as u32, w as u32, h as u32);
-        if x32 >= pw || y32 >= ph { return Err(Co5300Error::OutOfBounds); }
-        if x32.checked_add(w32).unwrap_or(u32::MAX) > pw ||
-           y32.checked_add(h32).unwrap_or(u32::MAX) > ph {
+        if x32 >= pw || y32 >= ph {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        if x32.checked_add(w32).unwrap_or(u32::MAX) > pw
+            || y32.checked_add(h32).unwrap_or(u32::MAX) > ph
+        {
             return Err(Co5300Error::OutOfBounds);
         }
 
@@ -713,7 +757,9 @@ where
         let expected = (w as usize) * (h as usize) * 2;
 
         // each pixel is 2 bytes (RGB565 BE)
-        if data.len() != expected { return Err(Co5300Error::OutOfBounds); }
+        if data.len() != expected {
+            return Err(Co5300Error::OutOfBounds);
+        }
 
         // Set window
         self.qspi_set_window_raw(x0, y0, x1, y1)?;
@@ -733,13 +779,7 @@ where
             let address = Address::_24Bit(ad, address_mode);
             let chunk = &data[off..off + take];
             let _ = self.spi.cs.set_low();
-            let res = bus.half_duplex_write(
-                data_mode,
-                instruction,
-                address,
-                0,
-                chunk,
-            );
+            let res = bus.half_duplex_write(data_mode, instruction, address, 0, chunk);
             let _ = self.spi.cs.set_high();
             res.map_err(|_| Co5300Error::Spi(()))?;
             off += take;
@@ -754,7 +794,8 @@ where
                 let base = (y0 as usize + ry) * fbw + (x0 as usize);
                 let row = &mut self.fb[base..base + (w as usize)];
                 for px in row.iter_mut() {
-                    let hi = data[si]; let lo = data[si + 1];
+                    let hi = data[si];
+                    let lo = data[si + 1];
                     *px = u16::from_be_bytes([hi, lo]).to_be();
                     si += 2;
                 }
@@ -763,13 +804,10 @@ where
         Ok(())
     }
 
-
     // ---- Low-level helpers ----
     // Low-level command send (with data)
     #[inline(always)]
-    fn cmd(&mut self, cmd: u8, data: &[u8])
-        -> Result<(), Co5300Error<(), RST::Error>>
-    {
+    fn cmd(&mut self, cmd: u8, data: &[u8]) -> Result<(), Co5300Error<(), RST::Error>> {
         let _ = self.spi.cs.set_low();
         let res = self.spi.bus.half_duplex_write(
             DataMode::Single,
@@ -837,20 +875,34 @@ where
 
         // Update FB and dirty rect
         for Pixel(p, c) in pixels {
-            if p.x < 0 || p.y < 0 { continue; }
+            if p.x < 0 || p.y < 0 {
+                continue;
+            }
             let (x, y) = (p.x as u16, p.y as u16);
-            if x >= self.w || y >= self.h { continue; }
+            if x >= self.w || y >= self.h {
+                continue;
+            }
             self.fb[(y as usize) * (self.w as usize) + (x as usize)] = c.into_storage().to_be();
 
             if !any {
                 any = true;
-                minx = x; maxx = x;
-                miny = y; maxy = y;
+                minx = x;
+                maxx = x;
+                miny = y;
+                maxy = y;
             } else {
-                if x < minx { minx = x; }
-                if y < miny { miny = y; }
-                if x > maxx { maxx = x; }
-                if y > maxy { maxy = y; }
+                if x < minx {
+                    minx = x;
+                }
+                if y < miny {
+                    miny = y;
+                }
+                if x > maxx {
+                    maxx = x;
+                }
+                if y > maxy {
+                    maxy = y;
+                }
             }
         }
 
@@ -860,7 +912,6 @@ where
         }
         Ok(())
     }
-
 
     // FAST PATH: row streaming for images and large fills
     fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
@@ -876,7 +927,9 @@ where
             // Drain iterator to keep semantics
             let mut it = colors.into_iter();
             let total = (area.size.width as usize) * (area.size.height as usize);
-            for _ in 0..total { let _ = it.next(); }
+            for _ in 0..total {
+                let _ = it.next();
+            }
             return Ok(());
         }
 
@@ -901,13 +954,17 @@ where
 
         // Skip rows above intersection
         for _ in 0..top_skip {
-            for _ in 0..area_w { let _ = it.next(); }
+            for _ in 0..area_w {
+                let _ = it.next();
+            }
         }
 
         // Rows in intersection
         for ry in 0..inter_h {
             // Skip left columns
-            for _ in 0..left_skip { let _ = it.next(); }
+            for _ in 0..left_skip {
+                let _ = it.next();
+            }
 
             // Write visible span into FB
             let dst_row = (y0 as usize + ry) * fbw;
@@ -919,13 +976,17 @@ where
             }
 
             // Skip right columns
-            for _ in 0..right_skip { let _ = it.next(); }
+            for _ in 0..right_skip {
+                let _ = it.next();
+            }
         }
 
         // Drain rows below to preserve iterator semantics
         let rows_below = area_h.saturating_sub(top_skip + inter_h);
         for _ in 0..rows_below {
-            for _ in 0..area_w { let _ = it.next(); }
+            for _ in 0..area_w {
+                let _ = it.next();
+            }
         }
 
         // One flush from FB (handles even-alignment + single RAMWR)
@@ -941,7 +1002,6 @@ where
         let _ = self.fill_rect_solid(0, 0, self.w, self.h, color);
         Ok(())
     }
-
 }
 
 // Convenience builder that picks common defaults and returns the concrete type.
@@ -951,7 +1011,7 @@ pub fn new_with_defaults<'fb, RST>(
     rst: Option<RST>,
     delay: &mut impl embedded_hal::delay::DelayNs,
     fb: &'fb mut [u16],
-    ) -> Result<Co5300Display<'fb, RST>, Co5300Error<(), RST::Error>>
+) -> Result<Co5300Display<'fb, RST>, Co5300Error<(), RST::Error>>
 where
     RST: embedded_hal::digital::OutputPin,
 {
@@ -961,7 +1021,6 @@ where
     display.qspi_enter_quad();
     Ok(display)
 }
-
 
 // Raw SPI container: manual CS + bus so we can wrap half_duplex writes ourselves.
 pub struct RawSpiDev<'a> {

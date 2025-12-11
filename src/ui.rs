@@ -19,10 +19,7 @@ use esp_backtrace as _;
 use embedded_graphics::{
     draw_target::DrawTarget,
     image::{Image, ImageRawBE},
-    mono_font::{
-        ascii::FONT_10X20,
-        MonoFont, MonoTextStyleBuilder,
-    },
+    mono_font::{ascii::FONT_10X20, MonoFont, MonoTextStyleBuilder},
     pixelcolor::Rgb565,
     prelude::{OriginDimensions, Point, Primitive, RgbColor, Size},
     primitives::{Line, PrimitiveStyle, Rectangle},
@@ -30,7 +27,7 @@ use embedded_graphics::{
     Drawable,
 };
 use esp_hal::timer::systimer::{SystemTimer, Unit};
-use libm::{cosf, sinf};
+use libm::{atan2f, cosf, sinf};
 
 use core::any::Any;
 use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
@@ -114,8 +111,7 @@ static ALIEN_LOGO: &[u8] =
     include_bytes!(concat!("assets/omnitrix_logo_466x466_rgb565_be.raw.zlib"));
 static INFO_PAGE_IMAGE: &[u8] =
     include_bytes!(concat!("assets/debug_image3_466x466_rgb565_be.raw.zlib"));
-static WATCH_BG_IMAGE: &[u8] =
-    include_bytes!("assets/watch_background_466x466_rgb565_be.raw.zlib");
+static WATCH_BG_IMAGE: &[u8] = include_bytes!("assets/watch_background_466x466_rgb565_be.raw.zlib");
 
 // Generic asset cache
 static ASSETS: Mutex<RefCell<[AssetSlot; ASSET_MAX]>> = Mutex::new(RefCell::new(
@@ -149,6 +145,12 @@ static HAND_CACHE: Mutex<RefCell<HandCache>> = Mutex::new(RefCell::new(HandCache
 static WATCH_BG: Mutex<RefCell<Option<alloc::vec::Vec<u8>>>> = Mutex::new(RefCell::new(None));
 static WATCH_FACE_DIRTY: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 static LAST_TRANSFORM_ACTIVE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
+static BRIGHTNESS_PCT: Mutex<RefCell<u8>> = Mutex::new(RefCell::new(100));
+static BRIGHTNESS_EDIT: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
+static BRIGHTNESS_LAST: Mutex<RefCell<Option<u8>>> = Mutex::new(RefCell::new(None));
+static LAST_SETTINGS_STATE: Mutex<RefCell<Option<SettingsMenuState>>> =
+    Mutex::new(RefCell::new(None));
+static BRIGHTNESS_DIRTY: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 
 // uses a simple stack for navigation history
 fn nav_push(p: Page) {
@@ -209,10 +211,10 @@ pub enum Dialog {
 // States for Main Menu
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MainMenuState {
-    Home,        // just show home
-    WatchApp,    // enter watch app (analog/digital)
-    SettingsApp, // enter Settings
-    EasterEggApp,     // enter Easter Egg
+    Home,         // just show home
+    WatchApp,     // enter watch app (analog/digital)
+    SettingsApp,  // enter Settings
+    EasterEggApp, // enter Easter Egg
 }
 
 // States for Watch App
@@ -248,12 +250,7 @@ pub fn watch_edit_start() {
     let total_mins = now / 60;
     let h = ((total_mins / 60) % 24) as u8;
     let m = (total_mins % 60) as u8;
-    let digits = [
-        h / 10,
-        h % 10,
-        m / 10,
-        m % 10,
-    ];
+    let digits = [h / 10, h % 10, m / 10, m % 10];
 
     // Set edit state
     critical_section::with(|cs| {
@@ -305,7 +302,11 @@ pub fn watch_edit_adjust(delta: i32) {
             let (min_d, max_d) = match idx {
                 0 => (0, 2),
                 1 => {
-                    if ed.digits[0] == 2 { (0, 3) } else { (0, 9) }
+                    if ed.digits[0] == 2 {
+                        (0, 3)
+                    } else {
+                        (0, 9)
+                    }
                 }
                 2 => (0, 5),
                 _ => (0, 9),
@@ -313,8 +314,12 @@ pub fn watch_edit_adjust(delta: i32) {
             // Adjust digit
             digit += delta;
             // Wrap around
-            if digit > max_d { digit = min_d; }
-            if digit < min_d { digit = max_d; }
+            if digit > max_d {
+                digit = min_d;
+            }
+            if digit < min_d {
+                digit = max_d;
+            }
 
             // Update digit
             ed.digits[idx] = digit as u8;
@@ -323,6 +328,56 @@ pub fn watch_edit_adjust(delta: i32) {
     });
 }
 
+pub fn brightness_pct() -> u8 {
+    critical_section::with(|cs| *BRIGHTNESS_PCT.borrow(cs).borrow())
+}
+
+pub fn brightness_set_pct(new_pct: i32) -> u8 {
+    let clamped = new_pct.clamp(0, 100) as u8;
+    critical_section::with(|cs| {
+        *BRIGHTNESS_PCT.borrow(cs).borrow_mut() = clamped;
+        *BRIGHTNESS_DIRTY.borrow(cs).borrow_mut() = true;
+    });
+    clamped
+}
+
+pub fn brightness_adjust(delta: i32) -> u8 {
+    if delta == 0 {
+        return brightness_pct();
+    }
+    critical_section::with(|cs| {
+        let mut pct = *BRIGHTNESS_PCT.borrow(cs).borrow();
+        let mut v = pct as i32 + delta;
+        if v < 0 {
+            v = 0;
+        } else if v > 100 {
+            v = 100;
+        }
+        pct = v as u8;
+        if pct != *BRIGHTNESS_PCT.borrow(cs).borrow() {
+            *BRIGHTNESS_PCT.borrow(cs).borrow_mut() = pct;
+            *BRIGHTNESS_DIRTY.borrow(cs).borrow_mut() = true;
+        }
+        pct
+    })
+}
+
+pub fn brightness_edit_active() -> bool {
+    critical_section::with(|cs| *BRIGHTNESS_EDIT.borrow(cs).borrow())
+}
+
+pub fn brightness_edit_set(active: bool) {
+    critical_section::with(|cs| *BRIGHTNESS_EDIT.borrow(cs).borrow_mut() = active);
+}
+
+pub fn brightness_take_dirty() -> bool {
+    critical_section::with(|cs| {
+        let mut d = BRIGHTNESS_DIRTY.borrow(cs).borrow_mut();
+        let was = *d;
+        *d = false;
+        was
+    })
+}
 
 fn clock_now_seconds() -> u64 {
     // Get current software clock time in seconds since epoch
@@ -351,8 +406,8 @@ fn clock_now_seconds_f32() -> f32 {
 // States for Settings Menu
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SettingsMenuState {
-    Volume,
-    Brightness,
+    BrightnessPrompt,
+    BrightnessAdjust,
     Reset,
 }
 
@@ -396,9 +451,9 @@ impl UiState {
             }
             Page::Settings(state) => {
                 let next = match state {
-                    SettingsMenuState::Volume => SettingsMenuState::Brightness,
-                    SettingsMenuState::Brightness => SettingsMenuState::Reset,
-                    SettingsMenuState::Reset => SettingsMenuState::Volume,
+                    SettingsMenuState::BrightnessPrompt => SettingsMenuState::Reset,
+                    SettingsMenuState::Reset => SettingsMenuState::BrightnessPrompt,
+                    SettingsMenuState::BrightnessAdjust => SettingsMenuState::BrightnessAdjust,
                 };
                 Page::Settings(next)
             }
@@ -449,9 +504,9 @@ impl UiState {
             }
             Page::Settings(state) => {
                 let prev = match state {
-                    SettingsMenuState::Volume => SettingsMenuState::Reset,
-                    SettingsMenuState::Brightness => SettingsMenuState::Volume,
-                    SettingsMenuState::Reset => SettingsMenuState::Brightness,
+                    SettingsMenuState::BrightnessPrompt => SettingsMenuState::Reset,
+                    SettingsMenuState::Reset => SettingsMenuState::BrightnessPrompt,
+                    SettingsMenuState::BrightnessAdjust => SettingsMenuState::BrightnessAdjust,
                 };
                 Page::Settings(prev)
             }
@@ -486,6 +541,19 @@ impl UiState {
                 dialog: None,
             };
         }
+        // If in Settings adjust view, pop back to prompt (also pop nav once).
+        if matches!(
+            self.page,
+            Page::Settings(SettingsMenuState::BrightnessAdjust)
+        ) {
+            let _ = nav_pop();
+            return Self {
+                page: Page::Settings(SettingsMenuState::BrightnessPrompt),
+                dialog: None,
+            };
+        }
+
+        // Otherwise, try navigation history first.
         if let Some(prev) = nav_pop() {
             return Self {
                 page: prev,
@@ -508,24 +576,32 @@ impl UiState {
             };
         }
         match self.page {
-        Page::Main(state) => {
-            nav_push(Page::Main(state));
-            let page = match state {
-                MainMenuState::Home => Page::Omnitrix(OmnitrixState::Alien1),
-                MainMenuState::WatchApp => Page::Watch(WatchAppState::Analog),
-                MainMenuState::SettingsApp => Page::Settings(SettingsMenuState::Volume),
-                MainMenuState::EasterEggApp => Page::EasterEgg,
-            };
-            Self { page, dialog: None }
-        }
+            Page::Main(state) => {
+                nav_push(Page::Main(state));
+                let page = match state {
+                    MainMenuState::Home => Page::Omnitrix(OmnitrixState::Alien1),
+                    MainMenuState::WatchApp => Page::Watch(WatchAppState::Analog),
+                    MainMenuState::SettingsApp => {
+                        Page::Settings(SettingsMenuState::BrightnessPrompt)
+                    }
+                    MainMenuState::EasterEggApp => Page::EasterEgg,
+                };
+                Self { page, dialog: None }
+            }
             Page::Watch(_) => Self {
                 page: self.page,
                 dialog: None,
             },
-            Page::Settings(_) => Self {
-                page: self.page,
-                dialog: None,
-            },
+            Page::Settings(s) => {
+                let page = match s {
+                    SettingsMenuState::BrightnessPrompt => {
+                        nav_push(Page::Settings(s));
+                        Page::Settings(SettingsMenuState::BrightnessAdjust)
+                    }
+                    _ => self.page,
+                };
+                Self { page, dialog: None }
+            }
             Page::Omnitrix(_) => Self {
                 page: self.page,
                 dialog: None,
@@ -693,9 +769,15 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
             let hour_pad = (hour_stroke * 2).max(10);
 
             // Previous points
-            if let Some(p) = cache.sec { add_pt(p, sec_pad); }
-            if let Some(p) = cache.min { add_pt(p, min_pad); }
-            if let Some(p) = cache.hour { add_pt(p, hour_pad); }
+            if let Some(p) = cache.sec {
+                add_pt(p, sec_pad);
+            }
+            if let Some(p) = cache.min {
+                add_pt(p, min_pad);
+            }
+            if let Some(p) = cache.hour {
+                add_pt(p, hour_pad);
+            }
 
             // New points
             add_pt(sec_end, sec_pad);
@@ -727,13 +809,27 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
 
             // Draw all hands
             // Hour hand
-            co.draw_line_fb(cx, cy, hour_end.x, hour_end.y, Rgb565::WHITE, hour_stroke as u8);
+            co.draw_line_fb(
+                cx,
+                cy,
+                hour_end.x,
+                hour_end.y,
+                Rgb565::WHITE,
+                hour_stroke as u8,
+            );
             // Minute hand
-            co.draw_line_fb(cx, cy, min_end.x, min_end.y, Rgb565::YELLOW, min_stroke as u8);
+            co.draw_line_fb(
+                cx,
+                cy,
+                min_end.x,
+                min_end.y,
+                Rgb565::YELLOW,
+                min_stroke as u8,
+            );
             // Second hand
             co.draw_line_fb(cx, cy, sec_end.x, sec_end.y, Rgb565::CYAN, sec_stroke as u8);
             // Center dot as solid circle
-            let r_outer: i32  = 8;
+            let r_outer: i32 = 8;
             let r_outer2: i32 = r_outer * r_outer;
             let c_solid = rgb565_from_888(0x52, 0xC6, 0x6B); // #52C66B
             let x0 = cx - r_outer;
@@ -745,7 +841,9 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
                     let dx = xx - cx;
                     let dy = yy - cy;
                     let d2 = dx * dx + dy * dy;
-                    if d2 > r_outer2 { continue; }
+                    if d2 > r_outer2 {
+                        continue;
+                    }
                     co.fill_rect_fb(xx, yy, xx, yy, c_solid);
                 }
             }
@@ -773,6 +871,419 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
     draw_hand_line(disp, cx, cy, sec_end, Rgb565::RED, 2);
     draw_hand_line(disp, cx, cy, min_end, Rgb565::GREEN, 3);
     draw_hand_line(disp, cx, cy, hour_end, Rgb565::BLUE, 4);
+}
+
+// Fill an annular arc into the framebuffer and return its bbox.
+fn fill_ring_arc_fb(
+    drv: &mut crate::display::DisplayType<'static>,
+    cx: i32,
+    cy: i32,
+    r_outer: i32,
+    r_inner: i32,
+    ang0_deg: f32,
+    ang1_deg: f32,
+    color: Rgb565,
+) -> Option<(i32, i32, i32, i32)> {
+    // Normalize angles so ang1 >= ang0 in [0, 360+)
+    let mut ang0 = ang0_deg;
+    let mut ang1 = ang1_deg;
+    while ang0 < 0.0 {
+        ang0 += 360.0;
+        ang1 += 360.0;
+    }
+    while ang1 < ang0 {
+        ang1 += 360.0;
+    }
+    // Cap span to at most one full revolution
+    if ang1 <= ang0 {
+        ang1 = ang0 + 360.0;
+    }
+
+    let r2_outer = r_outer * r_outer;
+    let r2_inner = r_inner * r_inner;
+
+    // Full ring bbox (robust and cheap at 466x466)
+    let minx = (cx - r_outer).max(0);
+    let maxx = (cx + r_outer).min((RESOLUTION - 1) as i32);
+    let miny = (cy - r_outer).max(0);
+    let maxy = (cy + r_outer).min((RESOLUTION - 1) as i32);
+
+    let mut bb: Option<(i32, i32, i32, i32)> = None;
+    for y in miny..=maxy {
+        for x in minx..=maxx {
+            let dx = x - cx;
+            let dy = y - cy;
+            let d2 = dx * dx + dy * dy;
+            if d2 > r2_outer || d2 < r2_inner {
+                continue;
+            }
+            let mut ang = atan2f(dy as f32, dx as f32).to_degrees();
+            if ang < ang0 {
+                ang += 360.0;
+            }
+            if ang > ang1 {
+                continue;
+            }
+            drv.fill_rect_fb(x, y, x, y, color);
+            bb = Some(match bb {
+                None => (x, y, x, y),
+                Some((bx0, by0, bx1, by1)) => (bx0.min(x), by0.min(y), bx1.max(x), by1.max(y)),
+            });
+        }
+    }
+    bb
+}
+
+// Draw an annular arc directly to the panel (no framebuffer update, even-aligned writes).
+fn fill_ring_arc_no_fb(
+    drv: &mut crate::display::DisplayType<'static>,
+    cx: i32,
+    cy: i32,
+    r_outer: i32,
+    r_inner: i32,
+    ang0_deg: f32,
+    ang1_deg: f32,
+    color: Rgb565,
+) -> Option<(i32, i32, i32, i32)> {
+    // Normalize angles so ang1 >= ang0 in [0, 360+)
+    let mut ang0 = ang0_deg;
+    let mut ang1 = ang1_deg;
+    while ang0 < 0.0 {
+        ang0 += 360.0;
+        ang1 += 360.0;
+    }
+    while ang1 < ang0 {
+        ang1 += 360.0;
+    }
+    if ang1 <= ang0 {
+        ang1 = ang0 + 360.0;
+    }
+
+    let r2_outer = r_outer * r_outer;
+    let r2_inner = r_inner * r_inner;
+
+    // Full ring bbox (used only for return value)
+    let minx = ((cx - r_outer).max(0)) & !1;
+    let maxx = ((cx + r_outer).min((RESOLUTION - 1) as i32)) | 1;
+    let miny = ((cy - r_outer).max(0)) & !1;
+    let maxy = ((cy + r_outer).min((RESOLUTION - 1) as i32)) | 1;
+
+    let mut bb: Option<(i32, i32, i32, i32)> = None;
+    // Scan rows in 2-pixel bands to satisfy even-write requirement, and batch
+    // contiguous spans per row to minimize QSPI window changes.
+    for y0 in (miny..=maxy).step_by(2) {
+        let y_center = y0 + 1;
+        let dy = y_center - cy;
+        // Quick reject if outside outer radius.
+        if dy * dy > r2_outer {
+            continue;
+        }
+        let mut run_start: Option<i32> = None;
+        let mut run_end: i32 = 0;
+        for x0 in (minx..=maxx).step_by(2) {
+            let x_center = x0 + 1;
+            let dx = x_center - cx;
+            let d2 = dx * dx + dy * dy;
+            let inside_radial = d2 <= r2_outer && d2 >= r2_inner;
+            let inside_ang = if inside_radial {
+                let mut ang = atan2f(dy as f32, dx as f32).to_degrees();
+                if ang < 0.0 {
+                    ang += 360.0;
+                }
+                if ang < ang0 {
+                    ang += 360.0;
+                }
+                ang >= ang0 && ang <= ang1
+            } else {
+                false
+            };
+
+            if inside_ang {
+                if run_start.is_none() {
+                    run_start = Some(x0);
+                }
+                run_end = x0;
+            } else if let Some(rs) = run_start {
+                let width = (run_end - rs + 2) as u16; // inclusive span, 2px blocks
+                let _ = drv.fill_rect_solid_no_fb(rs as u16, y0 as u16, width, 2, color);
+                bb = Some(match bb {
+                    None => (rs, y0, rs + width as i32 - 1, y0 + 1),
+                    Some((bx0, by0, bx1, by1)) => (
+                        bx0.min(rs),
+                        by0.min(y0),
+                        bx1.max(rs + width as i32 - 1),
+                        by1.max(y0 + 1),
+                    ),
+                });
+                run_start = None;
+            }
+        }
+        if let Some(rs) = run_start {
+            let width = (run_end - rs + 2) as u16;
+            let _ = drv.fill_rect_solid_no_fb(rs as u16, y0 as u16, width, 2, color);
+            bb = Some(match bb {
+                None => (rs, y0, rs + width as i32 - 1, y0 + 1),
+                Some((bx0, by0, bx1, by1)) => (
+                    bx0.min(rs),
+                    by0.min(y0),
+                    bx1.max(rs + width as i32 - 1),
+                    by1.max(y0 + 1),
+                ),
+            });
+        }
+    }
+    bb
+}
+
+fn draw_ring_segment(
+    disp: &mut impl PanelRgb565,
+    cx: i32,
+    cy: i32,
+    radius: i32,
+    thickness: i32,
+    start_deg: f32,
+    end_deg: f32,
+    color: Rgb565,
+) {
+    let step = 3.0_f32;
+    let r_inner = radius.saturating_sub(thickness.max(1) - 1);
+    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
+    {
+        let mut minx = i32::MAX;
+        let mut miny = i32::MAX;
+        let mut maxx = i32::MIN;
+        let mut maxy = i32::MIN;
+        let mut draw_line = |x0: i32, y0: i32, x1: i32, y1: i32| {
+            if let Some((ax0, ay0, ax1, ay1)) =
+                co.draw_line_fb(x0, y0, x1, y1, color, thickness as u8)
+            {
+                minx = minx.min(ax0 as i32);
+                miny = miny.min(ay0 as i32);
+                maxx = maxx.max(ax1 as i32);
+                maxy = maxy.max(ay1 as i32);
+            }
+        };
+        let mut a = start_deg;
+        while a <= end_deg + 0.1 {
+            let ar = a.to_radians();
+            let ox = cx + (cosf(ar) * radius as f32) as i32;
+            let oy = cy + (sinf(ar) * radius as f32) as i32;
+            let ix = cx + (cosf(ar) * r_inner as f32) as i32;
+            let iy = cy + (sinf(ar) * r_inner as f32) as i32;
+            draw_line(ox, oy, ix, iy);
+            a += step;
+        }
+        if minx != i32::MAX {
+            let _ = co.flush_rect_even(
+                minx.clamp(0, (RESOLUTION - 1) as i32) as u16,
+                miny.clamp(0, (RESOLUTION - 1) as i32) as u16,
+                maxx.clamp(0, (RESOLUTION - 1) as i32) as u16,
+                maxy.clamp(0, (RESOLUTION - 1) as i32) as u16,
+            );
+        }
+    } else {
+        let mut a = start_deg;
+        while a <= end_deg + 0.1 {
+            let ar = a.to_radians();
+            let ox = cx + (cosf(ar) * radius as f32) as i32;
+            let oy = cy + (sinf(ar) * radius as f32) as i32;
+            let ix = cx + (cosf(ar) * r_inner as f32) as i32;
+            let iy = cy + (sinf(ar) * r_inner as f32) as i32;
+            let _ = Line::new(Point::new(ox, oy), Point::new(ix, iy))
+                .into_styled(PrimitiveStyle::with_stroke(color, thickness.max(1) as u32))
+                .draw(disp);
+            a += step;
+        }
+    }
+}
+
+fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
+    let pct = brightness_pct();
+    let radius = (RESOLUTION as i32 / 2) + 10; // extend past the visible circle
+    let thickness_fg = 20;
+    let thickness_bg = thickness_fg + 12; // thicker black base to smooth edges
+    let radius_fg_outer = radius;
+    let radius_fg_inner = radius - thickness_fg;
+    let radius_bg_outer = radius + 2; // slightly over-clear
+    let radius_bg_inner = (radius - thickness_bg - 2).max(0);
+    let start = -90.0_f32;
+    let end_full = start + 360.0;
+    let end_pct = start + (pct as f32) * 3.6;
+    let bg_ring = Rgb565::BLACK;
+    let fg_ring = rgb565_from_888(0x9F, 0xFF, 0x4A);
+
+    let pad = radius_bg_outer + 4;
+    let x0 = (CENTER - pad).clamp(0, (RESOLUTION - 1) as i32);
+    let x1 = (CENTER + pad).clamp(0, (RESOLUTION - 1) as i32);
+    let y0 = (CENTER - pad).clamp(0, (RESOLUTION - 1) as i32);
+    let y1 = (CENTER + pad).clamp(0, (RESOLUTION - 1) as i32);
+    let text_box = (CENTER - 120, CENTER - 40, CENTER + 120, CENTER + 40);
+
+    if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
+    {
+        let prev_pct_opt = critical_section::with(|cs| *BRIGHTNESS_LAST.borrow(cs).borrow());
+        let do_full = prev_pct_opt.is_none();
+        let prev_pct = prev_pct_opt.unwrap_or(pct);
+
+        // Convert percentages to angles (3.6 deg per percent)
+        let prev_ang = start + (prev_pct as f32) * 3.6;
+        let new_ang = start + (pct as f32) * 3.6;
+
+        // Draw base ring once when entering.
+        if do_full {
+            // Full black ring background
+            let _ = fill_ring_arc_no_fb(
+                co,
+                CENTER,
+                CENTER,
+                radius_bg_outer,
+                radius_bg_inner,
+                start - 5.0,
+                end_full + 5.0,
+                bg_ring,
+            );
+            // Draw the current foreground span on entry
+            if pct > 0 {
+                let fg_end = if pct == 100 { end_full + 5.0 } else { new_ang };
+                let _ = fill_ring_arc_no_fb(
+                    co,
+                    CENTER,
+                    CENTER,
+                    radius_fg_outer,
+                    radius_fg_inner,
+                    start - 5.0,
+                    fg_end,
+                    fg_ring,
+                );
+            }
+        } else if pct != prev_pct {
+            // Incremental update: only draw the delta region in ONE pass
+            if pct > prev_pct {
+                // GROWING: paint from just before prev to new angle
+                let fg_start = prev_ang - 2.0; // small overlap to seal seams
+                let fg_end = if pct == 100 { end_full + 5.0 } else { new_ang };
+                let _ = fill_ring_arc_no_fb(
+                    co,
+                    CENTER,
+                    CENTER,
+                    radius_fg_outer,
+                    radius_fg_inner,
+                    fg_start,
+                    fg_end,
+                    fg_ring,
+                );
+            } else {
+                // SHRINKING: single-pass approach
+                // Paint foreground tip FIRST, then clear only beyond it
+                // This reverses the order to prevent bounce
+                if pct > 0 {
+                    // First: ensure the tip at new_ang is solid
+                    let _ = fill_ring_arc_no_fb(
+                        co,
+                        CENTER,
+                        CENTER,
+                        radius_fg_outer,
+                        radius_fg_inner,
+                        new_ang - 3.0,
+                        new_ang,
+                        fg_ring,
+                    );
+                }
+                // Second: clear ONLY from new_ang onwards (not overlapping the tip)
+                let clear_start = if pct == 0 { start - 5.0 } else { new_ang };
+                let clear_end = prev_ang + 5.0;
+                let _ = fill_ring_arc_no_fb(
+                    co,
+                    CENTER,
+                    CENTER,
+                    radius_bg_outer,
+                    radius_bg_inner,
+                    clear_start,
+                    clear_end,
+                    bg_ring,
+                );
+            }
+        }
+
+        // Draw center text (always refreshed) and merge its bbox for flush.
+        let (tx0, ty0, tx1, ty1) = text_box;
+        co.fill_rect_fb(tx0, ty0, tx1, ty1, Rgb565::BLACK);
+        let pct_buf = alloc::format!("{}%", pct);
+        draw_text(
+            co,
+            &pct_buf,
+            fg_ring,
+            Some(Rgb565::BLACK),
+            CENTER,
+            CENTER,
+            false,
+            true,
+            Some(&FONT_10X20),
+        );
+
+        // Update last pct after drawing
+        critical_section::with(|cs| {
+            *BRIGHTNESS_LAST.borrow(cs).borrow_mut() = Some(pct);
+        });
+
+        // Flush only the text box (ring is drawn straight to panel).
+        let x0 = (tx0.clamp(0, (RESOLUTION - 1) as i32)) & !1;
+        let y0 = (ty0.clamp(0, (RESOLUTION - 1) as i32)) & !1;
+        let x1 = (tx1.clamp(0, (RESOLUTION - 1) as i32) | 1).min((RESOLUTION - 1) as i32);
+        let y1 = (ty1.clamp(0, (RESOLUTION - 1) as i32) | 1).min((RESOLUTION - 1) as i32);
+        let _ = co.flush_rect_even(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+    } else {
+        // Fallback: small clear and redraw (non-panel path).
+        let _ = Rectangle::new(
+            Point::new(x0, y0),
+            Size::new((x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32),
+        )
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(disp);
+        draw_ring_segment(
+            disp,
+            CENTER,
+            CENTER,
+            radius,
+            thickness_bg,
+            start,
+            end_full,
+            bg_ring,
+        );
+        draw_ring_segment(
+            disp,
+            CENTER,
+            CENTER,
+            radius,
+            thickness_bg,
+            start,
+            end_pct,
+            fg_ring,
+        );
+        draw_ring_segment(
+            disp,
+            CENTER,
+            CENTER,
+            radius,
+            thickness_fg,
+            start,
+            end_pct,
+            fg_ring,
+        );
+        // Text: redraw center text in fallback mode
+        let pct_buf = alloc::format!("{}%", pct);
+        draw_text(
+            disp,
+            &pct_buf,
+            fg_ring,
+            Some(Rgb565::BLACK),
+            CENTER,
+            CENTER - 8,
+            false,
+            true,
+            Some(&FONT_10X20),
+        );
+    }
 }
 
 fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
@@ -818,8 +1329,16 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
             let pa = Point::new(xa, y);
             let pb = Point::new(xb, y);
             let front_side = sinf(phase) >= 0.0;
-            let col_a = if front_side { strand_a_front } else { strand_a_back };
-            let col_b = if front_side { strand_b_back } else { strand_b_front };
+            let col_a = if front_side {
+                strand_a_front
+            } else {
+                strand_a_back
+            };
+            let col_b = if front_side {
+                strand_b_back
+            } else {
+                strand_b_front
+            };
             let col_a_sh = rgb565_from_888(
                 (col_a.r().saturating_mul(3) / 4) as u8,
                 (col_a.g().saturating_mul(3) / 4) as u8,
@@ -835,11 +1354,13 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
             if let Some(p) = prev_a {
                 // Hint depth with a darker trail
                 let _ = co.draw_line_fb(p.x, p.y, pa.x, pa.y, col_a_sh, strand_thick);
-                let _ = co.draw_line_fb(p.x, p.y, pa.x, pa.y, col_a, strand_thick.saturating_sub(2));
+                let _ =
+                    co.draw_line_fb(p.x, p.y, pa.x, pa.y, col_a, strand_thick.saturating_sub(2));
             }
             if let Some(p) = prev_b {
                 let _ = co.draw_line_fb(p.x, p.y, pb.x, pb.y, col_b_sh, strand_thick);
-                let _ = co.draw_line_fb(p.x, p.y, pb.x, pb.y, col_b, strand_thick.saturating_sub(2));
+                let _ =
+                    co.draw_line_fb(p.x, p.y, pb.x, pb.y, col_b, strand_thick.saturating_sub(2));
             }
 
             // Curved rung: bend slightly using a midpoint offset for a faux spin effect.
@@ -861,9 +1382,12 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
         let _ = co.flush_rect_even(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
     } else {
         // Fallback path using embedded-graphics primitives.
-        let _ = Rectangle::new(Point::new(x0, y0), Size::new((x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32))
-            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-            .draw(disp);
+        let _ = Rectangle::new(
+            Point::new(x0, y0),
+            Size::new((x1 - x0 + 1) as u32, (y1 - y0 + 1) as u32),
+        )
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(disp);
         let mut prev_a: Option<Point> = None;
         let mut prev_b: Option<Point> = None;
         for (i, y) in (y_start..=y_end).step_by(step).enumerate() {
@@ -875,8 +1399,16 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
             let pa = Point::new(xa, y);
             let pb = Point::new(xb, y);
             let front_side = sinf(phase) >= 0.0;
-            let col_a = if front_side { strand_a_front } else { strand_a_back };
-            let col_b = if front_side { strand_b_back } else { strand_b_front };
+            let col_a = if front_side {
+                strand_a_front
+            } else {
+                strand_a_back
+            };
+            let col_b = if front_side {
+                strand_b_back
+            } else {
+                strand_b_front
+            };
             let col_a_sh = rgb565_from_888(
                 (col_a.r().saturating_mul(3) / 4) as u8,
                 (col_a.g().saturating_mul(3) / 4) as u8,
@@ -965,10 +1497,7 @@ fn draw_clock_edit(disp: &mut impl PanelRgb565, ed: ClockEditState) {
     let idx = ed.idx.min(3) as i32;
     let visual_idx = if idx >= 2 { idx + 1 } else { idx }; // skip colon slot
     let underline_x = start_x + visual_idx * char_w;
-    let rect = Rectangle::new(
-        Point::new(underline_x, base_y),
-        Size::new(char_w as u32, 2),
-    );
+    let rect = Rectangle::new(Point::new(underline_x, base_y), Size::new(char_w as u32, 2));
     rect.into_styled(PrimitiveStyle::with_fill(Rgb565::CYAN))
         .draw(disp)
         .ok();
@@ -1195,8 +1724,8 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                     !was
                 });
                 if entering {
-                    if let Some(co) =
-                        (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
+                    if let Some(co) = (disp as &mut dyn Any)
+                        .downcast_mut::<crate::display::DisplayType<'static>>()
                     {
                         let _ = co.fill_rect_solid_no_fb(
                             0,
@@ -1230,6 +1759,32 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
             *WATCH_BG.borrow(cs).borrow_mut() = None; // free background when leaving watch page
             *LAST_WATCH_EDIT_ACTIVE.borrow(cs).borrow_mut() = false;
         });
+    }
+    let entering_brightness = critical_section::with(|cs| {
+        let mut last = LAST_SETTINGS_STATE.borrow(cs).borrow_mut();
+        let was = *last;
+        let now = if let Page::Settings(s) = state.page {
+            Some(s)
+        } else {
+            None
+        };
+        *last = now;
+        was != now && matches!(now, Some(SettingsMenuState::BrightnessAdjust))
+    });
+    if !matches!(state.page, Page::Settings(_)) {
+        brightness_edit_set(false);
+        critical_section::with(|cs| *BRIGHTNESS_LAST.borrow(cs).borrow_mut() = None);
+    } else {
+        // Within settings: clear brightness edit when not on brightness adjust page, and reset cache when entering adjust.
+        if !matches!(
+            state.page,
+            Page::Settings(SettingsMenuState::BrightnessAdjust)
+        ) {
+            brightness_edit_set(false);
+        }
+        if entering_brightness {
+            critical_section::with(|cs| *BRIGHTNESS_LAST.borrow(cs).borrow_mut() = None);
+        }
     }
     // Reset transform tracker when dialog is not active.
     critical_section::with(|cs| {
@@ -1291,18 +1846,37 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
             }
         }
 
-        Page::Settings(settings_state) => {
-            let (msg, fg, bg) = match settings_state {
-                SettingsMenuState::Volume => {
-                    ("Settings: Volume", Rgb565::YELLOW, Some(Rgb565::BLUE))
-                }
-                SettingsMenuState::Brightness => {
-                    ("Settings: Brightness", Rgb565::YELLOW, Some(Rgb565::BLUE))
-                }
-                SettingsMenuState::Reset => ("Settings: Reset", Rgb565::YELLOW, Some(Rgb565::BLUE)),
-            };
-            draw_text(disp, msg, fg, bg, CENTER, CENTER, true, true, None);
-        }
+        Page::Settings(settings_state) => match settings_state {
+            SettingsMenuState::BrightnessPrompt => {
+                draw_text(
+                    disp,
+                    "Adjust Brightness",
+                    Rgb565::WHITE,
+                    Some(Rgb565::BLUE),
+                    CENTER,
+                    CENTER,
+                    true,
+                    true,
+                    None,
+                );
+            }
+            SettingsMenuState::BrightnessAdjust => {
+                draw_brightness_ui(disp);
+            }
+            SettingsMenuState::Reset => {
+                draw_text(
+                    disp,
+                    "Settings: Reset",
+                    Rgb565::YELLOW,
+                    Some(Rgb565::BLUE),
+                    CENTER,
+                    CENTER,
+                    true,
+                    true,
+                    None,
+                );
+            }
+        },
 
         Page::Watch(watch_state) => {
             // If watch mode changed, repaint face and reset cache.
@@ -1369,7 +1943,9 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                     // If we were in edit mode last frame but not now, need to clear to bg
                     if should_clear_after_edit {
                         if ensure_watch_background_loaded() {
-                            if let Some(bg) = critical_section::with(|cs| WATCH_BG.borrow(cs).borrow().as_ref().cloned()) {
+                            if let Some(bg) = critical_section::with(|cs| {
+                                WATCH_BG.borrow(cs).borrow().as_ref().cloned()
+                            }) {
                                 draw_image_bytes(disp, &bg, RESOLUTION, RESOLUTION, false, true);
                             }
                         }

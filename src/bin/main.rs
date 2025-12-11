@@ -21,9 +21,15 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // Module imports
 use esp32s3_tests::{
     display::setup_display,
+    input::{
+        handle_button_generic, handle_encoder_generic, handle_imu_int_generic, ButtonState,
+        ImuIntState, RotaryState,
+    },
     qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
-    input::{handle_button_generic, handle_encoder_generic, handle_imu_int_generic, ButtonState, ImuIntState, RotaryState},
-    ui::{precache_asset, update_ui, AssetId, Dialog, MainMenuState, Page, UiState, WatchAppState},
+    ui::{
+        brightness_adjust, precache_asset, update_ui, AssetId, Dialog, MainMenuState, Page,
+        SettingsMenuState, UiState, WatchAppState,
+    },
     wiring::{init_board_pins, BoardPins},
 };
 
@@ -37,7 +43,10 @@ use esp_backtrace as _;
 
 // ESP-HAL imports
 use esp_hal::{
-    handler, i2c::master::{Config as I2cConfig, I2c}, main, psram, ram, time::Rate,
+    handler,
+    i2c::master::{Config as I2cConfig, I2c},
+    main, psram, ram,
+    time::Rate,
     timer::systimer::{SystemTimer, Unit},
     Config,
 };
@@ -93,6 +102,12 @@ static ROTARY: RotaryState<'static> = RotaryState {
     last_step: Mutex::new(Cell::new(0)),   // +1 or -1 from last transition
 };
 
+#[cfg(feature = "esp32s3-disp143Oled")]
+fn apply_brightness(display: &mut esp32s3_tests::display::DisplayType<'static>, pct: u8) {
+    let hw = ((pct as u16) * 255 / 100) as u8;
+    let _ = display.set_brightness(hw);
+}
+
 // Global UI state
 static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState {
     page: Page::Main(MainMenuState::Home),
@@ -146,7 +161,6 @@ fn handler() {
 
 #[main]
 fn main() -> ! {
-    
     // initial UI state
     let mut last_ui_state = UiState {
         page: Page::Main(MainMenuState::Home),
@@ -167,8 +181,11 @@ fn main() -> ! {
 
     // Destructure pins for easier access
     let BoardPins {
-        btn1, btn2, btn3,
-        enc_clk, enc_dt,
+        btn1,
+        btn2,
+        btn3,
+        enc_clk,
+        enc_dt,
         #[cfg(feature = "esp32s3-disp143Oled")]
         imu_int,
         display_pins,
@@ -278,7 +295,7 @@ fn main() -> ! {
                 if let Some((addr, _who)) = found {
                     match Qmi8658::new(i2c, addr) {
                         Ok(dev) => {
-                        // Ok(mut dev) => {
+                            // Ok(mut dev) => {
                             // println!("IMU WHO_AM_I (driver): 0x{:02X}", who);
                             // match (dev.read_reg8(0x02), dev.read_reg8(0x09)) {
                             //     (Ok(c1), Ok(c8)) => println!("IMU CTRL1=0x{:02X} CTRL8=0x{:02X}", c1, c8),
@@ -314,13 +331,11 @@ fn main() -> ! {
     #[cfg(feature = "esp32s3-disp143Oled")]
     let mut smash_count: u8 = 0;
 
-
     // Debug output of IMU data
     // #[cfg(feature = "esp32s3-disp143Oled")]
     // let mut dbg_next_ms: u64 = 0;
     // #[cfg(feature = "esp32s3-disp143Oled")]
     // let mut _dbg_next_ms: u64 = 0;
-
 
     // // -------------------- UI Init --------------------
 
@@ -468,9 +483,8 @@ fn main() -> ! {
     //     }
     // }
 
-
     // // -------------------- Main loop --------------------
-    
+
     // Main loop: handle UI, buttons, rotary, and IMU-triggered smash input
     loop {
         let now_ms = {
@@ -496,11 +510,20 @@ fn main() -> ! {
             needs_redraw = true;
         }
 
+        if matches!(
+            ui_state.page,
+            Page::Settings(SettingsMenuState::BrightnessAdjust)
+        ) {
+            if esp32s3_tests::ui::brightness_take_dirty() {
+                needs_redraw = true;
+            }
+        }
+
         // Keep redrawing while the Transform dialog is visible so the helix animates.
         if matches!(ui_state.dialog, Some(Dialog::TransformPage)) {
             needs_redraw = true;
         }
-        
+
         update_ui(&mut my_display, last_ui_state, needs_redraw);
         needs_redraw = false;
 
@@ -649,6 +672,7 @@ fn main() -> ! {
             if esp32s3_tests::ui::watch_edit_active() {
                 esp32s3_tests::ui::watch_edit_cancel();
             } else {
+                let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
                 critical_section::with(|cs| {
                     let state = UI_STATE.borrow(cs).get();
                     let new_state = state.back();
@@ -661,7 +685,10 @@ fn main() -> ! {
         // Button 2 = Select (enter/confirm)
         if b2_event {
             let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
-            if matches!(ui_state.page, Page::Watch(esp32s3_tests::ui::WatchAppState::Digital)) {
+            if matches!(
+                ui_state.page,
+                Page::Watch(esp32s3_tests::ui::WatchAppState::Digital)
+            ) {
                 if esp32s3_tests::ui::watch_edit_active() {
                     esp32s3_tests::ui::watch_edit_advance();
                 } else {
@@ -697,8 +724,17 @@ fn main() -> ! {
         if Some(detent) != last_detent {
             if let Some(prev) = last_detent {
                 let step_delta = detent - prev;
+                let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
                 if esp32s3_tests::ui::watch_edit_active() {
                     esp32s3_tests::ui::watch_edit_adjust(-step_delta);
+                } else if matches!(
+                    ui_state.page,
+                    Page::Settings(SettingsMenuState::BrightnessAdjust)
+                ) {
+                    let new_pct = brightness_adjust(-step_delta);
+                    #[cfg(feature = "esp32s3-disp143Oled")]
+                    apply_brightness(&mut my_display, new_pct);
+                    needs_redraw = true;
                 } else if step_delta > 0 {
                     // turned clockwise: go to next state
                     critical_section::with(|cs| {
