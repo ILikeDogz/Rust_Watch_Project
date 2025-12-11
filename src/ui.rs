@@ -64,6 +64,8 @@ pub enum AssetId {
     Alien10,
     Logo,
     InfoPage,
+    SettingsImage,
+    WatchIcon,
 }
 
 #[derive(Copy, Clone)]
@@ -74,7 +76,7 @@ struct AssetSlot {
 }
 
 // Number of asset slots
-const ASSET_MAX: usize = 12;
+const ASSET_MAX: usize = 14;
 
 macro_rules! res {
     () => {
@@ -111,6 +113,8 @@ static ALIEN_LOGO: &[u8] =
     include_bytes!(concat!("assets/omnitrix_logo_466x466_rgb565_be.raw.zlib"));
 static INFO_PAGE_IMAGE: &[u8] =
     include_bytes!(concat!("assets/debug_image3_466x466_rgb565_be.raw.zlib"));
+static SETTINGS_IMAGE: &[u8] = include_bytes!("assets/settings_image_400x344_rgb565_be.raw.zlib");
+static WATCH_ICON_IMAGE: &[u8] = include_bytes!("assets/watch_icon_316x316_rgb565_be.raw.zlib");
 static WATCH_BG_IMAGE: &[u8] = include_bytes!("assets/watch_background_466x466_rgb565_be.raw.zlib");
 
 // Generic asset cache
@@ -1537,6 +1541,8 @@ fn asset_meta(id: AssetId) -> (usize, u32, u32, &'static [u8]) {
         AssetId::Alien10 => (9, 308, 374, ALIEN10_IMAGE),
         AssetId::Logo => (10, 466, 466, ALIEN_LOGO),
         AssetId::InfoPage => (11, 466, 466, INFO_PAGE_IMAGE),
+        AssetId::SettingsImage => (12, 400, 344, SETTINGS_IMAGE),
+        AssetId::WatchIcon => (13, 316, 316, WATCH_ICON_IMAGE),
     }
 }
 
@@ -1593,7 +1599,8 @@ pub fn precache_all() -> usize {
         AssetId::Alien9,
         AssetId::Alien10,
         AssetId::Logo,
-        AssetId::InfoPage,
+        AssetId::SettingsImage,
+        AssetId::WatchIcon,
     ] {
         if precache_asset(id) {
             ok += 1;
@@ -1751,30 +1758,24 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                     }
                 }
                 MainMenuState::WatchApp => {
-                    draw_text(
-                        disp,
-                        "Watch App",
-                        Rgb565::WHITE,
-                        Some(Rgb565::BLACK),
-                        CENTER,
-                        CENTER,
-                        true,
-                        true,
-                        None,
-                    );
+                    let _ = disp.clear(Rgb565::BLACK);
+                    if let Some((bytes, w, h)) = get_cached_asset(AssetId::WatchIcon) {
+                        draw_image_bytes(disp, bytes, w, h, false, false);
+                    } else if precache_asset(AssetId::WatchIcon) {
+                        if let Some((bytes, w, h)) = get_cached_asset(AssetId::WatchIcon) {
+                            draw_image_bytes(disp, bytes, w, h, false, false);
+                        }
+                    }
                 }
                 MainMenuState::SettingsApp => {
-                    draw_text(
-                        disp,
-                        "Settings",
-                        Rgb565::WHITE,
-                        Some(Rgb565::BLUE),
-                        CENTER,
-                        CENTER,
-                        true,
-                        true,
-                        None,
-                    );
+                    let _ = disp.clear(Rgb565::BLACK);
+                    if let Some((bytes, w, h)) = get_cached_asset(AssetId::SettingsImage) {
+                        draw_image_bytes(disp, bytes, w, h, false, false);
+                    } else if precache_asset(AssetId::SettingsImage) {
+                        if let Some((bytes, w, h)) = get_cached_asset(AssetId::SettingsImage) {
+                            draw_image_bytes(disp, bytes, w, h, false, false);
+                        }
+                    }
                 }
             }
         }
@@ -1922,12 +1923,24 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
         }
 
         Page::EasterEgg => {
-            // Draw info page image; fallback to text if not cached
-            if let Some((bytes, w, h)) = get_cached_asset(AssetId::InfoPage) {
-                draw_image_bytes(disp, bytes, w, h, false, false);
-            } else if precache_asset(AssetId::InfoPage) {
-                if let Some((bytes, w, h)) = get_cached_asset(AssetId::InfoPage) {
-                    draw_image_bytes(disp, bytes, w, h, false, false);
+            // Draw info page image by decompressing on demand (no cache).
+            let need = (466 * 466 * 2) as usize;
+            if let Ok(buf) = decompress_to_vec_zlib_with_limit(INFO_PAGE_IMAGE, need) {
+                if buf.len() == need {
+                    draw_image_bytes(disp, &buf, 466, 466, false, false);
+                } else {
+                    disp.clear(Rgb565::WHITE).ok();
+                    draw_text(
+                        disp,
+                        "Info Screen",
+                        Rgb565::CYAN,
+                        None,
+                        CENTER,
+                        CENTER,
+                        false,
+                        true,
+                        None,
+                    );
                 }
             } else {
                 disp.clear(Rgb565::WHITE).ok();

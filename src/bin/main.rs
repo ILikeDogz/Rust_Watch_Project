@@ -672,7 +672,6 @@ fn main() -> ! {
             if esp32s3_tests::ui::watch_edit_active() {
                 esp32s3_tests::ui::watch_edit_cancel();
             } else {
-                let ui_state = critical_section::with(|cs| UI_STATE.borrow(cs).get());
                 critical_section::with(|cs| {
                     let state = UI_STATE.borrow(cs).get();
                     let new_state = state.back();
@@ -734,7 +733,6 @@ fn main() -> ! {
                     let new_pct = brightness_adjust(-step_delta);
                     #[cfg(feature = "esp32s3-disp143Oled")]
                     apply_brightness(&mut my_display, new_pct);
-                    needs_redraw = true;
                 } else if step_delta > 0 {
                     // turned clockwise: go to next state
                     critical_section::with(|cs| {
