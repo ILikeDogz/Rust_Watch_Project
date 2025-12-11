@@ -37,7 +37,7 @@ impl embedded_hal::delay::DelayNs for TimerDelay {
     #[inline]
     fn delay_us(&mut self, us: u32) {
         let ticks_per_sec = SystemTimer::ticks_per_second();
-        let start = SystemTimer::unit_value(Unit::Unit0); 
+        let start = SystemTimer::unit_value(Unit::Unit0);
         let delta_ticks = (us as u64 * ticks_per_sec).div_ceil(1_000_000);
         let end_ticks = start.saturating_add(delta_ticks);
 
@@ -49,7 +49,7 @@ impl embedded_hal::delay::DelayNs for TimerDelay {
     #[inline]
     fn delay_ms(&mut self, ms: u32) {
         let ticks_per_sec = SystemTimer::ticks_per_second();
-        let start = SystemTimer::unit_value(Unit::Unit0); 
+        let start = SystemTimer::unit_value(Unit::Unit0);
         let delta_ticks = (ms as u64 * ticks_per_sec).div_ceil(1_000);
         let end_ticks = start.saturating_add(delta_ticks);
 

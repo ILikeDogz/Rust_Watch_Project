@@ -11,8 +11,8 @@
 use esp_backtrace as _;
 
 use core::cell::{Cell, RefCell};
-use critical_section::Mutex;
 use core::sync::atomic::AtomicBool;
+use critical_section::Mutex;
 
 // ESP-HAL imports
 use esp_hal::gpio::Input;
@@ -115,12 +115,9 @@ pub fn handle_encoder_generic(encoder: &RotaryState) {
         // curr order: 00, 01, 10, 11 ; prev blocks: 00, 01, 10, 11
         const TRANS: [i8; 16] = [
             // prev=00: 00, 01, 10, 11
-            0, -1, 1, 0, 
-            // prev=01: 00, 01, 10, 11
-            1, 0, 0, -1,
-            // prev=10: 00, 01, 10, 11
-            -1, 0, 0, 1, 
-            // prev=11: 00, 01, 10, 11
+            0, -1, 1, 0, // prev=01: 00, 01, 10, 11
+            1, 0, 0, -1, // prev=10: 00, 01, 10, 11
+            -1, 0, 0, 1, // prev=11: 00, 01, 10, 11
             0, 1, -1, 0,
         ];
 

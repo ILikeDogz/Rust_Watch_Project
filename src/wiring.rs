@@ -4,13 +4,12 @@
 // features like "devkit" or "alt" in Cargo.toml.
 // OLED is the only one fully supported here, others are wip or templates.
 
-
 use esp_backtrace as _;
 
 // ESP-HAL imports
 use esp_hal::{
     gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig, Pull},
-    peripherals::{I2C0, Peripherals, SPI2},
+    peripherals::{Peripherals, I2C0, SPI2},
 };
 
 #[cfg(feature = "devkit-esp32s3-disp128")]

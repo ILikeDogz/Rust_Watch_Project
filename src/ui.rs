@@ -211,10 +211,9 @@ pub enum Dialog {
 // States for Main Menu
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MainMenuState {
-    Home,         // just show home
-    WatchApp,     // enter watch app (analog/digital)
-    SettingsApp,  // enter Settings
-    EasterEggApp, // enter Easter Egg
+    Home,        // just show home
+    WatchApp,    // enter watch app (analog/digital)
+    SettingsApp, // enter Settings
 }
 
 // States for Watch App
@@ -408,7 +407,7 @@ fn clock_now_seconds_f32() -> f32 {
 pub enum SettingsMenuState {
     BrightnessPrompt,
     BrightnessAdjust,
-    Reset,
+    EasterEgg,
 }
 
 // States for Omnitrix Menu
@@ -437,8 +436,7 @@ impl UiState {
                 let next = match state {
                     MainMenuState::Home => MainMenuState::WatchApp,
                     MainMenuState::WatchApp => MainMenuState::SettingsApp,
-                    MainMenuState::SettingsApp => MainMenuState::EasterEggApp,
-                    MainMenuState::EasterEggApp => MainMenuState::Home,
+                    MainMenuState::SettingsApp => MainMenuState::Home,
                 };
                 Page::Main(next)
             }
@@ -451,8 +449,8 @@ impl UiState {
             }
             Page::Settings(state) => {
                 let next = match state {
-                    SettingsMenuState::BrightnessPrompt => SettingsMenuState::Reset,
-                    SettingsMenuState::Reset => SettingsMenuState::BrightnessPrompt,
+                    SettingsMenuState::BrightnessPrompt => SettingsMenuState::EasterEgg,
+                    SettingsMenuState::EasterEgg => SettingsMenuState::BrightnessPrompt,
                     SettingsMenuState::BrightnessAdjust => SettingsMenuState::BrightnessAdjust,
                 };
                 Page::Settings(next)
@@ -488,10 +486,9 @@ impl UiState {
         let prev_page = match self.page {
             Page::Main(state) => {
                 let prev = match state {
-                    MainMenuState::Home => MainMenuState::EasterEggApp,
+                    MainMenuState::Home => MainMenuState::SettingsApp,
                     MainMenuState::WatchApp => MainMenuState::Home,
                     MainMenuState::SettingsApp => MainMenuState::WatchApp,
-                    MainMenuState::EasterEggApp => MainMenuState::SettingsApp,
                 };
                 Page::Main(prev)
             }
@@ -504,8 +501,8 @@ impl UiState {
             }
             Page::Settings(state) => {
                 let prev = match state {
-                    SettingsMenuState::BrightnessPrompt => SettingsMenuState::Reset,
-                    SettingsMenuState::Reset => SettingsMenuState::BrightnessPrompt,
+                    SettingsMenuState::BrightnessPrompt => SettingsMenuState::EasterEgg,
+                    SettingsMenuState::EasterEgg => SettingsMenuState::BrightnessPrompt,
                     SettingsMenuState::BrightnessAdjust => SettingsMenuState::BrightnessAdjust,
                 };
                 Page::Settings(prev)
@@ -552,6 +549,13 @@ impl UiState {
                 dialog: None,
             };
         }
+        if matches!(self.page, Page::EasterEgg) {
+            let _ = nav_pop(); // drop the settings->easter egg push
+            return Self {
+                page: Page::Settings(SettingsMenuState::EasterEgg),
+                dialog: None,
+            };
+        }
 
         // Otherwise, try navigation history first.
         if let Some(prev) = nav_pop() {
@@ -584,7 +588,6 @@ impl UiState {
                     MainMenuState::SettingsApp => {
                         Page::Settings(SettingsMenuState::BrightnessPrompt)
                     }
-                    MainMenuState::EasterEggApp => Page::EasterEgg,
                 };
                 Self { page, dialog: None }
             }
@@ -597,6 +600,10 @@ impl UiState {
                     SettingsMenuState::BrightnessPrompt => {
                         nav_push(Page::Settings(s));
                         Page::Settings(SettingsMenuState::BrightnessAdjust)
+                    }
+                    SettingsMenuState::EasterEgg => {
+                        nav_push(Page::Settings(s));
+                        Page::EasterEgg
                     }
                     _ => self.page,
                 };
@@ -873,68 +880,7 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
     draw_hand_line(disp, cx, cy, hour_end, Rgb565::BLUE, 4);
 }
 
-// Fill an annular arc into the framebuffer and return its bbox.
-fn fill_ring_arc_fb(
-    drv: &mut crate::display::DisplayType<'static>,
-    cx: i32,
-    cy: i32,
-    r_outer: i32,
-    r_inner: i32,
-    ang0_deg: f32,
-    ang1_deg: f32,
-    color: Rgb565,
-) -> Option<(i32, i32, i32, i32)> {
-    // Normalize angles so ang1 >= ang0 in [0, 360+)
-    let mut ang0 = ang0_deg;
-    let mut ang1 = ang1_deg;
-    while ang0 < 0.0 {
-        ang0 += 360.0;
-        ang1 += 360.0;
-    }
-    while ang1 < ang0 {
-        ang1 += 360.0;
-    }
-    // Cap span to at most one full revolution
-    if ang1 <= ang0 {
-        ang1 = ang0 + 360.0;
-    }
-
-    let r2_outer = r_outer * r_outer;
-    let r2_inner = r_inner * r_inner;
-
-    // Full ring bbox (robust and cheap at 466x466)
-    let minx = (cx - r_outer).max(0);
-    let maxx = (cx + r_outer).min((RESOLUTION - 1) as i32);
-    let miny = (cy - r_outer).max(0);
-    let maxy = (cy + r_outer).min((RESOLUTION - 1) as i32);
-
-    let mut bb: Option<(i32, i32, i32, i32)> = None;
-    for y in miny..=maxy {
-        for x in minx..=maxx {
-            let dx = x - cx;
-            let dy = y - cy;
-            let d2 = dx * dx + dy * dy;
-            if d2 > r2_outer || d2 < r2_inner {
-                continue;
-            }
-            let mut ang = atan2f(dy as f32, dx as f32).to_degrees();
-            if ang < ang0 {
-                ang += 360.0;
-            }
-            if ang > ang1 {
-                continue;
-            }
-            drv.fill_rect_fb(x, y, x, y, color);
-            bb = Some(match bb {
-                None => (x, y, x, y),
-                Some((bx0, by0, bx1, by1)) => (bx0.min(x), by0.min(y), bx1.max(x), by1.max(y)),
-            });
-        }
-    }
-    bb
-}
-
-// Draw an annular arc directly to the panel (no framebuffer update, even-aligned writes).
+// Draw an annular arc directly to the panel (no framebuffer update, faster, even-aligned writes).
 fn fill_ring_arc_no_fb(
     drv: &mut crate::display::DisplayType<'static>,
     cx: i32,
@@ -1820,22 +1766,9 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
                 MainMenuState::SettingsApp => {
                     draw_text(
                         disp,
-                        "Settings (WIP)",
+                        "Settings",
                         Rgb565::WHITE,
                         Some(Rgb565::BLUE),
-                        CENTER,
-                        CENTER,
-                        true,
-                        true,
-                        None,
-                    );
-                }
-                MainMenuState::EasterEggApp => {
-                    draw_text(
-                        disp,
-                        "Easter Egg",
-                        Rgb565::WHITE,
-                        Some(Rgb565::BLACK),
                         CENTER,
                         CENTER,
                         true,
@@ -1863,12 +1796,12 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
             SettingsMenuState::BrightnessAdjust => {
                 draw_brightness_ui(disp);
             }
-            SettingsMenuState::Reset => {
+            SettingsMenuState::EasterEgg => {
                 draw_text(
                     disp,
-                    "Settings: Reset",
-                    Rgb565::YELLOW,
-                    Some(Rgb565::BLUE),
+                    "Easter Egg",
+                    Rgb565::WHITE,
+                    Some(Rgb565::BLACK),
                     CENTER,
                     CENTER,
                     true,
