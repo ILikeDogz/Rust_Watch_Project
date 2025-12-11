@@ -27,8 +27,8 @@ use esp32s3_tests::{
     },
     qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
     ui::{
-        brightness_adjust, precache_asset, update_ui, AssetId, Dialog, MainMenuState, Page,
-        SettingsMenuState, UiState, WatchAppState,
+        brightness_adjust, clear_all_caches, get_clock_seconds, precache_asset, set_clock_seconds,
+        update_ui, AssetId, Dialog, MainMenuState, Page, SettingsMenuState, UiState, WatchAppState,
     },
     wiring::{init_board_pins, BoardPins},
 };
@@ -46,10 +46,19 @@ use esp_hal::{
     handler,
     i2c::master::{Config as I2cConfig, I2c},
     main, psram, ram,
+    rtc_cntl::{
+        reset_reason,
+        sleep::{Ext0WakeupSource, WakeupLevel},
+        wakeup_cause, Rtc, SocResetReason,
+    },
+    system::Cpu,
     time::Rate,
     timer::systimer::{SystemTimer, Unit},
     Config,
 };
+
+// Embedded HAL trait for delay
+use embedded_hal::delay::DelayNs;
 
 // Println macro
 use esp_println::println;
@@ -123,8 +132,7 @@ static IMU_INT: ImuIntState<'static> = ImuIntState {
 
 // Current debounce time (milliseconds)
 const DEBOUNCE_MS: u64 = 240;
-const COMBO_WINDOW_MS: u64 = 300;
-const COMBO_HOLD_MS: u64 = 1000;
+const SLEEP_HOLD_MS: u64 = 5000; // Hold button 1 for 5 seconds to sleep/wake
 
 // Interrupt handler
 #[handler]
@@ -191,16 +199,47 @@ fn main() -> ! {
         display_pins,
         #[cfg(feature = "esp32s3-disp143Oled")]
         imu_i2c,
+        #[cfg(feature = "esp32s3-disp143Oled")]
+        lpwr,
     } = pins;
+
+    // -------------------- RTC and Deep Sleep Wake Detection --------------------
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    let mut rtc = Rtc::new(lpwr);
+
+    // Track the RTC time when we booted/woke, so we can calculate elapsed time
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    let rtc_boot_time_us: u64 = rtc.current_time_us();
+
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    let woke_from_sleep = {
+        let reason = reset_reason(Cpu::ProCpu).unwrap_or(SocResetReason::ChipPowerOn);
+        let wake = wakeup_cause();
+
+        // Check if waking from deep sleep
+        // After deep sleep, the RTC timer continues but everything else resets
+        let from_sleep = matches!(reason, SocResetReason::CoreDeepSleep)
+            || matches!(
+                wake,
+                esp_hal::system::SleepSource::Gpio
+                    | esp_hal::system::SleepSource::Ext0
+                    | esp_hal::system::SleepSource::Ext1
+                    | esp_hal::system::SleepSource::Timer
+            );
+
+        if from_sleep {
+            // RTC kept running during sleep - restore clock from RTC value
+            let restored_secs = (rtc_boot_time_us / 1_000_000) as u32;
+            set_clock_seconds(restored_secs);
+            clear_all_caches();
+        }
+        from_sleep
+    };
 
     // rotary encoder detent tracking
     const DETENT_STEPS: i32 = 4; // set to 4 if your encoder is 4 steps per detent
     let mut last_detent: Option<i32> = None;
-    let mut last_btn1_press: Option<u64> = None;
-    let mut last_btn2_press: Option<u64> = None;
-    let mut combo_start: Option<u64> = None;
-    #[cfg(feature = "esp32s3-disp143Oled")]
-    let mut display_on = true;
+    let mut sleep_hold_start: Option<u64> = None; // Track button 1 hold for deep sleep
 
     // Read encoder pin states BEFORE moving them
     let clk_initial = enc_clk.is_high() as u8;
@@ -227,6 +266,36 @@ fn main() -> ! {
         #[cfg(feature = "esp32s3-disp143Oled")]
         IMU_INT.input.borrow_ref_mut(cs).replace(imu_int);
     });
+
+    // If we woke from deep sleep, wait for the wake button (Button 2) to be released
+    // This prevents the wake press from being registered as a UI action
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    if woke_from_sleep {
+        let mut delay = TimerDelay;
+        let mut wait_count = 0u32;
+        loop {
+            let btn2_released = critical_section::with(|cs| {
+                BUTTON2
+                    .input
+                    .borrow_ref(cs)
+                    .as_ref()
+                    .map(|b| b.is_high())
+                    .unwrap_or(true)
+            });
+            if btn2_released {
+                break;
+            }
+            delay.delay_ms(10);
+            wait_count += 1;
+            // Timeout after 3 seconds
+            if wait_count > 300 {
+                break;
+            }
+        }
+        delay.delay_ms(50);
+        BUTTON1_PRESSED.store(false, Ordering::Release);
+        BUTTON2_PRESSED.store(false, Ordering::Release);
+    }
 
     io.set_interrupt_handler(handler);
 
@@ -609,60 +678,72 @@ fn main() -> ! {
 
         #[cfg(feature = "esp32s3-disp143Oled")]
         {
-            if b1_event {
-                last_btn1_press = Some(now_ms);
-            }
-            if b2_event {
-                last_btn2_press = Some(now_ms);
-            }
-
-            let both_down = critical_section::with(|cs| {
-                let b1 = BUTTON1
+            // Track button 1 hold for deep sleep trigger
+            let btn1_down = critical_section::with(|cs| {
+                BUTTON1
                     .input
                     .borrow_ref(cs)
                     .as_ref()
                     .map(|p| p.is_low())
-                    .unwrap_or(false);
-                let b2 = BUTTON2
-                    .input
-                    .borrow_ref(cs)
-                    .as_ref()
-                    .map(|p| p.is_low())
-                    .unwrap_or(false);
-                b1 && b2
+                    .unwrap_or(false)
             });
 
-            let combo_ready = matches!(
-                (last_btn1_press, last_btn2_press),
-                (Some(t1), Some(t2)) if t1.abs_diff(t2) <= COMBO_WINDOW_MS
-            );
-
-            if both_down && combo_ready && combo_start.is_none() {
-                combo_start = Some(now_ms);
+            // Start tracking hold when button 1 goes down
+            if btn1_down && sleep_hold_start.is_none() {
+                sleep_hold_start = Some(now_ms);
             }
-            if !both_down {
-                combo_start = None;
+            // Reset if button released
+            if !btn1_down {
+                sleep_hold_start = None;
             }
 
-            if let Some(t0) = combo_start {
-                if now_ms.saturating_sub(t0) >= COMBO_HOLD_MS && both_down {
+            // Check for 5-second hold to enter deep sleep
+            if let Some(t0) = sleep_hold_start {
+                if now_ms.saturating_sub(t0) >= SLEEP_HOLD_MS && btn1_down {
+                    // Save clock time to RTC (RTC continues during deep sleep)
+                    let current_clock_secs = get_clock_seconds();
+                    let rtc_now_us = rtc.current_time_us();
+                    let elapsed_since_boot_us = rtc_now_us.saturating_sub(rtc_boot_time_us);
+                    let clock_total_us = (current_clock_secs as u64) * 1_000_000
+                        + (elapsed_since_boot_us % 1_000_000);
+                    rtc.set_current_time_us(clock_total_us);
+
+                    // Disable display
                     let mut delay = TimerDelay;
-                    let home = UiState {
-                        page: Page::Main(MainMenuState::Home),
-                        dialog: None,
-                    };
-                    if display_on {
-                        let _ = my_display.disable(&mut delay);
-                        display_on = false;
-                    } else {
-                        let _ = my_display.enable(&mut delay);
-                        critical_section::with(|cs| UI_STATE.borrow(cs).set(home));
-                        last_ui_state = home;
-                        needs_redraw = true;
-                        display_on = true;
+                    let _ = my_display.disable(&mut delay);
+
+                    // Wait for button 1 release
+                    loop {
+                        let btn1_released = critical_section::with(|cs| {
+                            BUTTON1
+                                .input
+                                .borrow_ref(cs)
+                                .as_ref()
+                                .map(|b| b.is_high())
+                                .unwrap_or(true)
+                        });
+                        if btn1_released {
+                            break;
+                        }
+                        delay.delay_ms(10);
                     }
-                    combo_start = None;
-                    continue;
+                    delay.delay_ms(50);
+
+                    // Release button pins for reconfiguration
+                    critical_section::with(|cs| {
+                        let _ = BUTTON1.input.borrow_ref_mut(cs).take();
+                        let _ = BUTTON2.input.borrow_ref_mut(cs).take();
+                    });
+
+                    // Configure GPIO7 (Button 2) as wake source with RTC pull-up
+                    let gpio7 = unsafe { esp_hal::peripherals::GPIO7::steal() };
+                    use esp_hal::gpio::RtcPinWithResistors;
+                    gpio7.rtcio_pullup(true);
+                    gpio7.rtcio_pulldown(false);
+                    let ext0_wake = Ext0WakeupSource::new(gpio7, WakeupLevel::Low);
+
+                    // Enter deep sleep (resets on wake)
+                    rtc.sleep_deep(&[&ext0_wake]);
                 }
             }
         }

@@ -344,6 +344,7 @@ pub fn brightness_set_pct(new_pct: i32) -> u8 {
     clamped
 }
 
+// Adjust brightness by delta, return new percentage
 pub fn brightness_adjust(delta: i32) -> u8 {
     if delta == 0 {
         return brightness_pct();
@@ -357,6 +358,7 @@ pub fn brightness_adjust(delta: i32) -> u8 {
             v = 100;
         }
         pct = v as u8;
+        // Mark dirty if changed
         if pct != *BRIGHTNESS_PCT.borrow(cs).borrow() {
             *BRIGHTNESS_PCT.borrow(cs).borrow_mut() = pct;
             *BRIGHTNESS_DIRTY.borrow(cs).borrow_mut() = true;
@@ -365,14 +367,17 @@ pub fn brightness_adjust(delta: i32) -> u8 {
     })
 }
 
+// Check if brightness edit mode is active
 pub fn brightness_edit_active() -> bool {
     critical_section::with(|cs| *BRIGHTNESS_EDIT.borrow(cs).borrow())
 }
 
+// Set brightness edit mode active/inactive
 pub fn brightness_edit_set(active: bool) {
     critical_section::with(|cs| *BRIGHTNESS_EDIT.borrow(cs).borrow_mut() = active);
 }
 
+// Take and clear the brightness dirty flag
 pub fn brightness_take_dirty() -> bool {
     critical_section::with(|cs| {
         let mut d = BRIGHTNESS_DIRTY.borrow(cs).borrow_mut();
@@ -380,6 +385,39 @@ pub fn brightness_take_dirty() -> bool {
         *d = false;
         was
     })
+}
+
+// Get the current clock time in seconds since epoch (for saving before deep sleep)
+pub fn get_clock_seconds() -> u64 {
+    clock_now_seconds()
+}
+
+// Clear all cached assets and state (call after waking from deep sleep)
+pub fn clear_all_caches() {
+    critical_section::with(|cs| {
+        // Clear asset cache
+        let mut assets = ASSETS.borrow(cs).borrow_mut();
+        for slot in assets.iter_mut() {
+            slot.data = None;
+            slot.w = 0;
+            slot.h = 0;
+        }
+
+        // Clear page tracking
+        *LAST_PAGE_KIND.borrow(cs).borrow_mut() = None;
+        *LAST_OMNI_TRANSFORM_ACTIVE.borrow(cs).borrow_mut() = false;
+        *NAV_HISTORY.borrow(cs).borrow_mut() = Vec::new();
+        *LAST_WATCH_STATE.borrow(cs).borrow_mut() = None;
+        *CLOCK_EDIT.borrow(cs).borrow_mut() = None;
+        *LAST_WATCH_EDIT_ACTIVE.borrow(cs).borrow_mut() = false;
+        *HAND_CACHE.borrow(cs).borrow_mut() = HandCache::new();
+        *WATCH_BG.borrow(cs).borrow_mut() = None;
+        *WATCH_FACE_DIRTY.borrow(cs).borrow_mut() = false;
+        *LAST_TRANSFORM_ACTIVE.borrow(cs).borrow_mut() = false;
+        *BRIGHTNESS_LAST.borrow(cs).borrow_mut() = None;
+        *LAST_SETTINGS_STATE.borrow(cs).borrow_mut() = None;
+        *BRIGHTNESS_DIRTY.borrow(cs).borrow_mut() = false;
+    });
 }
 
 fn clock_now_seconds() -> u64 {
@@ -1142,7 +1180,8 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
     let x1 = (CENTER + pad).clamp(0, (RESOLUTION - 1) as i32);
     let y0 = (CENTER - pad).clamp(0, (RESOLUTION - 1) as i32);
     let y1 = (CENTER + pad).clamp(0, (RESOLUTION - 1) as i32);
-    let text_box = (CENTER - 120, CENTER - 40, CENTER + 120, CENTER + 40);
+    // Tight text box so we don't wipe nearby graphics.
+    let text_box = (CENTER - 70, CENTER - 20, CENTER + 70, CENTER + 20);
 
     if let Some(co) = (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
     {
@@ -1241,7 +1280,7 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
             co,
             &pct_buf,
             fg_ring,
-            Some(Rgb565::BLACK),
+            None,
             CENTER,
             CENTER,
             false,
@@ -1303,7 +1342,7 @@ fn draw_brightness_ui(disp: &mut impl PanelRgb565) {
             disp,
             &pct_buf,
             fg_ring,
-            Some(Rgb565::BLACK),
+            None,
             CENTER,
             CENTER - 8,
             false,
@@ -1944,15 +1983,56 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
 
         Page::Settings(settings_state) => match settings_state {
             SettingsMenuState::BrightnessPrompt => {
+                // Clear the screen, then draw a simple white sun icon with label inside.
+                let _ = disp.clear(Rgb565::BLACK);
+                let cx = CENTER;
+                let cy = CENTER;
+                let outer_r = 90;
+                let ray_len = 42;
+                let ray_thick = 6u8;
+                let col = Rgb565::WHITE;
+                // Circle + rays using embedded-graphics primitives.
+                let _ = embedded_graphics::primitives::Circle::new(
+                    Point::new(cx - outer_r, cy - outer_r),
+                    (outer_r * 2) as u32,
+                )
+                .into_styled(PrimitiveStyle::with_stroke(col, 4))
+                .draw(disp);
+                for i in 0..8 {
+                    let ang = i as f32 * core::f32::consts::FRAC_PI_4;
+                    let dx = (cosf(ang) * (outer_r + 4) as f32) as i32;
+                    let dy = (sinf(ang) * (outer_r + 4) as f32) as i32;
+                    let tx = cx + dx;
+                    let ty = cy + dy;
+                    let rx = (cosf(ang) * (outer_r + ray_len) as f32) as i32 + cx;
+                    let ry = (sinf(ang) * (outer_r + ray_len) as f32) as i32 + cy;
+                    let _ = Line::new(Point::new(tx, ty), Point::new(rx, ry))
+                        .into_styled(PrimitiveStyle::with_stroke(col, ray_thick as u32))
+                        .draw(disp);
+                }
+
+                // two layers of text to fit the sun icon
                 draw_text(
                     disp,
-                    "Adjust Brightness",
-                    Rgb565::WHITE,
-                    Some(Rgb565::BLUE),
+                    "Adjust",
+                    col,
+                    Some(Rgb565::BLACK),
                     CENTER,
+                    CENTER - 8,
+                    false,
+                    false,
+                    None,
+                );
+                // second layer for better readability
+                draw_text(
+                    disp,
+                    "Brightness",
+                    col,
+                    Some(Rgb565::BLACK),
                     CENTER,
-                    true,
-                    true,
+                    CENTER + 8,
+                    false,
+                    false,
                     None,
                 );
             }

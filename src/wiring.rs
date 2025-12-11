@@ -16,7 +16,7 @@ use esp_hal::{
 use esp_hal::peripherals::{GPIO10, GPIO11};
 
 #[cfg(feature = "esp32s3-disp143Oled")]
-use esp_hal::peripherals::{DMA_CH0, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO47, GPIO48};
+use esp_hal::peripherals::{DMA_CH0, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO47, GPIO48, LPWR};
 
 pub struct BoardPins<'a> {
     // Leds
@@ -45,6 +45,10 @@ pub struct BoardPins<'a> {
     // shared I2C bus for touch/IMU
     #[cfg(feature = "esp32s3-disp143Oled")]
     pub imu_i2c: ImuI2cPins<'a>,
+
+    // RTC peripheral for deep sleep
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    pub lpwr: LPWR<'a>,
 }
 
 // nested, feature-only struct for LCD/SPI pins
@@ -233,6 +237,7 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) 
                 sda: imu_sda,
                 scl: imu_scl,
             },
+            lpwr: p.LPWR,
         },
         i2c0,
     )
