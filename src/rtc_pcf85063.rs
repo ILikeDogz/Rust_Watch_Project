@@ -105,7 +105,7 @@ pub fn datetime_to_unix(dt: &DateTime) -> u32 {
 
 // Convert Unix timestamp (seconds since 1970-01-01) to DateTime.
 pub fn unix_to_datetime(mut ts: u32) -> DateTime {
-    let mut days = ts / 86400;
+    let days = ts / 86400;
     ts %= 86400;
     let hour = (ts / 3600) as u8;
     ts %= 3600;
@@ -113,7 +113,7 @@ pub fn unix_to_datetime(mut ts: u32) -> DateTime {
     let second = (ts % 60) as u8;
 
     // Convert days since 1970-01-01 back to date (valid until 2099).
-    let mut z = days as i32 + 719468;
+    let z = days as i32 + 719468;
     let era = (z >= 0)
         .then(|| z / 146097)
         .unwrap_or_else(|| (z - 146096) / 146097);
