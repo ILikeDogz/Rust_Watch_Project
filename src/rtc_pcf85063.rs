@@ -74,10 +74,12 @@ where
     }
 }
 
+// BCD encode/decode helpers
 fn bcd_decode(v: u8) -> u8 {
     (v & 0x0F) + ((v >> 4) * 10)
 }
 
+// BCD encode
 fn bcd_encode(v: u8) -> u8 {
     ((v / 10) << 4) | (v % 10)
 }
@@ -95,11 +97,13 @@ fn days_since_unix(year: u16, month: u8, day: u8) -> u32 {
     (era * 146097 + doe - 719468) as u32
 }
 
+// Convert DateTime to Unix timestamp (seconds since 1970-01-01).
 pub fn datetime_to_unix(dt: &DateTime) -> u32 {
     let days = days_since_unix(dt.year, dt.month, dt.day);
     days * 86400 + (dt.hour as u32) * 3600 + (dt.minute as u32) * 60 + dt.second as u32
 }
 
+// Convert Unix timestamp (seconds since 1970-01-01) to DateTime.
 pub fn unix_to_datetime(mut ts: u32) -> DateTime {
     let mut days = ts / 86400;
     ts %= 86400;

@@ -321,7 +321,7 @@ fn main() -> ! {
         }
     };
 
-    // -------------------- IMU Init --------------------
+    // -------------------- IMU and RTC initialization --------------------
 
     #[cfg(feature = "esp32s3-disp143Oled")]
     let mut rtc_bus: Option<&'static core::cell::RefCell<I2c<'static, esp_hal::Blocking>>> = None;
@@ -338,26 +338,26 @@ fn main() -> ! {
                 let mut rtc_handle = Pcf85063::new(rtc_dev);
                 let rtc_secs = rtc_handle.read_datetime().ok().and_then(|(dt, vl)| {
                     if vl {
-                        esp_println::println!(
-                            "[RTC] VL=1 dt={:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                            dt.year,
-                            dt.month,
-                            dt.day,
-                            dt.hour,
-                            dt.minute,
-                            dt.second
-                        );
+                        // esp_println::println!(
+                        //     "[RTC] VL=1 dt={:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                        //     dt.year,
+                        //     dt.month,
+                        //     dt.day,
+                        //     dt.hour,
+                        //     dt.minute,
+                        //     dt.second
+                        // );
                         None
                     } else {
-                        esp_println::println!(
-                            "[RTC] read ok {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                            dt.year,
-                            dt.month,
-                            dt.day,
-                            dt.hour,
-                            dt.minute,
-                            dt.second
-                        );
+                        // esp_println::println!(
+                        //     "[RTC] read ok {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                        //     dt.year,
+                        //     dt.month,
+                        //     dt.day,
+                        //     dt.hour,
+                        //     dt.minute,
+                        //     dt.second
+                        // );
                         Some(datetime_to_unix(&dt))
                     }
                 });
@@ -365,7 +365,7 @@ fn main() -> ! {
                     let now = SystemTimer::unit_value(Unit::Unit0);
                     (now / SystemTimer::ticks_per_second()) as u32
                 });
-                esp_println::println!("[RTC] boot set_clock_seconds({})", boot_secs);
+                // esp_println::println!("[RTC] boot set_clock_seconds({})", boot_secs);
                 set_clock_seconds(boot_secs);
                 rtc_bus = Some(bus_static);
                 let mut bus_device = embedded_hal_bus::i2c::RefCellDevice::new(bus_static);
