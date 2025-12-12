@@ -27,11 +27,14 @@ use esp32s3_tests::{
     },
     qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
     ui::{
-        brightness_adjust, clear_all_caches, get_clock_seconds, precache_asset, set_clock_seconds,
-        update_ui, AssetId, Dialog, MainMenuState, Page, SettingsMenuState, UiState, WatchAppState,
+        brightness_adjust, clear_all_caches, clock_now_seconds_u32, get_clock_seconds,
+        precache_asset, set_clock_seconds, update_ui, AssetId, Dialog, MainMenuState, Page,
+        SettingsMenuState, UiState, WatchAppState,
     },
     wiring::{init_board_pins, BoardPins},
 };
+
+use esp32s3_tests::rtc_pcf85063::{datetime_to_unix, unix_to_datetime, Pcf85063};
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 use esp32s3_tests::display::TimerDelay;
@@ -59,7 +62,9 @@ use esp_hal::{
 
 // Embedded HAL trait for delay
 use embedded_hal::delay::DelayNs;
+use embedded_hal::i2c::I2c as _;
 
+#[cfg(feature = "esp32s3-disp143Oled")]
 // Println macro
 use esp_println::println;
 
@@ -240,6 +245,7 @@ fn main() -> ! {
     const DETENT_STEPS: i32 = 4; // set to 4 if your encoder is 4 steps per detent
     let mut last_detent: Option<i32> = None;
     let mut sleep_hold_start: Option<u64> = None; // Track button 1 hold for deep sleep
+    let mut last_watch_edit_active = false;
 
     // Read encoder pin states BEFORE moving them
     let clk_initial = enc_clk.is_high() as u8;
@@ -318,16 +324,56 @@ fn main() -> ! {
     // -------------------- IMU Init --------------------
 
     #[cfg(feature = "esp32s3-disp143Oled")]
+    let mut rtc_bus: Option<&'static core::cell::RefCell<I2c<'static, esp_hal::Blocking>>> = None;
+    #[cfg(feature = "esp32s3-disp143Oled")]
     let mut imu = {
         let cfg = I2cConfig::default().with_frequency(Rate::from_khz(400));
         match I2c::new(i2c0, cfg) {
             Ok(i2c) => {
-                let mut i2c = i2c.with_sda(imu_i2c.sda).with_scl(imu_i2c.scl);
+                let i2c = i2c.with_sda(imu_i2c.sda).with_scl(imu_i2c.scl);
+                let bus = core::cell::RefCell::new(i2c);
+                let bus_static: &'static core::cell::RefCell<I2c<'static, esp_hal::Blocking>> =
+                    Box::leak(Box::new(bus));
+                let rtc_dev = embedded_hal_bus::i2c::RefCellDevice::new(bus_static);
+                let mut rtc_handle = Pcf85063::new(rtc_dev);
+                let rtc_secs = rtc_handle.read_datetime().ok().and_then(|(dt, vl)| {
+                    if vl {
+                        esp_println::println!(
+                            "[RTC] VL=1 dt={:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                            dt.year,
+                            dt.month,
+                            dt.day,
+                            dt.hour,
+                            dt.minute,
+                            dt.second
+                        );
+                        None
+                    } else {
+                        esp_println::println!(
+                            "[RTC] read ok {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                            dt.year,
+                            dt.month,
+                            dt.day,
+                            dt.hour,
+                            dt.minute,
+                            dt.second
+                        );
+                        Some(datetime_to_unix(&dt))
+                    }
+                });
+                let boot_secs = rtc_secs.unwrap_or_else(|| {
+                    let now = SystemTimer::unit_value(Unit::Unit0);
+                    (now / SystemTimer::ticks_per_second()) as u32
+                });
+                esp_println::println!("[RTC] boot set_clock_seconds({})", boot_secs);
+                set_clock_seconds(boot_secs);
+                rtc_bus = Some(bus_static);
+                let mut bus_device = embedded_hal_bus::i2c::RefCellDevice::new(bus_static);
 
                 // Small helper to probe addresses
                 let mut probe = |addr: u8| -> Option<u8> {
                     let mut who = [0u8];
-                    match i2c.write_read(addr, &[0x00], &mut who) {
+                    match bus_device.write_read(addr, &[0x00], &mut who) {
                         Ok(()) => {
                             // println!("IMU probe ok addr 0x{:02X} WHO 0x{:02X}", addr, who[0]);
                             Some(who[0])
@@ -362,7 +408,7 @@ fn main() -> ! {
                 }
 
                 if let Some((addr, _who)) = found {
-                    match Qmi8658::new(i2c, addr) {
+                    match Qmi8658::new(bus_device, addr) {
                         Ok(dev) => {
                             // Ok(mut dev) => {
                             // println!("IMU WHO_AM_I (driver): 0x{:02X}", who);
@@ -643,36 +689,7 @@ fn main() -> ! {
             }
         }
 
-        // Debug output of IMU data
-        // #[cfg(feature = "esp32s3-disp143Oled")]
-        // if now_ms >= dbg_next_ms {
-        //     if let Some(s) = last_sample {
-        //         let mag_sq = s.accel_mag_sq();
-        //         let dot = smash_detector.gravity_dot(&s);
-        //         println!(
-        //             "DBG a=[{}, {}, {}] |a|^2={} dot={} gyro=[{}, {}, {}] int_flag={} pin_low={}",
-        //             s.accel[0],
-        //             s.accel[1],
-        //             s.accel[2],
-        //             mag_sq,
-        //             dot,
-        //             s.gyro[0],
-        //             s.gyro[1],
-        //             s.gyro[2],
-        //             IMU_INT_FLAG.load(Ordering::Relaxed),
-        //             critical_section::with(|cs| {
-        //                 IMU_INT
-        //                     .input
-        //                     .borrow_ref(cs)
-        //                     .as_ref()
-        //                     .map(|p| p.is_low())
-        //                     .unwrap_or(false)
-        //             })
-        //         );
-        //     }
-        //     dbg_next_ms = now_ms.saturating_add(200);
-        // }
-
+        // Handle button events
         let b1_event = BUTTON1_PRESSED.swap(false, Ordering::Acquire);
         let b2_event = BUTTON2_PRESSED.swap(false, Ordering::Acquire);
 
@@ -736,6 +753,7 @@ fn main() -> ! {
                     });
 
                     // Configure GPIO7 (Button 2) as wake source with RTC pull-up
+                    // uses unsafe steal since we've released the pin from earlier
                     let gpio7 = unsafe { esp_hal::peripherals::GPIO7::steal() };
                     use esp_hal::gpio::RtcPinWithResistors;
                     gpio7.rtcio_pullup(true);
@@ -832,6 +850,22 @@ fn main() -> ! {
             }
             last_detent = Some(detent);
             needs_redraw = true;
+        }
+
+        // If we just exited watch edit, sync external RTC with current software clock.
+        #[cfg(feature = "esp32s3-disp143Oled")]
+        {
+            let edit_active = esp32s3_tests::ui::watch_edit_active();
+            if last_watch_edit_active && !edit_active {
+                if let Some(bus_ref) = rtc_bus {
+                    let dev = embedded_hal_bus::i2c::RefCellDevice::new(bus_ref);
+                    let mut rtc_handle = Pcf85063::new(dev);
+                    let secs = clock_now_seconds_u32();
+                    let dt = unix_to_datetime(secs);
+                    let _ = rtc_handle.set_datetime(&dt);
+                }
+            }
+            last_watch_edit_active = edit_active;
         }
 
         // Minimal delay to keep polling responsive

@@ -3,6 +3,7 @@
 pub mod display;
 pub mod input;
 pub mod qmi8658_imu;
+pub mod rtc_pcf85063;
 pub mod ui;
 pub mod wiring;
 

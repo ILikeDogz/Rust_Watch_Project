@@ -405,7 +405,7 @@ where
         res
     }
 
-    // Flush an FB rectangle, forcing even start/end (2x2 tiles), using raw window.
+    // Flush an FB rectangle, forcing even start/end (2x2 tiles), using raw window, important for embedded-graphics integration.
     fn flush_fb_rect_even(
         &mut self,
         x0: u16,
@@ -493,7 +493,7 @@ where
         self.flush_fb_rect_even(x0, y0, x1, y1)
     }
 
-    // Draw a line directly into the framebuffer (no flush). Returns the drawn bounding box.
+    // Draw a line directly into the framebuffer (no flush). Returns the drawn bounding box. Used for certain specific graphics.
     pub fn draw_line_fb(
         &mut self,
         x0: i32,
@@ -568,7 +568,7 @@ where
         }
     }
 
-    // Fill a rectangle in the framebuffer with a solid color (no flush).
+    // Fill a rectangle in the framebuffer with a solid color (no flush), used for certain specific graphics.
     pub fn fill_rect_fb(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgb565) {
         let w = self.w as i32;
         let h = self.h as i32;
@@ -620,6 +620,7 @@ where
         self.fill_rect_solid_opt(x, y, w, h, color, false)
     }
 
+    // Core implementation of solid fill with optional FB update, main purpose is for speed, e.g., clearing.
     fn fill_rect_solid_opt(
         &mut self,
         x: u16,
@@ -724,6 +725,7 @@ where
         self.blit_rect_be_fast_opt(x0, y0, w, h, data, false)
     }
 
+    // Core implementation of blit with optional FB update, main purpose is for loading images
     fn blit_rect_be_fast_opt(
         &mut self,
         x0: u16,

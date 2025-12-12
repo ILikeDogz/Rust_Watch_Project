@@ -1,0 +1,133 @@
+use embedded_hal::i2c::I2c;
+
+#[derive(Copy, Clone, Debug)]
+pub struct DateTime {
+    pub year: u16,  // full year, e.g., 2024
+    pub month: u8,  // 1-12
+    pub day: u8,    // 1-31
+    pub hour: u8,   // 0-23
+    pub minute: u8, // 0-59
+    pub second: u8, // 0-59
+}
+
+pub struct Pcf85063<I2C> {
+    i2c: I2C,
+}
+
+impl<I2C, E> Pcf85063<I2C>
+where
+    I2C: I2c<Error = E>,
+{
+    pub fn new(i2c: I2C) -> Self {
+        Self { i2c }
+    }
+
+    pub fn into_inner(self) -> I2C {
+        self.i2c
+    }
+
+    // Read datetime. Returns (dt, vl_flag) where vl_flag == true means time is unreliable (power loss).
+    pub fn read_datetime(&mut self) -> Result<(DateTime, bool), E> {
+        let mut buf = [0u8; 7];
+        // Time registers start at 0x04: sec, min, hour, day, weekday, month, year
+        self.i2c.write_read(0x51, &[0x04], &mut buf)?;
+        let vl = (buf[0] & 0x80) != 0;
+        let sec = bcd_decode(buf[0] & 0x7F);
+        let min = bcd_decode(buf[1] & 0x7F);
+        let hour = bcd_decode(buf[2] & 0x3F);
+        let day = bcd_decode(buf[3] & 0x3F);
+        let month_raw = buf[5];
+        let month = bcd_decode(month_raw & 0x1F);
+        let year = if (month_raw & 0x80) != 0 {
+            1900u16 + bcd_decode(buf[6]) as u16
+        } else {
+            2000u16 + bcd_decode(buf[6]) as u16
+        };
+        Ok((
+            DateTime {
+                year,
+                month,
+                day,
+                hour,
+                minute: min,
+                second: sec,
+            },
+            vl,
+        ))
+    }
+
+    // Set datetime. Ignores weekday field.
+    pub fn set_datetime(&mut self, dt: &DateTime) -> Result<(), E> {
+        let yr = (dt.year % 100) as u8;
+        let data = [
+            0x04,
+            bcd_encode(dt.second),
+            bcd_encode(dt.minute),
+            bcd_encode(dt.hour),
+            bcd_encode(dt.day),
+            0, // weekday not used
+            bcd_encode(dt.month),
+            bcd_encode(yr),
+        ];
+        self.i2c.write(0x51, &data)?;
+        Ok(())
+    }
+}
+
+fn bcd_decode(v: u8) -> u8 {
+    (v & 0x0F) + ((v >> 4) * 10)
+}
+
+fn bcd_encode(v: u8) -> u8 {
+    ((v / 10) << 4) | (v % 10)
+}
+
+// Days since 1970-01-01 for UTC conversion (simple, handles leap years through 2099).
+fn days_since_unix(year: u16, month: u8, day: u8) -> u32 {
+    let y = year as i32;
+    let m = month as i32;
+    let d = day as i32;
+    let (y1, m1) = if m <= 2 { (y - 1, m + 12) } else { (y, m) };
+    let era = y1 / 400;
+    let yoe = y1 - era * 400;
+    let doy = (153 * (m1 + 1) / 5 + d - 123) as i32;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    (era * 146097 + doe - 719468) as u32
+}
+
+pub fn datetime_to_unix(dt: &DateTime) -> u32 {
+    let days = days_since_unix(dt.year, dt.month, dt.day);
+    days * 86400 + (dt.hour as u32) * 3600 + (dt.minute as u32) * 60 + dt.second as u32
+}
+
+pub fn unix_to_datetime(mut ts: u32) -> DateTime {
+    let mut days = ts / 86400;
+    ts %= 86400;
+    let hour = (ts / 3600) as u8;
+    ts %= 3600;
+    let minute = (ts / 60) as u8;
+    let second = (ts % 60) as u8;
+
+    // Convert days since 1970-01-01 back to date (valid until 2099).
+    let mut z = days as i32 + 719468;
+    let era = (z >= 0)
+        .then(|| z / 146097)
+        .unwrap_or_else(|| (z - 146096) / 146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if month <= 2 { 1 } else { 0 };
+
+    DateTime {
+        year: year as u16,
+        month: month as u8,
+        day: day as u8,
+        hour,
+        minute,
+        second,
+    }
+}

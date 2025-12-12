@@ -432,15 +432,41 @@ fn clock_now_seconds() -> u64 {
     })
 }
 
+pub fn clock_now_seconds_u32() -> u32 {
+    clock_now_seconds() as u32
+}
+
 fn clock_now_seconds_f32() -> f32 {
     // Get current software clock time in seconds since epoch as f32
     critical_section::with(|cs| {
-        let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow() as f32;
+        let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow();
         let base_ticks = *CLOCK_BASE_TICKS.borrow(cs).borrow();
         let now = SystemTimer::unit_value(Unit::Unit0);
-        let tps = SystemTimer::ticks_per_second() as f32;
-        let elapsed = (now.saturating_sub(base_ticks)) as f32 / tps;
-        base_secs + elapsed
+        let tps = SystemTimer::ticks_per_second() as u64;
+        let elapsed_ticks = now.saturating_sub(base_ticks);
+        let whole = elapsed_ticks / tps;
+        let frac = (elapsed_ticks % tps) as f32 / tps as f32;
+        (base_secs + whole) as f32 + frac
+    })
+}
+
+/// Return hours, minutes, seconds as f32 with good precision by working modulo 12h.
+fn clock_now_hms_f32() -> (f32, f32, f32) {
+    critical_section::with(|cs| {
+        let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow();
+        let base_ticks = *CLOCK_BASE_TICKS.borrow(cs).borrow();
+        let now = SystemTimer::unit_value(Unit::Unit0);
+        let tps = SystemTimer::ticks_per_second() as u64;
+        let elapsed_ticks = now.saturating_sub(base_ticks);
+        let whole = elapsed_ticks / tps;
+        let frac = (elapsed_ticks % tps) as f32 / tps as f32;
+        let total = base_secs + whole;
+        let s = (total % 60) as f32 + frac;
+        let m_total = total / 60;
+        let m = (m_total % 60) as f32 + s / 60.0;
+        let h_total = m_total / 60;
+        let h = (h_total % 12) as f32 + m / 60.0;
+        (h, m, s)
     })
 }
 
@@ -766,12 +792,7 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
     let cy = center.1;
 
     // Current time in fractional hours, minutes, seconds
-    let total_secs_f = clock_now_seconds_f32(); // necessary for smooth second hand
-    let s = total_secs_f % 60.0;
-    let m_total = total_secs_f / 60.0; // minutes including fractional seconds
-    let m = m_total % 60.0;
-    let h_total = m_total / 60.0; // hours including fractional minutes/seconds
-    let h = h_total % 12.0;
+    let (h, m, s) = clock_now_hms_f32();
 
     // Angles: 0 deg at 12 o'clock, increasing clockwise
     let sec_ang = (s / 60.0) * 360.0 - 90.0;
@@ -1396,9 +1417,7 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
         let mut prev_a: Option<Point> = None;
         let mut prev_b: Option<Point> = None;
 
-        // Rung spacing - fixed positions along Y axis that don't change with time
-        let rung_spacing = step * 3;
-
+        // Generate strand points
         for (i, y) in (y_start..=y_end).step_by(step).enumerate() {
             let phase = t + (i as f32) * 0.32;
             let amp = amp_max * 0.75;
@@ -1413,7 +1432,7 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
 
             // Depth value: cosf gives z-depth (-1 = back, +1 = front)
             let depth_a = cosf(phase);
-            let depth_b = -depth_a;
+            // let depth_b = -depth_a;
 
             if let (Some(pa_prev), Some(pb_prev)) = (prev_a, prev_b) {
                 let prev_phase = t + ((i - 1) as f32) * 0.32;
