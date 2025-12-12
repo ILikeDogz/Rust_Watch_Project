@@ -446,7 +446,10 @@ fn clock_now_seconds_f32() -> f32 {
         let elapsed_ticks = now.saturating_sub(base_ticks);
         let whole = elapsed_ticks / tps;
         let frac = (elapsed_ticks % tps) as f32 / tps as f32;
-        (base_secs + whole) as f32 + frac
+        // Work modulo 24h to preserve sub-second precision even with large epoch seconds.
+        let total = base_secs + whole;
+        let within_day = (total % 86_400) as f32;
+        within_day + frac
     })
 }
 
