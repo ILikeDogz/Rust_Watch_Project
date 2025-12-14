@@ -1,0 +1,9 @@
+Change Physical Footprint: Designator=2Pin Old Footprint=CONN_PRPC002SAAN-RC_SUL New Footprint=CONN_PRPC002SAAN-RC_SUL
+Change Physical Footprint: Designator=BUT1 Old Footprint=4312560387X6 New Footprint=4312560387X6
+Change Physical Footprint: Designator=BUT2 Old Footprint=4312560387X6 New Footprint=4312560387X6
+Change Physical Footprint: Designator=C1 Old Footprint=CAPC1005X55N New Footprint=CAPC1005X55N
+Change Physical Footprint: Designator=C2 Old Footprint=CAPC1005X55N New Footprint=CAPC1005X55N
+Change Physical Footprint: Designator=Input Old Footprint=WURTH_61300411121 New Footprint=WURTH_61300411121
+Change Physical Footprint: Designator=R1 Old Footprint=RES_RC0805_2X1P25_YAG New Footprint=RES_RC0805_2X1P25_YAG
+Change Physical Footprint: Designator=R2 Old Footprint=RES_RC0805_2X1P25_YAG New Footprint=RES_RC0805_2X1P25_YAG
+Change Physical Footprint: Designator=Rot Encoder Old Footprint=PES1240SN0024 New Footprint=PES1240SN0024

@@ -1,0 +1,30 @@
+Removed Pin From Net: NetName=GND Pin=BUT1-1
+Removed Pin From Net: NetName=GND Pin=BUT1-3
+Removed Pin From Net: NetName=GND Pin=BUT2-1
+Removed Pin From Net: NetName=GND Pin=BUT2-3
+Change Component Footprint: Designator=BUT1 Old Footprint=TE_1977067-1 New Footprint=4312560387X6
+Change Component Footprint: Designator=BUT2 Old Footprint=TE_1977067-1 New Footprint=4312560387X6
+Change Component Comment : Designator=BUT1 Old Comment=1977067-1 New Comment=431256038736
+Change Component Comment : Designator=BUT2 Old Comment=1977067-1 New Comment=431256038736
+Change component parameters: Designator = "BUT1" ("BUT1"); Footprint = "TE_1977067-1"; UniqueID = "\XBAWBOLB" ("\XBAWBOLB")
+Change component parameters (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/431256038716/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=eda"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MF"; Value = "Würth Elektronik"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MP"; Value = "431256038716"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/431256038716/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=snap"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Change component parameters: Designator = "BUT2" ("BUT2"); Footprint = "TE_1977067-1"; UniqueID = "\CXXGICUN" ("\CXXGICUN")
+Change component parameters (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/431256038716/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=eda"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MF"; Value = "Würth Elektronik"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MP"; Value = "431256038716"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/431256038716/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=snap"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Pin To Net: NetName=GND Pin=BUT1-2
+Added Pin To Net: NetName=GND Pin=BUT2-2
+Added Pin To Net: NetName=NetBUT1_3 Pin=BUT1-3
+Added Pin To Net: NetName=NetBUT1_3 Pin=Input-01
+Added Net: Name=NetBUT1_3
+Added Pin To Net: NetName=NetBUT2_3 Pin=BUT2-3
+Added Pin To Net: NetName=NetBUT2_3 Pin=Input-04
+Added Net: Name=NetBUT2_3

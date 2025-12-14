@@ -1,0 +1,19 @@
+Removed Pin From Net: NetName=GND Pin=Bottom But-1
+Removed Pin From Net: NetName=NetC2_2 Pin=Input-1
+Removed Pin From Net: NetName=NetC1_2 Pin=Input-2
+Removed Pin From Net: NetName=NetBUT2_3 Pin=Input-3
+Removed Pin From Net: NetName=NetBUT1_3 Pin=Input-4
+Removed Member From Class: ClassName=Watch_Input Member=Bottom But
+Change Component Footprint: Designator=Input Old Footprint=61300511121 New Footprint=WURTH_61300411121
+Change Component Comment : Designator=Input Old Comment=6130XX11121_61300511121 New Comment=61300411121
+Change component parameters: Designator = "Input" ("Input"); Footprint = "61300511121"; UniqueID = "\YPJNPNRF" ("\YPJNPNRF")
+Change component parameters (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/61300411121/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=eda"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MF"; Value = "Würth Elektronik"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MP"; Value = "61300411121"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/61300411121/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=snap"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Pin To Net: NetName=NetC2_2 Pin=Input-01
+Added Pin To Net: NetName=NetC1_2 Pin=Input-02
+Added Pin To Net: NetName=NetBUT2_3 Pin=Input-03
+Added Pin To Net: NetName=NetBUT1_3 Pin=Input-04

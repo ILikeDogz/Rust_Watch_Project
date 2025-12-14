@@ -1,0 +1,8 @@
+Change Component Footprint: Designator=2Pin Old Footprint=AMPHENOL_10129378-902002BLF New Footprint=CONN_PRPC002SAAN-RC_SUL
+Change Component Comment : Designator=2Pin Old Comment=10129378-902002BLF New Comment=PRPC002SAAN-RC
+Change component parameters: Designator = "2Pin" ("2pin"); Footprint = "AMPHENOL_10129378-902002BLF"; UniqueID = "\UMERXIIN" ("\UMERXIIN")
+Change component parameters (AddParameter): Name = "Copyright"; Value = "Copyright (C) 2025 Ultra Librarian. All rights reserved."; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Manufacturer_Name"; Value = "Sullins"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Manufacturer_Part_Number"; Value = "PRPC002SAAN-RC"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "RefDes"; Value = "RefDes"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Type"; Value = "Type"; VariantName = "[No Variations]"

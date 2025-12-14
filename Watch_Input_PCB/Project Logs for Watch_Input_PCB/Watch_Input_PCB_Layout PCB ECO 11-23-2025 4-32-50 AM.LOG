@@ -1,0 +1,18 @@
+Change Component Footprint: Designator=C1 Old Footprint=CAPC1005X55N New Footprint=CAPC2012X95N
+Change Component Footprint: Designator=C2 Old Footprint=CAPC1005X55N New Footprint=CAPC2012X95N
+Change Component Comment : Designator=C1 Old Comment=CL05A104KA5NNNC New Comment=CL21B104KBCNNNC
+Change Component Comment : Designator=C2 Old Comment=CL05A104KA5NNNC New Comment=CL21B104KBCNNNC
+Change component parameters: Designator = "C1" ("C1"); Footprint = "CAPC1005X55N"; UniqueID = "\CXTDUNMA" ("\CXTDUNMA")
+Change component parameters (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/CL21B104KBCNNNC/Samsung/view-part/?ref=eda"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MF"; Value = "Samsung Electro-Mechanics"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MP"; Value = "CL21B104KBCNNNC"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Package"; Value = "SMD-2 Samsung"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/CL21B104KBCNNNC/Samsung/view-part/?ref=snap"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Change component parameters: Designator = "C2" ("C2"); Footprint = "CAPC1005X55N"; UniqueID = "\ATCNGIAL" ("\ATCNGIAL")
+Change component parameters (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/CL21B104KBCNNNC/Samsung/view-part/?ref=eda"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MF"; Value = "Samsung Electro-Mechanics"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MP"; Value = "CL21B104KBCNNNC"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Package"; Value = "SMD-2 Samsung"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/CL21B104KBCNNNC/Samsung/view-part/?ref=snap"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
