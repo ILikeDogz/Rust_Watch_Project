@@ -1,0 +1,6 @@
+Removed Pin From Net: NetName=GND Pin=BUT1-1
+Removed Pin From Net: NetName=GND Pin=BUT1-3
+Removed Pin From Net: NetName=GND Pin=BUT2-1
+Removed Pin From Net: NetName=GND Pin=BUT2-3
+Removed Member From Class: ClassName=Watch_Input Member=BUT1
+Removed Member From Class: ClassName=Watch_Input Member=BUT2

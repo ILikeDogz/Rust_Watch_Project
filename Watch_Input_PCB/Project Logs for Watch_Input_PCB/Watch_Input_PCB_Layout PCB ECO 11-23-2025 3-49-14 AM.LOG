@@ -1,0 +1,25 @@
+Removed Pin From Net: NetName=VCC Pin=2Pin-2
+Removed Pin From Net: NetName=NetC2_2 Pin=J1-1
+Removed Pin From Net: NetName=VCC Pin=J1-2
+Removed Pin From Net: NetName=VCC Pin=J2-1
+Removed Pin From Net: NetName=NetC1_2 Pin=J2-2
+Removed Member From Class: ClassName=Watch_Input Member=J1
+Removed Member From Class: ClassName=Watch_Input Member=J2
+Added Component: Designator=R1(RES_RC0805_2X1P25_YAG)
+Add component (AddParameter): Name = "Copyright"; Value = "Copyright (C) 2025 Ultra Librarian. All rights reserved."; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Manufacturer_Name"; Value = "Yageo"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Manufacturer_Part_Number"; Value = "RC0805FR-0710KP"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "RefDes"; Value = ""; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Type"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=R2(RES_RC0805_2X1P25_YAG)
+Add component (AddParameter): Name = "Copyright"; Value = "Copyright (C) 2025 Ultra Librarian. All rights reserved."; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Manufacturer_Name"; Value = "Yageo"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Manufacturer_Part_Number"; Value = "RC0805FR-0710KP"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "RefDes"; Value = ""; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Type"; Value = ""; VariantName = "[No Variations]"
+Added Pin To Net: NetName=NetC2_2 Pin=R1-1
+Added Pin To Net: NetName=VCC Pin=R1-2
+Added Pin To Net: NetName=VCC Pin=R2-1
+Added Pin To Net: NetName=NetC1_2 Pin=R2-2
+Added Member To Class: ClassName=Watch_Input Member=Component R1 RC0805FR-0710KP
+Added Member To Class: ClassName=Watch_Input Member=Component R2 RC0805FR-0710KP

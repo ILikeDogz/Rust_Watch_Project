@@ -1,0 +1,43 @@
+Removed Pin From Net: NetName=GND Pin=BUT1-2
+Removed Pin From Net: NetName=GND Pin=BUT2-2
+Change Component Footprint: Designator=BUT1 Old Footprint=4312560387X6 New Footprint=TE_1977067-1
+Change Component Footprint: Designator=BUT2 Old Footprint=4312560387X6 New Footprint=TE_1977067-1
+Change Component Comment : Designator=BUT1 Old Comment=431256038736 New Comment=1977067-1
+Change Component Comment : Designator=BUT2 Old Comment=431256038736 New Comment=1977067-1
+Change component parameters: Designator = "BUT1" ("BUT1"); Footprint = "4312560387X6"; UniqueID = "\LYXAMUDZ" ("\LYXAMUDZ")
+Change component parameters (AddParameter): Name = "Availability"; Value = "Warning"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/1977067-1/TE%20Connectivity%20ALCOSWITCH%20Switches/view-part/2191392/?ref=eda"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MF"; Value = "TE Connectivity"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MP"; Value = "1977067-1"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Price"; Value = "None"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/1977067-1/TE%20Connectivity%20ALCOSWITCH%20Switches/view-part/2191392/?ref=snap"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Change component parameters: Designator = "BUT2" ("BUT2"); Footprint = "4312560387X6"; UniqueID = "\VKXXTUCW" ("\VKXXTUCW")
+Change component parameters (AddParameter): Name = "Availability"; Value = "Warning"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/1977067-1/TE%20Connectivity%20ALCOSWITCH%20Switches/view-part/2191392/?ref=eda"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MF"; Value = "TE Connectivity"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "MP"; Value = "1977067-1"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Price"; Value = "None"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/1977067-1/TE%20Connectivity%20ALCOSWITCH%20Switches/view-part/2191392/?ref=snap"; VariantName = "[No Variations]"
+Change component parameters (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Pin To Net: NetName=GND Pin=BUT1-1
+Added Pin To Net: NetName=GND Pin=BUT1-3
+Added Pin To Net: NetName=GND Pin=BUT2-1
+Added Pin To Net: NetName=GND Pin=BUT2-3
+Added Pin To Net: NetName=NetBUT1_2 Pin=BUT1-2
+Added Pin To Net: NetName=NetBUT1_2 Pin=Input-01
+Added Net: Name=NetBUT1_2
+Added Pin To Net: NetName=NetBUT1_P1 Pin=BUT1-P1
+Added Pin To Net: NetName=NetBUT1_P1 Pin=BUT1-P2
+Added Net: Name=NetBUT1_P1
+Added Pin To Net: NetName=NetBUT2_2 Pin=BUT2-2
+Added Pin To Net: NetName=NetBUT2_2 Pin=Input-04
+Added Net: Name=NetBUT2_2
+Added Pin To Net: NetName=NetBUT2_P1 Pin=BUT2-P1
+Added Pin To Net: NetName=NetBUT2_P1 Pin=BUT2-P2
+Added Net: Name=NetBUT2_P1
+Added Member To Class: ClassName=Watch_Input Member=Component BUT2 1977067-1
+Added Member To Class: ClassName=Watch_Input Member=Component R1 RC0805FR-0710KP
+Added Member To Class: ClassName=Watch_Input Member=Component R2 RC0805FR-0710KP

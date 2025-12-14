@@ -1,0 +1,103 @@
+Added Component: Designator=2Pin(AMPHENOL_10129378-902002BLF)
+Add component (AddParameter): Name = "Availability"; Value = "Unavailable"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = ""; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "10129378-902002BLF"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Price"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=BUT1(4312560387X6)
+Add component (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/431256038716/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=eda"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "Würth Elektronik"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "431256038716"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/431256038716/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=snap"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=BUT2(4312560387X6)
+Add component (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/431256038716/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=eda"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "Würth Elektronik"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "431256038716"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/431256038716/W%25C3%25BCrth+Elektronik+Midcom/view-part/?ref=snap"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=C1(CAPC1005X55N)
+Add component (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/CL05A104KA5NNNC/Samsung/view-part/?ref=eda"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "Samsung"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "CL05A104KA5NNNC"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "SMD-2 Samsung"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/CL05A104KA5NNNC/Samsung/view-part/?ref=snap"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=C2(CAPC1005X55N)
+Add component (AddParameter): Name = "Check_prices"; Value = "https://www.snapeda.com/parts/CL05A104KA5NNNC/Samsung/view-part/?ref=eda"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "Samsung"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "CL05A104KA5NNNC"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "SMD-2 Samsung"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "SnapEDA_Link"; Value = "https://www.snapeda.com/parts/CL05A104KA5NNNC/Samsung/view-part/?ref=snap"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=Input(61300511121)
+Add component (AddParameter): Name = "Availability"; Value = "Unavailable"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "{'manufacturer': u'W\xfcrth Elektronik'}"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "61300511121"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Price"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=R1(R0402)
+Add component (AddParameter): Name = "Availability"; Value = "Unavailable"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "{'manufacturer': u'YAGEO'}"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "RC0402JR-0710KL"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Price"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=R2(R0402)
+Add component (AddParameter): Name = "Availability"; Value = "Unavailable"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "{'manufacturer': u'YAGEO'}"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "RC0402JR-0710KL"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Price"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=Rot Encoder(PES1240SN0024)
+Add component (AddParameter): Name = "Datasheet Link"; Value = "https://www.bourns.com/docs/Product-Datasheets/PES12.pdf"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Geometry.Height"; Value = "8.5mm"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Manufacturer_Name"; Value = "Bourns"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Manufacturer_Part_Number"; Value = "PES12-40S-N0024"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Mouser Part Number"; Value = "652-PES12-40S-N0024"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Mouser Price/Stock"; Value = "https://www.mouser.co.uk/ProductDetail/Bourns/PES12-40S-N0024?qs=9fn1gpisni7PBzk9dl6VPg%3D%3D"; VariantName = "[No Variations]"
+Added Component: Designator=U?(B3U-1000P-B)
+Add component (AddParameter): Name = "Copyright"; Value = "Copyright (C) 2025 Ultra Librarian. All rights reserved."; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Manufacturer_Name"; Value = "Omron"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Manufacturer_Part_Number"; Value = "B3U-1000P-B"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "RefDes"; Value = "RefDes"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Type"; Value = "Type"; VariantName = "[No Variations]"
+Added Pin To Net: NetName=GND Pin=2Pin-1
+Added Pin To Net: NetName=GND Pin=BUT1-2
+Added Pin To Net: NetName=GND Pin=BUT2-2
+Added Pin To Net: NetName=GND Pin=C1-1
+Added Pin To Net: NetName=GND Pin=C2-1
+Added Pin To Net: NetName=GND Pin=Rot Encoder-C1
+Added Pin To Net: NetName=GND Pin=U?-1
+Added Net: Name=GND
+Added Pin To Net: NetName=NetBUT1_3 Pin=BUT1-3
+Added Pin To Net: NetName=NetBUT1_3 Pin=Input-4
+Added Net: Name=NetBUT1_3
+Added Pin To Net: NetName=NetBUT2_3 Pin=BUT2-3
+Added Pin To Net: NetName=NetBUT2_3 Pin=Input-3
+Added Net: Name=NetBUT2_3
+Added Pin To Net: NetName=NetC1_2 Pin=C1-2
+Added Pin To Net: NetName=NetC1_2 Pin=Input-2
+Added Pin To Net: NetName=NetC1_2 Pin=R2-2
+Added Pin To Net: NetName=NetC1_2 Pin=Rot Encoder-B1
+Added Net: Name=NetC1_2
+Added Pin To Net: NetName=NetC2_2 Pin=C2-2
+Added Pin To Net: NetName=NetC2_2 Pin=Input-1
+Added Pin To Net: NetName=NetC2_2 Pin=R1-1
+Added Pin To Net: NetName=NetC2_2 Pin=Rot Encoder-A1
+Added Net: Name=NetC2_2
+Added Pin To Net: NetName=NetInput_5 Pin=Input-5
+Added Pin To Net: NetName=NetInput_5 Pin=U?-2
+Added Net: Name=NetInput_5
+Added Pin To Net: NetName=VCC Pin=2Pin-2
+Added Pin To Net: NetName=VCC Pin=R1-2
+Added Pin To Net: NetName=VCC Pin=R2-1
+Added Net: Name=VCC
+Added Class: Name=Watch_Input
+Added Rule: Name=Schematic Supply Nets
+Added Rule: Name=Schematic Supply Nets_1

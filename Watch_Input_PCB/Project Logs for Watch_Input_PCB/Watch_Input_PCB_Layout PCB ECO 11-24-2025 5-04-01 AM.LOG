@@ -1,0 +1,14 @@
+Add component: Footprint Not Found TE_1977067-1
+Add component: Footprint Not Found TE_1977067-1
+Add Pin To Net: Unknown Pin: Pin BUTT1-1
+Add Pin To Net: Unknown Pin: Pin BUTT1-3
+Add Pin To Net: Unknown Pin: Pin BUTT2-1
+Add Pin To Net: Unknown Pin: Pin BUTT2-3
+Added Pin To Net: NetName=NetBUTT1_2 Pin=Input-01
+Added Net: Name=NetBUTT1_2
+Added Net: Name=NetBUTT1_P1
+Added Pin To Net: NetName=NetBUTT2_2 Pin=Input-04
+Added Net: Name=NetBUTT2_2
+Added Net: Name=NetBUTT2_P1
+Add Class Member: Failed to add class member : Component BUTT1 1977067-1
+Add Class Member: Failed to add class member : Component BUTT2 1977067-1

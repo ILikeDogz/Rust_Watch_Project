@@ -1,0 +1,12 @@
+Output: NC Drill Files
+Type  : NC Drill
+From  : Project [Watch_Input_PCB.PrjPcb]
+   Generated File[Watch_Input_PCB_Layout.TXT]
+   Generated File[Watch_Input_PCB_Layout.LDP]
+   Generated File[Watch_Input_PCB_Layout.DRR]
+
+
+Files Generated   : 3
+Documents Printed : 0
+
+Finished Output Generation At 5:11:14 AM On 11/25/2025

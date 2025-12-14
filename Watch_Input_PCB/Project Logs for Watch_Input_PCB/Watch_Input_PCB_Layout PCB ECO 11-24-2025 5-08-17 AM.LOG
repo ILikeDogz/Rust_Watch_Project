@@ -1,0 +1,4 @@
+Change Component DesignItemId : Designator=BUT1 Old DesignItemId=1977067-1 New DesignItemId=
+Change Component Library : Designator=BUT1 Old Library=1977067-1.SchLib New Library=1977067-1.IntLib
+Added Member To Class: ClassName=Watch_Input Member=Component BUT1 1977067-1
+Added Member To Class: ClassName=Watch_Input Member=Component BUT2 1977067-1

@@ -1,0 +1,26 @@
+Removed Pin From Net: NetName=NetC2_2 Pin=R1-1
+Removed Pin From Net: NetName=VCC Pin=R1-2
+Removed Pin From Net: NetName=VCC Pin=R2-1
+Removed Pin From Net: NetName=NetC1_2 Pin=R2-2
+Removed Member From Class: ClassName=Watch_Input Member=R1
+Removed Member From Class: ClassName=Watch_Input Member=R2
+Added Component: Designator=J1(R0402)
+Add component (AddParameter): Name = "Availability"; Value = "Unavailable"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "{'manufacturer': u'YAGEO'}"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "RC0402JR-0710KL"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Price"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Component: Designator=J2(R0402)
+Add component (AddParameter): Name = "Availability"; Value = "Unavailable"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MF"; Value = "{'manufacturer': u'YAGEO'}"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "MP"; Value = "RC0402JR-0710KL"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Package"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Price"; Value = "None"; VariantName = "[No Variations]"
+Add component (AddParameter): Name = "Value"; Value = ""; VariantName = "[No Variations]"
+Added Pin To Net: NetName=NetC2_2 Pin=J1-1
+Added Pin To Net: NetName=VCC Pin=J1-2
+Added Pin To Net: NetName=VCC Pin=J2-1
+Added Pin To Net: NetName=NetC1_2 Pin=J2-2
+Added Member To Class: ClassName=Watch_Input Member=Component J1 SMD-RES-10K-5%-1/(0402)
+Added Member To Class: ClassName=Watch_Input Member=Component J2 SMD-RES-10K-5%-1/(0402)
