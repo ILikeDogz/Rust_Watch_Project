@@ -2,6 +2,9 @@
 runner = "espflash flash --monitor --chip esp32s3"
 
 [env]
+ESP_HAL_CONFIG_PSRAM_MODE = "octal"
+# ESP_HAL_CONFIG_PLACE_SPI_MASTER_DRIVER_IN_RAM = "true"
+
 
 [build]
 rustflags = [
@@ -11,4 +14,4 @@ rustflags = [
 target = "xtensa-esp32s3-none-elf"
 
 [unstable]
-build-std = ["core"]
+build-std = ["core", "alloc"]

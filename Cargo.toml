@@ -9,11 +9,48 @@ name = "esp32s3_tests"
 path = "./src/bin/main.rs"
 
 [dependencies]
-esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"] }
-esp-hal                = { version = "=1.0.0-rc.0", features = ["esp32s3"] }
+# HAL + runtime
+esp-hal = { version = "1.0.0", features = ["esp32s3", "unstable", "psram"] }
+esp-println = "0.16.1"
+esp-backtrace = { version = "0.18.1", features = ["panic-handler", "println"] }
+esp-bootloader-esp-idf = "0.4.0"
+critical-section = "1.1"
+cfg-if = "1.0.4"
+esp-alloc = "0.9.0"
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 
-critical-section = "1.2.0"
+# Display stack (all on embedded-hal 1.0)
+mipidsi = { version = "0.9.0", optional = true }
+display-interface = { version = "0.5", optional = true }
+display-interface-spi = { version = "0.5", optional = true }
+embedded-hal = { version = "1.0.0", optional = true }
+embedded-hal-bus = { version = "0.3.0", optional = true }
+embedded-graphics = { version = "0.8.1", optional = true }
+heapless = {version = "0.9.2", optional = true }
+bytemuck = {version = "1.17", optional = true }
+libm = {version = "0.2", optional = true }
 
+# esp-idf-sys = { version = "0.35", features = ["binstart"], optional = true }
+# esp-idf-hal = { version = "0.44", optional = true }
+
+[features]
+# Default to ESP32-S3
+default = ["esp32s3-disp143Oled"]
+
+disp_mipidsi = ["mipidsi", "display-interface", "display-interface-spi", "embedded-hal", "embedded-hal-bus", "embedded-graphics"]
+disp_co5300 = ["embedded-hal", "embedded-hal-bus", "embedded-graphics", "heapless", "bytemuck", "libm"]
+
+esp32     = ["esp-hal/esp32",     "esp-println/esp32",     "esp-backtrace/esp32",     "esp-bootloader-esp-idf/esp32"]
+esp32c2   = ["esp-hal/esp32c2",   "esp-println/esp32c2",   "esp-backtrace/esp32c2",   "esp-bootloader-esp-idf/esp32c2"]
+esp32c3   = ["esp-hal/esp32c3",   "esp-println/esp32c3",   "esp-backtrace/esp32c3",   "esp-bootloader-esp-idf/esp32c3"]
+esp32c6   = ["esp-hal/esp32c6",   "esp-println/esp32c6",   "esp-backtrace/esp32c6",   "esp-bootloader-esp-idf/esp32c6"]
+esp32h2   = ["esp-hal/esp32h2",   "esp-println/esp32h2",   "esp-backtrace/esp32h2",   "esp-bootloader-esp-idf/esp32h2"]
+esp32s2   = ["esp-hal/esp32s2",   "esp-println/esp32s2",   "esp-backtrace/esp32",     "esp-bootloader-esp-idf/esp32s2"]
+esp32s3   = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3"]
+devkit-esp32s3-disp128 = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3", "disp_mipidsi"]
+allinone = ["esp-hal/esp32s3",   "esp-println/esp32s3",   "esp-backtrace/esp32s3",   "esp-bootloader-esp-idf/esp32s3"]
+esp32s3-disp143Oled = ["esp-hal/esp32s3", "esp-hal/psram", "esp-println/esp32s3", "esp-backtrace/esp32s3", "esp-bootloader-esp-idf/esp32s3", "disp_co5300"]
+alt = []
 
 [profile.dev]
 # Rust debug is too slow.
