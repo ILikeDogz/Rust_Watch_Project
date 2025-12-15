@@ -227,6 +227,8 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   doing too much and definitely needs to be cleaned up. A simple stack with pop and push is used to track the state for purposes of the back button functionality. The state machine currently is definitely a bit overcomplicated and the
   file includes nearly anything relating to the UI is in this file. 
 
+  The animations are made with math that I got from various sources online and offline from different people, and adjusted to fit my needs.
+
   In order to get the snappy feel for the UI, certain graphics are preloaded images, and clears and framebuffer updates are strategically used to speed up graphics draws through knowing what the possible next states are.
 
   Location: src/ui.rs
