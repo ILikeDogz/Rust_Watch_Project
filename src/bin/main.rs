@@ -34,7 +34,9 @@ use esp32s3_tests::{
     wiring::{init_board_pins, BoardPins},
 };
 
-use esp32s3_tests::rtc_pcf85063::{datetime_to_unix, unix_to_datetime, Pcf85063};
+use esp32s3_tests::rtc_pcf85063::{
+    datetime_is_valid, datetime_to_unix, unix_to_datetime, Pcf85063,
+};
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 use esp32s3_tests::display::TimerDelay;
@@ -348,7 +350,7 @@ fn main() -> ! {
                         //     dt.second
                         // );
                         None
-                    } else {
+                    } else if datetime_is_valid(&dt) {
                         // esp_println::println!(
                         //     "[RTC] read ok {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
                         //     dt.year,
@@ -359,6 +361,17 @@ fn main() -> ! {
                         //     dt.second
                         // );
                         Some(datetime_to_unix(&dt))
+                    } else {
+                        // esp_println::println!(
+                        //     "[RTC] read invalid {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                        //     dt.year,
+                        //     dt.month,
+                        //     dt.day,
+                        //     dt.hour,
+                        //     dt.minute,
+                        //     dt.second
+                        // );
+                        None
                     }
                 });
                 let boot_secs = rtc_secs.unwrap_or_else(|| {
