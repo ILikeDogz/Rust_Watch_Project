@@ -2,6 +2,17 @@
 
 This is a WIP project to make a smart watch programmed in bare metal (no std) embedded Rust from "scratch" on an esp32-s3. 
 
+Demo Video:
+
+https://www.youtube.com/shorts/WcdTKyUyNlw
+
+Images: 
+
+<img width="1008" height="783" alt="image" src="https://github.com/user-attachments/assets/4c80d549-ff28-4cfd-b0a6-e240a691f92d" />
+
+<img width="1008" height="954" alt="image" src="https://github.com/user-attachments/assets/24207fd4-6e11-484b-a1d1-8b972f070628" />
+
+
 ## Overview:
 The Watch project features a 1.43 in OLED display apart of an esp32-s3 + display devboard from waveshare. There are 3 physical inputs, 2 buttons and a rotary encoder, and the imu which acts as a secret input for only one menu, intending to work as a fake button due to the impracticality of including a physical button under the watch. The left button is set up to be the back button, and the right button is the select button. The rotary encoder acts as a left or right controller allowing for fast switching through menus. The watch currently features 3 main "apps". Low power mode for the watch can be activated through holding down the back button. Pressing the select button will wake the watch up after entering low power mode (restarting the watch). 
 
@@ -249,7 +260,63 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 
   Information/Reference: 
   
-####
+### Todo/Addition Ideas:
+  - Additional Apps
+  - Clean up the ui.rs file a lot
+  - Clean up main.rs
+  - Make the IMU driver less specific
+  - Automated Software Tests
+  - A lot not mentioned 
+
+## Testing Overview:
+  All Testing was done on a breadboard prototype using throughhole components, standard switches from a random arduino kit, and the PES12-40S-N0024.
+
+  Breadboard Prototype:
+  
+  <img width="1344" height="1008" alt="image" src="https://github.com/user-attachments/assets/a5cab035-a81f-4887-8b7c-62a1b8191e3c" />
+
+  This breadboard portotype implements the same controls as the current pcb design uses, except with an addition of a third button for easier testing of the feature the imu implements. Since switches are for the most part the same, not 
+  using the exact switches did not matter much, but the same rotary encoder was used to get a feel for the torque and to be testing with the right amount of detents.
+
+  Initial Testing was done with am esp32-s3 dev kit, not this display + board. This was to test the functionality of button inputs, using simple LED outputs to confirm their function, and function of the encoder through serial print 
+  statements. Testing of the inputs was for the most part insignificant though due to them being pretty standard inputs and implementations.
+
+  Was going to use a GC9A01 LCB, but it looked bad after flashing an example program onto it, so switched to a 1.43 in OLED. 
+  
+  With the display + board commbo, the initial test ran was to run the example program and determine the specific driver of the display, as the driver was mentioned on the wiki to either be a CO5300 or SH8601. After running the arduino 
+  example and determining the driver to be a CO5300 driver, the development of the driver software began.
+
+  The main testing process was to iteratively build on the driver, and seeing how the display reacted in response. The testing began with the simple implementation of a full color push to the display. After some initial failures, due to an inccorectly made delay function, the display was showing a solid color. For these tests the driver initially was made with single wire spi, due to being simpler to implement, qspi later.
+
+  <img width="1320" height="1312" alt="image" src="https://github.com/user-attachments/assets/1d36a154-8b16-4cc1-82ea-5633e61af58b" />
+
+  After, the next test was to check if odd writes could work or not, as many displays such as the CO5300, do not properly accept odd writes. Testing was done with some simple lines and 1x1 pixel writes, which initially failed, but the 
+  2x thick writes worked, showing that the display did not accept odd writes. 
+
+  Based on this, the decision was made to use a software framebuffer on the psram, to enable odd writes, and get true full control over the pixels. A set of simple graphics tests was made to run in garbage.txt. These were set up to do a few things, fill color the display, draw text on the edges, load an image, and draw a 1 pixel thick shape and timings. After a lot of iterations and connecting the driver to the embedded graphics library/crate, the test image was showing up properly.
+
+  <img width="1008" height="937" alt="image" src="https://github.com/user-attachments/assets/045fcda5-180c-405b-85ba-517d7c1ea20e" />
+
+  Unfortunately, single wire was quite slow, thus the driver was refactored to support qspi (the wiring had already been set up, based on the waveshare wiki guide). This process involved interating, and continually reflashing the 
+  display + board until the image showed up again properly, and the timing was much faster.
+
+  Once the QSPI had showed up properly, a display demo was made to simple load the main graphics in a preset sequence of the UI, and time it, measuring performance in the serial monitor showed good results.
+
+  Testing the rest of the watch was pretty simple process, of reflashing the esp32-s3, with a new updated UI, just testing that buttons and features worked as expected.
+
+  The RTC and IMU were quite simple, and for most part worked almost first try after a bit of iterative testing to see if they worked as expected, through reading the serial monitor, and visually seeing the UI update.
+
+  Once the current UI had been completed, it was flashed, and ran through ensuring no crashed, and full functionality.
+
+  The same software was then uploaded onto the watch + board + input pcb combo, and proceeded to work the same after the same run through manual test. Confirmed PCB connections with a multimeter, the PCB worked despite my questionable 
+  soldering.
+
+  The watch was left overnight in low power mode and then woken up to confirm A, the battery was useable for more than a day in low power, and B to confirm the time stayed accurate with use of the RTC, succeeded.
+
+  
+  
+
+
 
 
 
