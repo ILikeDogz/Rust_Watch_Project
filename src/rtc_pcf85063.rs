@@ -91,24 +91,24 @@ fn days_since_unix(year: u16, month: u8, day: u8) -> u32 {
     let d = day as i32;
     let (y1, m1) = if m <= 2 { (y - 1, m + 12) } else { (y, m) };
     let era = y1 / 400;
-    let yoe = y1 - era * 400;
-    let doy = (153 * (m1 + 1) / 5 + d - 123) as i32;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    (era * 146097 + doe - 719468) as u32
+    let yoe = y1 - era * 400; // year of era
+    let doy = (153 * (m1 + 1) / 5 + d - 123) as i32; // days since March 1
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // days since era
+    (era * 146097 + doe - 719468) as u32 // 719468 = days from 0000-03-01 to 1970-01-01
 }
 
 // Convert DateTime to Unix timestamp (seconds since 1970-01-01).
 pub fn datetime_to_unix(dt: &DateTime) -> u32 {
     let days = days_since_unix(dt.year, dt.month, dt.day) as u64;
     let secs = days
-        .saturating_mul(86_400)
-        .saturating_add((dt.hour as u64) * 3600)
-        .saturating_add((dt.minute as u64) * 60)
-        .saturating_add(dt.second as u64);
+        .saturating_mul(86_400)// 86400 seconds in a day
+        .saturating_add((dt.hour as u64) * 3600) // 3600 seconds in an hour
+        .saturating_add((dt.minute as u64) * 60) // 60 seconds in a minute
+        .saturating_add(dt.second as u64); // add seconds
     secs.min(u32::MAX as u64) as u32
 }
 
-/// Basic sanity check on decoded RTC time.
+// Basic sanity check on decoded RTC time.
 pub fn datetime_is_valid(dt: &DateTime) -> bool {
     (2020..=2099).contains(&dt.year)
         && (1..=12).contains(&dt.month)
@@ -128,18 +128,18 @@ pub fn unix_to_datetime(mut ts: u32) -> DateTime {
     let second = (ts % 60) as u8;
 
     // Convert days since 1970-01-01 back to date (valid until 2099).
-    let z = days as i32 + 719468;
+    let z = days as i32 + 719468; // 719468 = days from 0000-03-01 to 1970-01-01
     let era = (z >= 0)
-        .then(|| z / 146097)
-        .unwrap_or_else(|| (z - 146096) / 146097);
+        .then(|| z / 146097) // 146097 = days in 400 years
+        .unwrap_or_else(|| (z - 146096) / 146097); 
     let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era, 1460 = days in 4 years, 36524 = days in 100 years, 146096 = days in 400 years
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = mp + if mp < 10 { 3 } else { -9 };
-    let year = y + if month <= 2 { 1 } else { 0 };
+    let mp = (5 * doy + 2) / 153; // 153 = days in 5 months
+    let day = doy - (153 * mp + 2) / 5 + 1; 
+    let month = mp + if mp < 10 { 3 } else { -9 }; // March=3,...,January=13,February=14
+    let year = y + if month <= 2 { 1 } else { 0 }; // adjust year if month is Jan or Feb
 
     DateTime {
         year: year as u16,
