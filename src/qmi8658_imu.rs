@@ -1,6 +1,7 @@
-//! Minimal QMI8658 IMU bring-up and a simple smash detector
-//! The register values are conservative defaults for the Waveshare ESP32-S3
-//! Touch AMOLED 1.43" board (QMI8658 on the touch I2C bus)
+// Minimal QMI8658 IMU bring-up and a simple smash detector
+// The register values are conservative defaults for the Waveshare ESP32-S3
+// Touch AMOLED 1.43" board (QMI8658 on the touch I2C bus)
+// Datasheet: https://files.waveshare.com/wiki/common/QMI8658C_datasheet_rev_0.9.pdf
 
 use embedded_hal::i2c;
 
