@@ -8,9 +8,9 @@ https://www.youtube.com/shorts/WcdTKyUyNlw
 
 Images: 
 
-<img width="1008" height="783" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/4c80d549-ff28-4cfd-b0a6-e240a691f92d" />
+<img width="1008" height="783" alt="image" src="https://github.com/user-attachments/assets/4c80d549-ff28-4cfd-b0a6-e240a691f92d" />
 
-<img width="1008" height="954" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/24207fd4-6e11-484b-a1d1-8b972f070628" />
+<img width="1008" height="954" alt="image" src="https://github.com/user-attachments/assets/24207fd4-6e11-484b-a1d1-8b972f070628" />
 
 
 ## Overview:
@@ -86,7 +86,7 @@ looking graphics and true black. The inputs were decided based on the recalibrat
   
   Purchase at: https://www.digikey.com/en/products/detail/te-connectivity-alcoswitch-switches/1977067-1/5596904
   
-  Information/Reference: https://www.te.com/commerce/DocumentDelivery/DDEController?Action=Watch_rs/srchrtrv&DocNm=1977067&DocType=Customer+Drawing&DocLang=English&DocFormat=pdf&PartCntxt=1977067-1
+  Information/Reference: https://www.te.com/commerce/DocumentDelivery/DDEController?Action=srchrtrv&DocNm=1977067&DocType=Customer+Drawing&DocLang=English&DocFormat=pdf&PartCntxt=1977067-1
 
   Notes: Chosen due to availability and height.
 - 2x, 10 kOhms ±1% 0.125W, 1/8W Chip Resistor 0805: Used RC0805FR-0710KP, others may work
@@ -126,27 +126,27 @@ looking graphics and true black. The inputs were decided based on the recalibrat
 
 ### PCB Schematic (V0):
   
-<img width="890" height="704" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/92232321-a05d-4db2-b031-d550acabcd80" />
+<img width="890" height="704" alt="image" src="https://github.com/user-attachments/assets/92232321-a05d-4db2-b031-d550acabcd80" />
   
 ### PCB (V0):
   
-<img width="558" height="445" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/6c103cb8-8472-4610-b414-a6963d79f5b3" />
+<img width="558" height="445" alt="image" src="https://github.com/user-attachments/assets/6c103cb8-8472-4610-b414-a6963d79f5b3" />
 
 ### Physical Housing (incomplete):
 
 #### Section View:
   
-<img width="534" height="329" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/30da1533-3aac-428e-8af2-7b9b4dcba1ae" />
+<img width="534" height="329" alt="image" src="https://github.com/user-attachments/assets/30da1533-3aac-428e-8af2-7b9b4dcba1ae" />
 
 #### Full View (isometric):
 
-<img width="544" height="509" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/27e37163-5b85-4623-951b-d487718098e8" />
+<img width="544" height="509" alt="image" src="https://github.com/user-attachments/assets/27e37163-5b85-4623-951b-d487718098e8" />
 
 
 ### Todo/Addition Ideas:
   - Testing of core housing (3d print completed on attempt 4)
     
-  <img width="1503" height="1237" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/d8be9f58-90f6-4ef6-87dc-928cb25f309d" />
+  <img width="1503" height="1237" alt="image" src="https://github.com/user-attachments/assets/d8be9f58-90f6-4ef6-87dc-928cb25f309d" />
  
   - Modeling and testing of base+wrist mount housing
   - Addition of additional features beyond simple 3 inputs
@@ -281,7 +281,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 
   Breadboard Prototype:
   
-  <img width="1344" height="1008" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/a5cab035-a81f-4887-8b7c-62a1b8191e3c" />
+  <img width="1344" height="1008" alt="image" src="https://github.com/user-attachments/assets/a5cab035-a81f-4887-8b7c-62a1b8191e3c" />
 
   This breadboard portotype implements the same controls as the current pcb design uses, except with an addition of a third button for easier testing of the feature the imu implements. Since switches are for the most part the same, not 
   using the exact switches did not matter much, but the same rotary encoder was used to get a feel for the torque and to be testing with the right amount of detents.
@@ -296,14 +296,14 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 
   The main testing process was to iteratively build on the driver, and seeing how the display reacted in response. The testing began with the simple implementation of a full color push to the display. After some initial failures, due to an inccorectly made delay function, the display was showing a solid color. For these tests the driver initially was made with single wire spi, due to being simpler to implement, qspi later.
 
-  <img width="1320" height="1312" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/1d36a154-8b16-4cc1-82ea-5633e61af58b" />
+  <img width="1320" height="1312" alt="image" src="https://github.com/user-attachments/assets/1d36a154-8b16-4cc1-82ea-5633e61af58b" />
 
   After, the next test was to check if odd writes could work or not, as many displays such as the CO5300, do not properly accept odd writes. Testing was done with some simple lines and 1x1 pixel writes, which initially failed, but the 
   2x thick writes worked, showing that the display did not accept odd writes. 
 
   Based on this, the decision was made to use a software framebuffer on the psram, to enable odd writes, and get true full control over the pixels. A set of simple graphics tests was made to run in garbage.txt. These were set up to do a few things, fill color the display, draw text on the edges, load an image, and draw a 1 pixel thick shape, and write the timings for each draw. After a lot of iterations and connecting the driver to the embedded graphics library/crate, the full test image was showing up properly.
 
-  <img width="1008" height="937" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/045fcda5-180c-405b-85ba-517d7c1ea20e" />
+  <img width="1008" height="937" alt="image" src="https://github.com/user-attachments/assets/045fcda5-180c-405b-85ba-517d7c1ea20e" />
 
   Unfortunately, single wire was quite slow, thus the driver was refactored to support qspi (the wiring had already been set up, based on the waveshare wiki guide). This process involved interating, and continually reflashing the 
   display + board until the image showed up again properly, and the timing was much faster.
