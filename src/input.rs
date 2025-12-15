@@ -1,4 +1,4 @@
-//! Input handling module for buttons and rotary encoder.
+//! Input handling module for buttons and rotary encoder and IMU interrupts.
 //!
 //! This module provides:
 //! - `ButtonState` and `RotaryState` structs for tracking input state

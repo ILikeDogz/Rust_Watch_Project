@@ -15,6 +15,7 @@
 //   Example: [0x02, 0x11] -> Sleep Out
 //            [0x02, 0x3A, 0x55] -> Pixel Format = 16bpp (RGB565)
 // Geometry: panel is 466 x 466 logical pixels (square).
+// Datasheet: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_20230328_07edb82936.pdf
 
 use core::fmt;
 

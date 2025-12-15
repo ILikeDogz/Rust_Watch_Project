@@ -1,3 +1,6 @@
+// RTC driver for PCF85063A/PCF85063TP real-time clock chips.
+// Datasheet: https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf
+
 use embedded_hal::i2c::I2c;
 
 #[derive(Copy, Clone, Debug)]
