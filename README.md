@@ -30,7 +30,7 @@ https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.43
 
 The decision to do it entirely in Rust was a result of my own personal hatred of CMAKE and Arduino IDE, and a love of Rust, being the first programming language I set out to learn anything beyond basics of if, else, loops.
 
-The choice for physical inputs instead of touch screen input, was due to liking the feel of analog inputs, and to better replicate features from the Omnitrix watch.
+The choice for physical inputs instead of touch screen input, was due to liking the feel of physical inputs, and to better replicate features from the Omnitrix watch.
 
 ### App 1: Omnitrix
 This is the default app of the watch, modeled off the functionality of the omnitrix from Ben 10. The select button enters the app, initially loading the first of 10 alien images. The rotary encoder can be used to quickly navigate the 10 different available aliens (preselected based on my favorites). Through physically smashing (recommended lightly) the watch, the user is able to select the Alien, which then plays an animation of a dna spiral spinning.
