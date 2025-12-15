@@ -1,12 +1,52 @@
 # Rust Watch Project
 
-This is a WIP project to make a smart watch using embedded Rust on an esp32-s3
+This is a WIP project to make a smart watch programmed in bare metal (no std) embedded Rust from "scratch" on an esp32-s3. 
 
-## Design Overview:
+## Overview:
+The Watch project features a 1.43 in OLED display apart of an esp32-s3 + display devboard from waveshare. There are 3 physical inputs, 2 buttons and a rotary encoder, and the imu which acts as a secret input for only one menu, intending to work as a fake button due to the impracticality of including a physical button under the watch. The left button is set up to be the back button, and the right button is the select button. The rotary encoder acts as a left or right controller allowing for fast switching through menus. The watch currently features 3 main "apps". Low power mode for the watch can be activated through holding down the back button. Pressing the select button will wake the watch up after entering low power mode (restarting the watch). 
 
-### Hardware Overview:
+The inspiration to use an esp32 + display devboard for a watch came from this video (This had no other contribution to the design):
 
-#### BOM (Subject to change):
+https://www.youtube.com/watch?v=E5cJF_3hY-w
+
+The inspiration for the physical housing comes from:
+
+https://ben10.fandom.com/wiki/Omnitrix_(Original)
+
+The examples in C and C++ provided by Waveshare acted as one of the main references for a lot of the driver level software:
+
+https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.43
+
+The decision to do it entirely in Rust was a result of my own personal hatred of CMAKE and Arduino IDE, and a love of Rust, being the first programming language I set out to learn anything beyond basics of if, else, loops.
+
+The choice for physical inputs instead of touch screen input, was due to liking the feel of analog inputs, and to better replicate features from the Omnitrix watch.
+
+### App 1: Omnitrix
+This is the default app of the watch, modeled off the functionality of the omnitrix from Ben 10. The select button enters the app, initially loading the first of 10 alien images. The rotary encoder can be used to quickly navigate the 10 different available aliens (preselected based on my favorites). Through physically smashing (recommended lightly) the watch, the user is able to select the Alien, which then plays an animation of a dna spiral spinning.
+
+#### Todo/Addition Ideas:
+- Include a speaker playing a sound to indicate transformation
+
+### App 2: Time
+This is the second app of the watch, this includes both an analog and digital clock with a preloaded background from Cyberpunk Edgerunners, and is themed based on the anime. When selected the analog clock is the page shown first, showing an animated analog clock based on a 12 hour time. Using the rotary encoder, the user can switch to the digital clock, which is based on 24 hour time. The time can be adjusted only in the digital clock mode, activated with the select button, and adjusted using combination of the select and rotary encoder. 
+
+#### Todo/Addition Ideas:
+- Include an edit mode for the analog clock mode aswell
+- Allow ability to swap from 12 hour and 24 hour time modes
+
+### App 3: Settings
+This is the third app of the watch, selecting this app loads in the brightness adjustment page, and the user can also use the encoder to switch to an easter egg. Additional configurable settings have not yet been added. Selecting the brightness adjustment page loads in a circular bar representing the brightness along with the percentage in the center. The user can adjust the brightness using the rotary encoder, and will adjust brightness in real time. Selecting the easter egg page loads in an easter egg image from Good Bye Eri by Tatsuki Fujimoto.
+
+#### Todo/Addition Ideas:
+- Include additional Settings pages
+- Include additional Settings
+
+## Hardware Overview:
+
+The hardware decisions were made to prioritize minimizing the size, and user experience. The display and board were chosen first, as the powerful chip and high quality 466x466 OLED display would be able to output and show nice
+looking graphics and true black. The inputs were decided based on the recalibrated omnitrix from Ben 10, which features what appears to be 2 buttons and a rotating bezel, this would later prove to provide some software design challenges. The PCB was designed with the housing somewhat in mind, to ensure it would fit inside, but also would physically be possible to use all the inputs, with space for certain internal mechanisms such as the tripple bevel gear system. The housing was designed, aiming to adhere to some general 3d print and structural advice for minimum wall thickness, while also trying to minimize the size of the housing.
+
+### BOM (Subject to change):
 - 1x, Display + Board: waveshare ESP32-S3-Touch-AMOLED-1.43
   
   Purchase at: https://www.amazon.com/Waveshare-Development-Interface-Accelerometer-Gyroscope/dp/B0DT9PSDW6/ref=sr_1_2
@@ -14,7 +54,7 @@ This is a WIP project to make a smart watch using embedded Rust on an esp32-s3
   Information/Reference: https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.43.
 
   Notes: The Waveshare OLED esp32-s3 board was chosen in part pimarily due to the processing power and psram of the s3 and due to the quality, size, and resolution of the OLED display and the additional features included in the devboard.
-  Waveshare additionally includes arduiono and esp-idf examples in C or C++ for reference.
+  Waveshare additionally includes arduiono and esp-idf examples in C or C++ for reference. This can come with either a CO5300 Display Driver or SH8601 Display Driver, the SH8601 has not been implemented by this software, though I'm 90%    sure most are the CO5300 given that all other similar 1.43 in OLED's with different microcontrollers from Waveshare use the CO5300.
 
 - 1x, Battery: DC 3.7V 500mAh 503030 Rechargeable Lithium Polymer Battery
 
@@ -71,31 +111,145 @@ This is a WIP project to make a smart watch using embedded Rust on an esp32-s3
 
   Notes: Only the core of the housing has been modeled. The housing has not physically been printed and tested yet, unknown if the model would work or be assembleable in real life. The end goal is for the housing to be wrist mountable.     The rotary encoder ideally should be able to be used through the rotating bezel with a three bevel gear train, the buttons should connect to some button stubs. The wrist connector and base should include a spring locked mechanism to      allow the core to pop up like the Ben 10 Omnitrix Watch.
 
-  #### PCB Schematic (V0):
+### PCB Schematic (V0):
   
-  <img width="890" height="704" alt="image" src="https://github.com/user-attachments/assets/92232321-a05d-4db2-b031-d550acabcd80" />
+<img width="890" height="704" alt="image" src="https://github.com/user-attachments/assets/92232321-a05d-4db2-b031-d550acabcd80" />
   
-  #### PCB (V0):
+### PCB (V0):
   
-  <img width="558" height="445" alt="image" src="https://github.com/user-attachments/assets/6c103cb8-8472-4610-b414-a6963d79f5b3" />
+<img width="558" height="445" alt="image" src="https://github.com/user-attachments/assets/6c103cb8-8472-4610-b414-a6963d79f5b3" />
 
-  #### Physical Housing (incomplete):
+### Physical Housing (incomplete):
 
-  Section View:
+#### Section View:
   
-  <img width="534" height="329" alt="image" src="https://github.com/user-attachments/assets/30da1533-3aac-428e-8af2-7b9b4dcba1ae" />
+<img width="534" height="329" alt="image" src="https://github.com/user-attachments/assets/30da1533-3aac-428e-8af2-7b9b4dcba1ae" />
 
-  Full View (isometric):
+#### Full View (isometric):
 
-  <img width="544" height="509" alt="image" src="https://github.com/user-attachments/assets/27e37163-5b85-4623-951b-d487718098e8" />
+<img width="544" height="509" alt="image" src="https://github.com/user-attachments/assets/27e37163-5b85-4623-951b-d487718098e8" />
 
 
-  #### Todo:
-    - Testing of core housing
-    - Modeling and testing of base+wrist mount housing
-    - Addition of additional features beyond simple 3 inputs
+### Todo/Addition Ideas:
+  - Testing of core housing (3d print completed on attempt 4)
+  <img width="1503" height="1237" alt="image" src="https://github.com/user-attachments/assets/d8be9f58-90f6-4ef6-87dc-928cb25f309d" />
+  - Modeling and testing of base+wrist mount housing
+  - Addition of additional features beyond simple 3 inputs
+  - Spring Locking mechanism of the watch
+  - Speaker addition
 
-### Software Overview:
+## Software Overview:
+
+The software decisions were made under one main philosophy, step one make it work, step two make it look nice. This process resulted in a lot of initial code being quite messy, but functional and cleaned up later. Certain parts such as the IMU and RTC inits, and the UI state machine have only really reached the make it work portion, while other parts have had some attempted clean up. 
+
+When programming an esp32 in bare metal Rust, something clear is that Rust is still a newer language, and as a result many esp32 features and support libraries, such as drivers, are incomplete or do not exist.
+
+The cargo.toml describes all the external libaries/crates used, while the lib.rs describes the internal files used.
+
+Included precompiled binary at esp32s3_tests.bin, can be flashed using esptools. 
+
+To compile, set up first Rust on esp32:
+
+https://docs.espressif.com/projects/rust/book/preface.html
+
+The current software is divided into a few parts, the drivers and display setup, the ui state machine, the input handling and wiring, main, and the additional non Rust code helper stuff.
+
+### The Drivers
+
+The following drivers were implemented in Rust, due to being unable to find existing libaries/crates
+#### CO5300 Display Driver
+
+Description: 
+  
+This software handles the communication from the esp32-s3 to the 1.43in OLED display itself. The examples written in C from Waveshare such as ESP32-S3-AMOLED-1.43-Demo\ESP-IDF\09_FactoryProgram and the included libaries were one of     the main references for initialization and setup for the QSPI. The address and init tables were confirmed with the datasheet, but the main thing these examples allowed was for testing and confirmation that the hardware was functional.  This driver is much more complicated then the RTC and IMU drivers though, as on top of the initialization and set up, for the drivers performance and ability to update the display fast matters, not just to work in general. The driver is set up to work with the Rust Embedded Graphics Library/Crate, through draw_iter, fill_contiguous, and clear implementations, aswell as having speciic additional functions to allow speeding up certain graphics. 
+
+While the CO5300 controller has internal GRAM for an internal frame buffer keeping the display image held, this is not readable, and due to a limitation in the writes to the display needing to be even (min 2x pixels), a software     framebuffer exists on the PSRAM. This software framebuffer is a simple box that just holds information of every pixels state on the display, allowing for odd writes to the display using the framebuffer to fill in information to make the write even without overwriting any pixels. As far as I am aware, the software framebuffer is too large to exist on the internal ram of 512 mB, due to not all that ram being available and the size of the framebuffer (466x466x2 for RGB 565), thus it lives on the PSRAM, which is unfortunately slower. This is the choice and sacrifice made in order to gain full total control of every pixel.
+
+The driver includes a constructor with the init table to reset the display and initialize all the defaults, and a second convenient constructor to make it quicker by assuming more of the defaults. For the most part the implementation of the initialization and setup for qspi was gained from referencing the C example from waveshare. There is additionally a cmd method for sending direct cmds to the controller, and qspi_send_mode_instr which is for sending the instructions in qspi (not always used though). There are also set_window methods for both spi and qspi, setting the writeable aera of the display. Additionally the driver implments methods to control brightness and power on and off the display. 
+
+There are three important functions to the drawing performance of the driver, the main one is the flush_fb_rect_even method that is key to the embedded graphics implementation, it pushes a rectanglular region from the framebuffer to the panel (aligned even as required by the CO5300), allowing only the dirty part to be updated. The second is the fill_rect_solid_opt, which draws a solid color rectangle to the display then optionally can update the framebuffer (used primarily for a very fast clearing of the display). The third main function is the blit_rect_be_fast_opt, this draws an image to the display through streaming a rectangle of bytes to the panel and optionally updates the frame buffer.
+
+The driver implementation is capable of streaming a full 466x466 image at near 35 to 40 fps based on my own testing, though this is done through having the images in ram already, ready to go. This is enough performance to perform simple animations and have a reactive ui.
+
+This is then used for display initialization handled by display.rs, setting up stuff like the frequency etc.
+
+Location: src/co5300.rs
+  
+Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_20230328_07edb82936.pdf and Waveshare Example
+  
+#### PCF85063 RTC Driver
+  Description:
+
+  This software handles the communication from the esp32-s3 to the rtc chip, the performance of the RTC is based on how well it keeps time and not really something controlled by the software, thus the implementation of this driver was     much simpler. The implenetation of this driver is a pretty direct conversion of the C driver from waveshare, into Rust.
+
+  Location: src/rtc_pcf85063.rs
+  
+  Information/Reference: https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf and Waveshare Example
+#### QMI8658 IMU Driver
+  Description:
+
+  This software handles communication from the esp32-s3 to the imu, this driver is very barebones however, and mainly only implements enough to function for the specific use case it has in this watch. It configures the imu, and reads
+  the raw sensor data and data conversion, and built in methods for detecting the only action currently using the IMU. For further/later use, this should definitely be updated.
+
+  Location: src/qmi8658_imu.rs
+  
+  Information/Reference: https://files.waveshare.com/wiki/common/QMI8658C_datasheet_rev_0.9.pdf and Waveshare Example
+
+#### Display setup
+  Description:
+
+  Abstracts the display setup to be as simple as setup_display(), to make it easy to swap displays later that may use a different driver.
+
+  Location: src/display.rs
+
+  Information/Reference: 
+### UI State Machine
+
+  Description:
+
+  This is the main state machine that handles the UI of the entire watch, it was designed with the intent to only support three button inputs (back, select, and the imu which replaces button 3) and a rotary encoder. The states were
+  designed to be based on layers of menus, and the current implementation is definitely still a WIP. The UI.rs file also includes methods for animations, caching images, brightness and time adjustment, and etc it is currently doing too 
+  much and definitely needs to be cleaned up. A simple stack with pop and push is used to track the state for purposes of the back button functionality. The state machine currently is definitely a bit overcomplicated and the file    
+  includes nearly anything relating to the UI is in this file. 
+
+  In order to get the snappy feel for the UI, certain graphics are preloaded images, and clears and framebuffer updates are strategically used to speed up graphics draws through knowing what the possible next states are.
+
+  Location: src/ui.rs
+
+  Information/Reference: 
+
+
+### Input and Wiring
+
+  Description:
+
+  These files handle the connection to the hardware. The wiring.rs file connects and configures all the gpio pins, allowing for easy changing of gpios. There are some profiles set up, the amoled profile is the one being used, others are 
+  not yet implemented. Notably, button 3 has a gpio, but in practice is not actually wired to anything as the IMU replaces it, this is related to the prototyping. The input.rs use interrupts to set flags, which are then polled for in 
+  main. 
+
+  Location: src/input.rs and src/wiring.rs
+
+  Information/Reference: https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.43 and http://wiki.fluidnc.com/en/hardware/ESP32-S3_Pin_Reference
+
+### Main
+  Description:
+  This is the main file. The main file handles setting up the interrupt handler, the display, psram, imu, etc. Before entering the main loop, the homepage is drawn on the display, then all the graphics are pre loaded. The main loop 
+  handles the polling of inputs, and what to actually do when the interrupt flags are set and inputs are used, and includes logic to be able to enable a deep sleep for the watch. The loop continuously called to update the ui, but only 
+  redraws when the redraw flag is set true. This makes it so most actions are only drawing once, but animations and others can set the redraw flag to true to be able to continually redraw. Much of the stuff going on, needs to be better 
+  abstracted.
+
+  Location: src/bin/main.rs
+
+  Information/Reference: https://documentation.espressif.com/esp32-s3_datasheet_en.pdf
+
+### Additional Helpers
+  Description: There exists a lot of additional helpers such as some quick python scripts for converting image files into bytes and compressing them.
+
+  Location: raw_images and src/assets and other files
+
+  Information/Reference: 
+  
+####
 
 
 
