@@ -453,7 +453,7 @@ fn clock_now_seconds_f32() -> f32 {
     })
 }
 
-/// Return hours, minutes, seconds as f32 with good precision by working modulo 12h.
+// Return hours, minutes, seconds as f32 with good precision by working modulo 12h.
 fn clock_now_hms_f32() -> (f32, f32, f32) {
     critical_section::with(|cs| {
         let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow();

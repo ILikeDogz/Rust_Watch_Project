@@ -3,6 +3,7 @@ edition      = "2021"
 name         = "esp32s3_tests"
 rust-version = "1.86"
 version      = "0.1.0"
+license      = "MIT"
 
 [[bin]]
 name = "esp32s3_tests"

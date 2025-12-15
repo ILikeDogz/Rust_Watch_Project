@@ -8,9 +8,9 @@ https://www.youtube.com/shorts/WcdTKyUyNlw
 
 Images: 
 
-<img width="1008" height="783" alt="image" src="https://github.com/user-attachments/assets/4c80d549-ff28-4cfd-b0a6-e240a691f92d" />
+<img width="1008" height="783" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/4c80d549-ff28-4cfd-b0a6-e240a691f92d" />
 
-<img width="1008" height="954" alt="image" src="https://github.com/user-attachments/assets/24207fd4-6e11-484b-a1d1-8b972f070628" />
+<img width="1008" height="954" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/24207fd4-6e11-484b-a1d1-8b972f070628" />
 
 
 ## Overview:
@@ -86,7 +86,7 @@ looking graphics and true black. The inputs were decided based on the recalibrat
   
   Purchase at: https://www.digikey.com/en/products/detail/te-connectivity-alcoswitch-switches/1977067-1/5596904
   
-  Information/Reference: https://www.te.com/commerce/DocumentDelivery/DDEController?Action=srchrtrv&DocNm=1977067&DocType=Customer+Drawing&DocLang=English&DocFormat=pdf&PartCntxt=1977067-1
+  Information/Reference: https://www.te.com/commerce/DocumentDelivery/DDEController?Action=Watch_rs/srchrtrv&DocNm=1977067&DocType=Customer+Drawing&DocLang=English&DocFormat=pdf&PartCntxt=1977067-1
 
   Notes: Chosen due to availability and height.
 - 2x, 10 kOhms ±1% 0.125W, 1/8W Chip Resistor 0805: Used RC0805FR-0710KP, others may work
@@ -124,27 +124,27 @@ looking graphics and true black. The inputs were decided based on the recalibrat
 
 ### PCB Schematic (V0):
   
-<img width="890" height="704" alt="image" src="https://github.com/user-attachments/assets/92232321-a05d-4db2-b031-d550acabcd80" />
+<img width="890" height="704" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/92232321-a05d-4db2-b031-d550acabcd80" />
   
 ### PCB (V0):
   
-<img width="558" height="445" alt="image" src="https://github.com/user-attachments/assets/6c103cb8-8472-4610-b414-a6963d79f5b3" />
+<img width="558" height="445" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/6c103cb8-8472-4610-b414-a6963d79f5b3" />
 
 ### Physical Housing (incomplete):
 
 #### Section View:
   
-<img width="534" height="329" alt="image" src="https://github.com/user-attachments/assets/30da1533-3aac-428e-8af2-7b9b4dcba1ae" />
+<img width="534" height="329" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/30da1533-3aac-428e-8af2-7b9b4dcba1ae" />
 
 #### Full View (isometric):
 
-<img width="544" height="509" alt="image" src="https://github.com/user-attachments/assets/27e37163-5b85-4623-951b-d487718098e8" />
+<img width="544" height="509" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/27e37163-5b85-4623-951b-d487718098e8" />
 
 
 ### Todo/Addition Ideas:
   - Testing of core housing (3d print completed on attempt 4)
     
-  <img width="1503" height="1237" alt="image" src="https://github.com/user-attachments/assets/d8be9f58-90f6-4ef6-87dc-928cb25f309d" />
+  <img width="1503" height="1237" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/d8be9f58-90f6-4ef6-87dc-928cb25f309d" />
  
   - Modeling and testing of base+wrist mount housing
   - Addition of additional features beyond simple 3 inputs
@@ -157,7 +157,7 @@ The software decisions were made under one main philosophy, step one make it wor
 
 When programming an esp32 in bare metal Rust, something clear is that Rust is still a newer language, and as a result many esp32 features and support libraries, such as drivers, are incomplete or do not exist.
 
-The cargo.toml describes all the external libaries/crates used, while the lib.rs describes the internal files used.
+All software is located under the Watch_rs folder, The Watch_rs/cargo.toml describes all the external libaries/crates used, while the Watch_rs/src/lib.rs describes the internal files used.
 
 Included precompiled binary at esp32s3_tests.bin, can be flashed using esptools. 
 
@@ -186,7 +186,7 @@ The driver implementation is capable of streaming a full 466x466 image at near 3
 
 This is then used for display initialization handled by display.rs, setting up stuff like the frequency etc.
 
-Location: src/co5300.rs
+Location: Watch_rs/src/co5300.rs
   
 Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_20230328_07edb82936.pdf and Waveshare Example
   
@@ -197,7 +197,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   much simpler. The implenetation of this driver is a pretty direct conversion of the C driver from waveshare, into Rust. The driver includes a simple constructor, methods for reading and setting time with BCD converting helper methods,
   and some date time and unix converters.
 
-  Location: src/rtc_pcf85063.rs
+  Location: Watch_rs/src/rtc_pcf85063.rs
   
   Information/Reference: https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf and Waveshare Example
 #### QMI8658 IMU Driver
@@ -206,7 +206,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   This software handles communication from the esp32-s3 to the imu, this driver is very barebones however, and mainly only implements enough to function for the specific use case it has in this watch. It includes a basic constructur, 
   configures the imu, and reads the raw sensor data and data conversion, and built in methods for detecting the only action currently using the IMU. For further/later use, this should definitely be updated.
 
-  Location: src/qmi8658_imu.rs
+  Location: Watch_rs/src/qmi8658_imu.rs
   
   Information/Reference: https://files.waveshare.com/wiki/common/QMI8658C_datasheet_rev_0.9.pdf and Waveshare Example
 
@@ -215,7 +215,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 
   Abstracts the display setup to be as simple as a call of setup_display, to make it easy to swap displays later that may use a different driver.
 
-  Location: src/display.rs
+  Location: Watch_rs/src/display.rs
 
   Information/Reference: 
 ### UI State Machine
@@ -223,7 +223,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   Description:
 
   This is the main state machine that handles the UI of the entire watch, it was designed with the intent to only support three button inputs (back, select, and the imu which replaces button 3) and a rotary encoder. The states were
-  designed to be based on layers of menus, and the current implementation is definitely still a WIP. The UI.rs file also includes methods for animations, navigation caching images, brightness and time adjustment, and etc it is currently 
+  designed to be based on layers of menus, and the current implementation is definitely still a WIP. The ui.rs file also includes methods for animations, navigation caching images, brightness and time adjustment, and etc it is currently 
   doing too much and definitely needs to be cleaned up. A simple stack with pop and push is used to track the state for purposes of the back button functionality. The state machine currently is definitely a bit overcomplicated and the
   file includes nearly anything relating to the UI is in this file. 
 
@@ -231,7 +231,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 
   In order to get the snappy feel for the UI, certain graphics are preloaded images, and clears and framebuffer updates are strategically used to speed up graphics draws through knowing what the possible next states are.
 
-  Location: src/ui.rs
+  Location: Watch_rs/src/ui.rs
 
   Information/Reference: 
 
@@ -244,7 +244,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   not yet implemented. Notably, button 3 has a gpio, but in practice is not actually wired to anything as the IMU replaces it, this is related to the prototyping. The input.rs use interrupts to set flags, which are then polled for in 
   main. 
 
-  Location: src/input.rs and src/wiring.rs
+  Location: Watch_rs/src/input.rs and Watch_rs/src/wiring.rs
 
   Information/Reference: https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.43 and http://wiki.fluidnc.com/en/hardware/ESP32-S3_Pin_Reference
 
@@ -255,14 +255,14 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   redraws when the redraw flag is set true. This makes it so most actions are only drawing once, but animations and others can set the redraw flag to true to be able to continually redraw. Much of the stuff going on, needs to be better 
   abstracted.
 
-  Location: src/bin/main.rs
+  Location: Watch_rs/src/bin/main.rs
 
   Information/Reference: https://documentation.espressif.com/esp32-s3_datasheet_en.pdf
 
 ### Additional Helpers
   Description: There exists a lot of additional helpers such as some quick python scripts for converting image files into bytes and compressing them.
 
-  Location: raw_images and src/assets and other files
+  Location: raw_images and Watch_rs/src/assets and other files
 
   Information/Reference: 
   
@@ -279,7 +279,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 
   Breadboard Prototype:
   
-  <img width="1344" height="1008" alt="image" src="https://github.com/user-attachments/assets/a5cab035-a81f-4887-8b7c-62a1b8191e3c" />
+  <img width="1344" height="1008" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/a5cab035-a81f-4887-8b7c-62a1b8191e3c" />
 
   This breadboard portotype implements the same controls as the current pcb design uses, except with an addition of a third button for easier testing of the feature the imu implements. Since switches are for the most part the same, not 
   using the exact switches did not matter much, but the same rotary encoder was used to get a feel for the torque and to be testing with the right amount of detents.
@@ -294,14 +294,14 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 
   The main testing process was to iteratively build on the driver, and seeing how the display reacted in response. The testing began with the simple implementation of a full color push to the display. After some initial failures, due to an inccorectly made delay function, the display was showing a solid color. For these tests the driver initially was made with single wire spi, due to being simpler to implement, qspi later.
 
-  <img width="1320" height="1312" alt="image" src="https://github.com/user-attachments/assets/1d36a154-8b16-4cc1-82ea-5633e61af58b" />
+  <img width="1320" height="1312" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/1d36a154-8b16-4cc1-82ea-5633e61af58b" />
 
   After, the next test was to check if odd writes could work or not, as many displays such as the CO5300, do not properly accept odd writes. Testing was done with some simple lines and 1x1 pixel writes, which initially failed, but the 
   2x thick writes worked, showing that the display did not accept odd writes. 
 
-  Based on this, the decision was made to use a software framebuffer on the psram, to enable odd writes, and get true full control over the pixels. A set of simple graphics tests was made to run in garbage.txt. These were set up to do a few things, fill color the display, draw text on the edges, load an image, and draw a 1 pixel thick shape and timings. After a lot of iterations and connecting the driver to the embedded graphics library/crate, the test image was showing up properly.
+  Based on this, the decision was made to use a software framebuffer on the psram, to enable odd writes, and get true full control over the pixels. A set of simple graphics tests was made to run in quick_tests.txt. These were set up to do a few things, fill color the display, draw text on the edges, load an image, and draw a 1 pixel thick shape and timings. After a lot of iterations and connecting the driver to the embedded graphics library/crate, the test image was showing up properly.
 
-  <img width="1008" height="937" alt="image" src="https://github.com/user-attachments/assets/045fcda5-180c-405b-85ba-517d7c1ea20e" />
+  <img width="1008" height="937" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/045fcda5-180c-405b-85ba-517d7c1ea20e" />
 
   Unfortunately, single wire was quite slow, thus the driver was refactored to support qspi (the wiring had already been set up, based on the waveshare wiki guide). This process involved interating, and continually reflashing the 
   display + board until the image showed up again properly, and the timing was much faster.
