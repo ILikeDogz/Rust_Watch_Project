@@ -193,7 +193,9 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 #### PCF85063 RTC Driver
   Description:
 
-  This software handles the communication from the esp32-s3 to the rtc chip, the performance of the RTC is based on how well it keeps time and not really something controlled by the software, thus the implementation of this driver was     much simpler. The implenetation of this driver is a pretty direct conversion of the C driver from waveshare, into Rust.
+  This software handles the communication from the esp32-s3 to the rtc chip, the performance of the RTC is based on how well it keeps time and not really something controlled by the software, thus the implementation of this driver was
+  much simpler. The implenetation of this driver is a pretty direct conversion of the C driver from waveshare, into Rust. The driver includes a simple constructor, methods for reading and setting time with BCD converting helper methods,
+  and some date time and unix converters.
 
   Location: src/rtc_pcf85063.rs
   
@@ -201,8 +203,8 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 #### QMI8658 IMU Driver
   Description:
 
-  This software handles communication from the esp32-s3 to the imu, this driver is very barebones however, and mainly only implements enough to function for the specific use case it has in this watch. It configures the imu, and reads
-  the raw sensor data and data conversion, and built in methods for detecting the only action currently using the IMU. For further/later use, this should definitely be updated.
+  This software handles communication from the esp32-s3 to the imu, this driver is very barebones however, and mainly only implements enough to function for the specific use case it has in this watch. It includes a basic constructur, 
+  configures the imu, and reads the raw sensor data and data conversion, and built in methods for detecting the only action currently using the IMU. For further/later use, this should definitely be updated.
 
   Location: src/qmi8658_imu.rs
   
@@ -211,7 +213,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 #### Display setup
   Description:
 
-  Abstracts the display setup to be as simple as setup_display(), to make it easy to swap displays later that may use a different driver.
+  Abstracts the display setup to be as simple as a call of setup_display, to make it easy to swap displays later that may use a different driver.
 
   Location: src/display.rs
 
@@ -221,9 +223,9 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   Description:
 
   This is the main state machine that handles the UI of the entire watch, it was designed with the intent to only support three button inputs (back, select, and the imu which replaces button 3) and a rotary encoder. The states were
-  designed to be based on layers of menus, and the current implementation is definitely still a WIP. The UI.rs file also includes methods for animations, caching images, brightness and time adjustment, and etc it is currently doing too 
-  much and definitely needs to be cleaned up. A simple stack with pop and push is used to track the state for purposes of the back button functionality. The state machine currently is definitely a bit overcomplicated and the file    
-  includes nearly anything relating to the UI is in this file. 
+  designed to be based on layers of menus, and the current implementation is definitely still a WIP. The UI.rs file also includes methods for animations, navigation caching images, brightness and time adjustment, and etc it is currently 
+  doing too much and definitely needs to be cleaned up. A simple stack with pop and push is used to track the state for purposes of the back button functionality. The state machine currently is definitely a bit overcomplicated and the
+  file includes nearly anything relating to the UI is in this file. 
 
   In order to get the snappy feel for the UI, certain graphics are preloaded images, and clears and framebuffer updates are strategically used to speed up graphics draws through knowing what the possible next states are.
 
