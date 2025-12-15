@@ -205,7 +205,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 #### QMI8658 IMU Driver
   Description:
 
-  This software handles communication from the esp32-s3 to the imu, this driver is very barebones however, and mainly only implements enough to function for the specific use case it has in this watch. It includes a basic constructur, 
+  This software handles communication from the esp32-s3 to the imu, this driver is very barebones however, and mainly only implements enough to function for the specific use case it has in this watch. It includes a basic constructor, 
   configures the imu, and reads the raw sensor data and data conversion, and built in methods for detecting the only action currently using the IMU. For further/later use, this should definitely be updated.
 
   Location: Watch_rs/src/qmi8658_imu.rs
