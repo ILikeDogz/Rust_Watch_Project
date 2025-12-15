@@ -14,7 +14,7 @@ Images:
 
 
 ## Overview:
-The Watch project features a 1.43 in OLED display apart of an esp32-s3 + display devboard from waveshare. There are 3 physical inputs, 2 buttons and a rotary encoder, and the imu which acts as a secret input for only one menu, intending to work as a fake button due to the impracticality of including a physical button under the watch. The left button is set up to be the back button, and the right button is the select button. The rotary encoder acts as a left or right controller allowing for fast switching through menus. The watch currently features 3 main "apps". Low power mode for the watch can be activated through holding down the back button. Pressing the select button will wake the watch up after entering low power mode (restarting the watch). 
+The Watch project features a 1.43 in OLED display apart of an esp32-s3 + display devboard from waveshare. There are 3 physical inputs, 2 buttons and a rotary encoder, and the imu which acts as a secret input for only one menu, intending to work as a fake button due to the impracticality of including a physical button under the watch. The left button is set up to be the back button, and the right button is the select button. The rotary encoder acts as a left or right controller allowing for fast switching through menus. The watch currently features 3 main fully functional "apps". Low power mode for the watch can be activated through holding down the back button. Pressing the select button will wake the watch up after entering low power mode (restarting the watch). 
 
 The inspiration to use an esp32 + display devboard for a watch came from this video (This had no other contribution to the design):
 
@@ -143,7 +143,9 @@ looking graphics and true black. The inputs were decided based on the recalibrat
 
 ### Todo/Addition Ideas:
   - Testing of core housing (3d print completed on attempt 4)
+    
   <img width="1503" height="1237" alt="image" src="https://github.com/user-attachments/assets/d8be9f58-90f6-4ef6-87dc-928cb25f309d" />
+ 
   - Modeling and testing of base+wrist mount housing
   - Addition of additional features beyond simple 3 inputs
   - Spring Locking mechanism of the watch
