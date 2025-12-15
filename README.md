@@ -107,6 +107,8 @@ looking graphics and true black. The inputs were decided based on the recalibrat
   Purchase at: https://www.amazon.com/dp/B07CJYSL2T
 
   Information/Reference: includes U shape wires, 24 AWG, male to male, wire length 2 mm, 5 mm, 7 mm, 10 mm, 12 mm, 15 mm, 17 mm, 20 mm, 22 mm, 25 mm, 50 mm, 75 mm, 100 mm, 125 mm
+
+  Notes: This wire size slides in well to the display + board female headers, after using a standard jumper cable to widen the hole, without widening the hole, it is very difficult to fit the wires in.
 - 1x Custom PCB for Watch Inputs
   
   Information/Reference:   Altiums Files located in the repository under Watch_Input_PCB, *Errors/Warnings related to missing schematic libraries may show up, associated altium libraries are not included,
@@ -118,7 +120,7 @@ looking graphics and true black. The inputs were decided based on the recalibrat
 
 - 1x Physical Housing (incomplete):
 
-  Information/Reference: Fusion 360 models locatied at Watch_Housing_Models.
+  Information/Reference: Fusion 360 models located at Watch_Housing_Models.
 
   Notes: Only the core of the housing has been modeled. The housing has not physically been printed and tested yet, unknown if the model would work or be assembleable in real life. The end goal is for the housing to be wrist mountable.     The rotary encoder ideally should be able to be used through the rotating bezel with a three bevel gear train, the buttons should connect to some button stubs. The wrist connector and base should include a spring locked mechanism to      allow the core to pop up like the Ben 10 Omnitrix Watch.
 
