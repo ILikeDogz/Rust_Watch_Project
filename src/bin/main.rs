@@ -1,12 +1,3 @@
-//! Watch Prototype
-//! ========================================
-//! needs to be run in WSL2 terminal
-//! source ~/export-esp.sh
-//! ========================================
-//!
-//! Toggles LCD when either button pressed.
-//! It also reads a rotary encoder and toggles LCD.
-
 //% CHIPS: esp32s3
 //% FEATURES: esp-hal/unstable
 
