@@ -4,7 +4,7 @@ This is a WIP project to make a smart watch programmed in bare metal (no std) em
 
 Demo Video:
 
-https://www.youtube.com/shorts/WcdTKyUyNlw
+https://youtube.com/shorts/OBYA_7BNOW4
 
 Images: 
 
