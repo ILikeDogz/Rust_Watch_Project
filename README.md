@@ -107,6 +107,8 @@ looking graphics and true black. The inputs were decided based on the recalibrat
   Purchase at: https://www.amazon.com/dp/B07CJYSL2T
 
   Information/Reference: includes U shape wires, 24 AWG, male to male, wire length 2 mm, 5 mm, 7 mm, 10 mm, 12 mm, 15 mm, 17 mm, 20 mm, 22 mm, 25 mm, 50 mm, 75 mm, 100 mm, 125 mm
+
+  Notes: This wire size slides in well to the display + board female headers, after using a standard jumper cable to widen the hole, without widening the hole, it is very difficult to fit the wires in.
 - 1x Custom PCB for Watch Inputs
   
   Information/Reference:   Altiums Files located in the repository under Watch_Input_PCB, *Errors/Warnings related to missing schematic libraries may show up, associated altium libraries are not included,
@@ -118,7 +120,7 @@ looking graphics and true black. The inputs were decided based on the recalibrat
 
 - 1x Physical Housing (incomplete):
 
-  Information/Reference: Fusion 360 models locatied at Watch_Housing_Models.
+  Information/Reference: Fusion 360 models located at Watch_Housing_Models.
 
   Notes: Only the core of the housing has been modeled. The housing has not physically been printed and tested yet, unknown if the model would work or be assembleable in real life. The end goal is for the housing to be wrist mountable.     The rotary encoder ideally should be able to be used through the rotating bezel with a three bevel gear train, the buttons should connect to some button stubs. The wrist connector and base should include a spring locked mechanism to      allow the core to pop up like the Ben 10 Omnitrix Watch.
 
@@ -284,10 +286,10 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   This breadboard portotype implements the same controls as the current pcb design uses, except with an addition of a third button for easier testing of the feature the imu implements. Since switches are for the most part the same, not 
   using the exact switches did not matter much, but the same rotary encoder was used to get a feel for the torque and to be testing with the right amount of detents.
 
-  Initial Testing was done with am esp32-s3 dev kit, not this display + board. This was to test the functionality of button inputs, using simple LED outputs to confirm their function, and function of the encoder through serial print 
+  Initial Testing was done with an esp32-s3 dev kit, not this display + board. This was to test the functionality of button inputs, using simple LED outputs to confirm their function, and function of the encoder through serial print 
   statements. Testing of the inputs was for the most part insignificant though due to them being pretty standard inputs and implementations.
 
-  Was going to use a GC9A01 LCB, but it looked bad after flashing an example program onto it, so switched to a 1.43 in OLED. 
+  Was going to use a GC9A01 LCD, but it looked bad after flashing an example program onto it, so switched to a 1.43 in OLED. 
   
   With the display + board commbo, the initial test ran was to run the example program and determine the specific driver of the display, as the driver was mentioned on the wiki to either be a CO5300 or SH8601. After running the arduino 
   example and determining the driver to be a CO5300 driver, the development of the driver software began.
@@ -299,7 +301,7 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   After, the next test was to check if odd writes could work or not, as many displays such as the CO5300, do not properly accept odd writes. Testing was done with some simple lines and 1x1 pixel writes, which initially failed, but the 
   2x thick writes worked, showing that the display did not accept odd writes. 
 
-  Based on this, the decision was made to use a software framebuffer on the psram, to enable odd writes, and get true full control over the pixels. A set of simple graphics tests was made to run in quick_tests.txt. These were set up to do a few things, fill color the display, draw text on the edges, load an image, and draw a 1 pixel thick shape and timings. After a lot of iterations and connecting the driver to the embedded graphics library/crate, the test image was showing up properly.
+  Based on this, the decision was made to use a software framebuffer on the psram, to enable odd writes, and get true full control over the pixels. A set of simple graphics tests was made to run in garbage.txt. These were set up to do a few things, fill color the display, draw text on the edges, load an image, and draw a 1 pixel thick shape, and write the timings for each draw. After a lot of iterations and connecting the driver to the embedded graphics library/crate, the full test image was showing up properly.
 
   <img width="1008" height="937" alt="image" Watch_rs/src="https://github.com/user-attachments/assets/045fcda5-180c-405b-85ba-517d7c1ea20e" />
 
