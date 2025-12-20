@@ -104,7 +104,7 @@ fn days_since_unix(year: u16, month: u8, day: u8) -> u32 {
 pub fn datetime_to_unix(dt: &DateTime) -> u32 {
     let days = days_since_unix(dt.year, dt.month, dt.day) as u64;
     let secs = days
-        .saturating_mul(86_400)// 86400 seconds in a day
+        .saturating_mul(86_400) // 86400 seconds in a day
         .saturating_add((dt.hour as u64) * 3600) // 3600 seconds in an hour
         .saturating_add((dt.minute as u64) * 60) // 60 seconds in a minute
         .saturating_add(dt.second as u64); // add seconds
@@ -134,13 +134,13 @@ pub fn unix_to_datetime(mut ts: u32) -> DateTime {
     let z = days as i32 + 719468; // 719468 = days from 0000-03-01 to 1970-01-01
     let era = (z >= 0)
         .then(|| z / 146097) // 146097 = days in 400 years
-        .unwrap_or_else(|| (z - 146096) / 146097); 
+        .unwrap_or_else(|| (z - 146096) / 146097);
     let doe = z - era * 146097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era, 1460 = days in 4 years, 36524 = days in 100 years, 146096 = days in 400 years
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153; // 153 = days in 5 months
-    let day = doy - (153 * mp + 2) / 5 + 1; 
+    let day = doy - (153 * mp + 2) / 5 + 1;
     let month = mp + if mp < 10 { 3 } else { -9 }; // March=3,...,January=13,February=14
     let year = y + if month <= 2 { 1 } else { 0 }; // adjust year if month is Jan or Feb
 

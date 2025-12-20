@@ -1,12 +1,12 @@
-//! UI state management and display rendering module.
-//!
-//! This module provides:
-//! - The `UiState` enum and its navigation methods (`next`, `prev`, etc.)
-//! - The `update_ui` function to render the current UI state to the display
-//! - Drawing helpers for text, shapes, and layout
-//!
-//! Designed for use with embedded-graphics, mipidsi, and ESP-HAL display drivers.
-//! All drawing is centered on a 240x240 display, but can be adapted for other sizes.
+// UI state management and display rendering module.
+//
+// This module provides:
+// - The `UiState` enum and its navigation methods (`next`, `prev`, etc.)
+// - The `update_ui` function to render the current UI state to the display
+// - Drawing helpers for text, shapes, and layout
+//
+// Designed for use with embedded-graphics, and ESP-HAL display drivers.
+// All drawing is centered on a 466x466 display, but can be adapted for other sizes.
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -453,7 +453,7 @@ fn clock_now_seconds_f32() -> f32 {
     })
 }
 
-/// Return hours, minutes, seconds as f32 with good precision by working modulo 12h.
+// Return hours, minutes, seconds as f32 with good precision by working modulo 12h.
 fn clock_now_hms_f32() -> (f32, f32, f32) {
     critical_section::with(|cs| {
         let base_secs = *CLOCK_BASE_SECS.borrow(cs).borrow();
