@@ -1,4 +1,4 @@
-//! Display setup and initialization module.
+// Display setup and initialization module.
 //
 // - `setup_display` picks the right backend based on features.
 // - Reuses your SpinDelay and DisplayPins wiring.
@@ -7,57 +7,23 @@
 
 use esp_backtrace as _;
 
+#[cfg(feature = "esp32s3-disp143Oled")]
+extern crate alloc;
+#[cfg(feature = "esp32s3-disp143Oled")]
+use alloc::{boxed::Box, vec};
+
+#[cfg(feature = "devkit-esp32s3-disp128")]
+use esp_hal::ram;
+
 // ------------------------- Common imports -------------------------
-use esp_hal::{
-    gpio::Output,
-    spi::master::Config,
-    spi::Mode,
-    time::Rate,
-    timer::systimer::{SystemTimer, Unit},
-};
+use esp_hal::{gpio::Output, spi::master::Config, spi::Mode, time::Rate};
 
 use crate::wiring::DisplayPins;
+#[cfg(feature = "devkit-esp32s3-disp128")]
+#[ram]
+static mut DISPLAY_BUF: [u8; 1024] = [0; 1024];
 
-// A delay provider that uses the ESP32-S3's high-resolution SystemTimer.
-pub struct TimerDelay;
-
-impl embedded_hal::delay::DelayNs for TimerDelay {
-    #[inline]
-    fn delay_ns(&mut self, ns: u32) {
-        let ticks_per_sec = SystemTimer::ticks_per_second();
-        let start = SystemTimer::unit_value(Unit::Unit0); // Calculate required ticks, rounding up to ensure at least minimum delay
-        let delta_ticks = (ns as u64 * ticks_per_sec).div_ceil(1_000_000_000);
-        let end_ticks = start.saturating_add(delta_ticks);
-
-        while SystemTimer::unit_value(Unit::Unit0) < end_ticks {
-            core::hint::spin_loop();
-        }
-    }
-
-    #[inline]
-    fn delay_us(&mut self, us: u32) {
-        let ticks_per_sec = SystemTimer::ticks_per_second();
-        let start = SystemTimer::unit_value(Unit::Unit0);
-        let delta_ticks = (us as u64 * ticks_per_sec).div_ceil(1_000_000);
-        let end_ticks = start.saturating_add(delta_ticks);
-
-        while SystemTimer::unit_value(Unit::Unit0) < end_ticks {
-            core::hint::spin_loop();
-        }
-    }
-
-    #[inline]
-    fn delay_ms(&mut self, ms: u32) {
-        let ticks_per_sec = SystemTimer::ticks_per_second();
-        let start = SystemTimer::unit_value(Unit::Unit0);
-        let delta_ticks = (ms as u64 * ticks_per_sec).div_ceil(1_000);
-        let end_ticks = start.saturating_add(delta_ticks);
-
-        while SystemTimer::unit_value(Unit::Unit0) < end_ticks {
-            core::hint::spin_loop();
-        }
-    }
-}
+pub use crate::hal::timer::TimerDelay;
 
 // ==================================================================
 // GC9A01 (240x240) backend  — feature: devkit-esp32s3-disp128
@@ -200,3 +166,16 @@ pub use gc9a01_backend::{setup_display, DisplayType};
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 pub use co5300_backend::{setup_display, DisplayType};
+
+#[cfg(feature = "devkit-esp32s3-disp128")]
+pub fn init_display<'a>(display_pins: DisplayPins<'a>) -> DisplayType<'a> {
+    // Safe because DISPLAY_BUF is only used here.
+    unsafe { setup_display(display_pins, &mut DISPLAY_BUF) }
+}
+
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub fn init_display<'a>(display_pins: DisplayPins<'a>) -> DisplayType<'a> {
+    const W: usize = 466;
+    let fb: &'static mut [u16] = Box::leak(vec![0u16; W * W].into_boxed_slice());
+    setup_display(display_pins, fb)
+}
