@@ -83,7 +83,6 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
 
         // Generate strand points
         for (i, y) in (y_start..=y_end).step_by(step).enumerate() {
-            
             // Calculate phase, amplitude, and offsets
             let phase = t + (i as f32) * 0.32;
             let amp = amp_max * 0.75;

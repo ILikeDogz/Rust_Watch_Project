@@ -80,8 +80,8 @@ pub fn render(disp: &mut impl PanelRgb565, watch_state: WatchAppState) {
             let edit = current_edit_state();
             let should_clear_after_edit = critical_section::with(|cs| {
                 // Check if we were in edit mode last frame but not now
-                let mut last = LAST_WATCH_EDIT_ACTIVE.borrow(cs).borrow_mut(); 
-                let was = *last;  
+                let mut last = LAST_WATCH_EDIT_ACTIVE.borrow(cs).borrow_mut();
+                let was = *last;
                 let now = edit.is_some();
                 *last = now;
                 was && !now

@@ -135,7 +135,7 @@ mod gc9a01_backend {
 #[cfg(feature = "esp32s3-disp143Oled")]
 mod co5300_backend {
     use super::*;
-    use crate::co5300::{self, Co5300Display, RawSpiDev};
+    use crate::drivers::co5300::{self, Co5300Display, RawSpiDev};
     use embedded_hal::delay::DelayNs;
     use esp_hal::{
         dma::{DmaRxBuf, DmaTxBuf},

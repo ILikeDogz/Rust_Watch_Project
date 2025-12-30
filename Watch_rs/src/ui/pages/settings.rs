@@ -170,7 +170,7 @@ fn fill_ring_arc_no_fb(
         // bottom
         if check_angle(90.0, ang0, ang1) {
             y_max = r_outer as f32;
-        } 
+        }
         // left
         if check_angle(180.0, ang0, ang1) {
             x_min = -(r_outer as f32);
@@ -178,7 +178,7 @@ fn fill_ring_arc_no_fb(
         // top
         if check_angle(270.0, ang0, ang1) {
             y_min = -(r_outer as f32);
-        } 
+        }
 
         // Convert to screen coords with small padding for rounding errors
         let pad = 2;

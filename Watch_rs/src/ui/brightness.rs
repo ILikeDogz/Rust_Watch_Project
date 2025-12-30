@@ -6,8 +6,8 @@ use critical_section::Mutex;
 
 static BRIGHTNESS_PCT: Mutex<RefCell<u8>> = Mutex::new(RefCell::new(100));
 static BRIGHTNESS_EDIT: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
-static BRIGHTNESS_LAST: Mutex<RefCell<Option<u8>>> = Mutex::new(RefCell::new(None)); 
-static BRIGHTNESS_DIRTY: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false)); 
+static BRIGHTNESS_LAST: Mutex<RefCell<Option<u8>>> = Mutex::new(RefCell::new(None));
+static BRIGHTNESS_DIRTY: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 
 // Get the initial brightness percentage
 pub fn get_brightness_pct() -> u8 {

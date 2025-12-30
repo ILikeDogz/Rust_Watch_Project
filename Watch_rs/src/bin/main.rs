@@ -12,11 +12,11 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // Module imports
 use esp32s3_tests::{
     display::setup_display,
+    drivers::qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
     input::{
         handle_button_generic, handle_encoder_generic, handle_imu_int_generic, ButtonState,
         ImuIntState, RotaryState,
     },
-    qmi8658_imu::{Qmi8658, SmashDetector, DEFAULT_I2C_ADDR},
     ui::{
         brightness_adjust, clear_all_caches, clock_now_seconds_u32, get_clock_seconds,
         precache_asset, set_clock_seconds, update_ui, AssetId, Dialog, MainMenuState, Page,
@@ -25,7 +25,7 @@ use esp32s3_tests::{
     wiring::{init_board_pins, BoardPins},
 };
 
-use esp32s3_tests::rtc_pcf85063::{
+use esp32s3_tests::drivers::rtc_pcf85063::{
     datetime_is_valid, datetime_to_unix, unix_to_datetime, Pcf85063,
 };
 
@@ -327,44 +327,54 @@ fn main() -> ! {
                 let bus = core::cell::RefCell::new(i2c);
                 let bus_static: &'static core::cell::RefCell<I2c<'static, esp_hal::Blocking>> =
                     Box::leak(Box::new(bus));
-                let rtc_dev = embedded_hal_bus::i2c::RefCellDevice::new(bus_static);
-                let mut rtc_handle = Pcf85063::new(rtc_dev);
-                let rtc_secs = rtc_handle.read_datetime().ok().and_then(|(dt, vl)| {
-                    if vl {
-                        // esp_println::println!(
-                        //     "[RTC] VL=1 dt={:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                        //     dt.year,
-                        //     dt.month,
-                        //     dt.day,
-                        //     dt.hour,
-                        //     dt.minute,
-                        //     dt.second
-                        // );
-                        None
-                    } else if datetime_is_valid(&dt) {
-                        // esp_println::println!(
-                        //     "[RTC] read ok {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                        //     dt.year,
-                        //     dt.month,
-                        //     dt.day,
-                        //     dt.hour,
-                        //     dt.minute,
-                        //     dt.second
-                        // );
-                        Some(datetime_to_unix(&dt))
-                    } else {
-                        // esp_println::println!(
-                        //     "[RTC] read invalid {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                        //     dt.year,
-                        //     dt.month,
-                        //     dt.day,
-                        //     dt.hour,
-                        //     dt.minute,
-                        //     dt.second
-                        // );
-                        None
+                let mut delay = TimerDelay;
+                delay.delay_ms(20);
+                let mut rtc_secs: Option<u32> = None;
+                for attempt in 0..3 {
+                    let rtc_dev = embedded_hal_bus::i2c::RefCellDevice::new(bus_static);
+                    let mut rtc_handle = Pcf85063::new(rtc_dev);
+                    let read = rtc_handle.read_datetime().ok().and_then(|(dt, vl)| {
+                        if vl {
+                            // esp_println::println!(
+                            //     "[RTC] VL=1 dt={:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                            //     dt.year,
+                            //     dt.month,
+                            //     dt.day,
+                            //     dt.hour,
+                            //     dt.minute,
+                            //     dt.second
+                            // );
+                            None
+                        } else if datetime_is_valid(&dt) {
+                            // esp_println::println!(
+                            //     "[RTC] read ok {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                            //     dt.year,
+                            //     dt.month,
+                            //     dt.day,
+                            //     dt.hour,
+                            //     dt.minute,
+                            //     dt.second
+                            // );
+                            Some(datetime_to_unix(&dt))
+                        } else {
+                            // esp_println::println!(
+                            //     "[RTC] read invalid {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                            //     dt.year,
+                            //     dt.month,
+                            //     dt.day,
+                            //     dt.hour,
+                            //     dt.minute,
+                            //     dt.second
+                            // );
+                            None
+                        }
+                    });
+                    if read.is_some() {
+                        rtc_secs = read;
+                        break;
                     }
-                });
+                    delay.delay_ms(10 + attempt * 10);
+                }
                 let boot_secs = rtc_secs.unwrap_or_else(|| {
                     let now = SystemTimer::unit_value(Unit::Unit0);
                     (now / SystemTimer::ticks_per_second()) as u32
@@ -442,7 +452,7 @@ fn main() -> ! {
     #[cfg(feature = "esp32s3-disp143Oled")]
     let mut smash_detector = SmashDetector::default_rough();
     #[cfg(feature = "esp32s3-disp143Oled")]
-    let mut last_sample: Option<esp32s3_tests::qmi8658_imu::ImuSample> = None;
+    let mut last_sample: Option<esp32s3_tests::drivers::qmi8658_imu::ImuSample> = None;
     #[cfg(feature = "esp32s3-disp143Oled")]
     let mut next_poll_ms: u64 = 0;
 

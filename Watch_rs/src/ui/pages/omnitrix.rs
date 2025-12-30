@@ -1,6 +1,6 @@
 // Render the Omnitrix page based on the current Omnitrix state.
 
-use crate::ui::assets::{asset_id_for_state, get_cached_asset, precache_asset, draw_image_bytes};
+use crate::ui::assets::{asset_id_for_state, draw_image_bytes, get_cached_asset, precache_asset};
 use crate::ui::state::OmnitrixState;
 use crate::ui::PanelRgb565;
 

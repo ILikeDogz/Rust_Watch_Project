@@ -27,7 +27,8 @@ pub mod time;
 
 pub use assets::{draw_image_bytes, get_cached_asset, precache_all, precache_asset, AssetId};
 pub use brightness::{
-    brightness_adjust, brightness_edit_active, brightness_edit_set, get_brightness_pct, brightness_take_dirty,
+    brightness_adjust, brightness_edit_active, brightness_edit_set, brightness_take_dirty,
+    get_brightness_pct,
 };
 pub use state::{
     Dialog, MainMenuState, OmnitrixState, Page, SettingsMenuState, UiState, WatchAppState,

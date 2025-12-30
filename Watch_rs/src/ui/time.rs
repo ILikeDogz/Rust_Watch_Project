@@ -207,24 +207,29 @@ pub fn format_clock_hm(buf: &mut [u8; 5]) -> &str {
     core::str::from_utf8(buf).unwrap_or("??:??")
 }
 
+// Get current clock seconds since epoch
 pub fn get_clock_seconds() -> u64 {
     clock_now_seconds()
 }
 
+// Reset hand cache (call on cache clear)
 pub fn reset_hand_cache() {
     critical_section::with(|cs| {
         *HAND_CACHE.borrow(cs).borrow_mut() = HandCache::new();
     });
 }
 
+// Get access to hand cache within a critical section
 pub fn with_hand_cache<R>(f: impl FnOnce(&mut HandCache) -> R) -> R {
     critical_section::with(|cs| f(&mut HAND_CACHE.borrow(cs).borrow_mut()))
 }
 
+// Get mutable access to hand cache within a critical section
 pub fn hand_cache_mut<'cs>(cs: CriticalSection<'cs>) -> core::cell::RefMut<'cs, HandCache> {
     HAND_CACHE.borrow(cs).borrow_mut()
 }
 
+// Take and clear the watch face dirty flag
 pub fn take_watch_face_dirty() -> bool {
     critical_section::with(|cs| {
         let mut f = WATCH_FACE_DIRTY.borrow(cs).borrow_mut();
@@ -236,10 +241,12 @@ pub fn take_watch_face_dirty() -> bool {
     })
 }
 
+// Mark the watch face as dirty (needs full redraw)
 pub fn mark_watch_face_dirty() {
     critical_section::with(|cs| *WATCH_FACE_DIRTY.borrow(cs).borrow_mut() = true);
 }
 
+// Reset all clock-related state (call on cache clear)
 pub fn reset_clock_state() {
     critical_section::with(|cs| {
         *CLOCK_EDIT.borrow(cs).borrow_mut() = None;
