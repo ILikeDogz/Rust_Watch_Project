@@ -11,9 +11,8 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 // Module imports
 use esp32s3_tests::{
-    app, init,
+    app, display::init_display, init,
     wiring::{init_board_pins, BoardPins},
-    display::init_display,
 };
 
 // Core imports
@@ -25,6 +24,8 @@ use esp_hal::{
     timer::systimer::{SystemTimer, Unit},
     Config,
 };
+#[cfg(feature = "esp32s3-disp143Oled")]
+use esp_hal::system::CpuControl;
 
 #[cfg(feature = "esp32s3-disp143Oled")]
 fn apply_brightness(display: &mut esp32s3_tests::display::DisplayType<'static>, pct: u8) {
@@ -46,7 +47,11 @@ fn main() -> ! {
     esp_alloc::psram_allocator!(&peripherals.PSRAM, psram);
 
     // one call gives you IO handler + all your role pins from wiring.rs
-    let (mut io, pins, i2c0) = init_board_pins(peripherals);
+    let (mut io, pins, i2c0, cpu_ctrl) = init_board_pins(peripherals);
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    let mut cpu_control = CpuControl::new(cpu_ctrl);
+    #[cfg(not(feature = "esp32s3-disp143Oled"))]
+    let _ = cpu_ctrl;
 
     // Destructure pins for easier access
     let BoardPins {
@@ -75,11 +80,11 @@ fn main() -> ! {
     #[cfg(not(feature = "esp32s3-disp143Oled"))]
     let imu_int_opt = None;
 
-    // Install inputs
-    app::state::install_inputs(btn1, btn2, btn3, enc_clk, enc_dt, imu_int_opt);
-
-    // Set up interrupt handler
-    io.set_interrupt_handler(app::interrupts::handler);
+    let now_ms = {
+        let t = SystemTimer::unit_value(Unit::Unit0);
+        t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    };
+    app::state::install_inputs(btn1, btn2, btn3, enc_clk, enc_dt, imu_int_opt, now_ms);
 
     let mut my_display = init_display(display_pins);
 
@@ -101,8 +106,17 @@ fn main() -> ! {
 
     #[cfg(feature = "esp32s3-disp143Oled")]
     {
-        app::boot::run_boot_sequence(&mut my_display);
+        app::boot::run_boot_sequence(&mut my_display, &mut cpu_control);
     }
+
+    // Prime inputs after boot animation completes.
+    let now_ms = {
+        let t = SystemTimer::unit_value(Unit::Unit0);
+        t.saturating_mul(1000) / SystemTimer::ticks_per_second()
+    };
+    app::state::prime_inputs(now_ms);
+    io.set_interrupt_handler(app::interrupts::handler);
+    app::state::set_inputs_enabled(true);
 
     // -------------------- Demo Sequence --------------------
     // // Demo sequence timing (for display driver benchmarking)

@@ -20,9 +20,16 @@ pub fn render(disp: &mut impl PanelRgb565, last_active: &mut bool) {
         if let Some(co) =
             (disp as &mut dyn core::any::Any).downcast_mut::<crate::display::DisplayType<'static>>()
         {
-            let _ =
-                co.fill_rect_solid_no_fb(0, 0, RESOLUTION as u16, RESOLUTION as u16, Rgb565::BLACK);
-            co.fill_rect_fb(
+            let _ = crate::display::FastPanelOps::fill_rect_solid_no_fb(
+                co,
+                0,
+                0,
+                RESOLUTION as u16,
+                RESOLUTION as u16,
+                Rgb565::BLACK,
+            );
+            crate::display::FastPanelOps::fill_rect_fb(
+                co,
                 0,
                 0,
                 (RESOLUTION - 1) as i32,
@@ -30,9 +37,12 @@ pub fn render(disp: &mut impl PanelRgb565, last_active: &mut bool) {
                 Rgb565::BLACK,
             );
         } else {
+            // Fallback clear for non-DisplayType panels
             let _ = disp.clear(Rgb565::BLACK);
         }
     }
+
+    // Draw the animated DNA helix overlay
     draw_transform_overlay(disp);
 }
 
@@ -68,7 +78,7 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
         (disp as &mut dyn core::any::Any).downcast_mut::<crate::display::DisplayType<'static>>()
     {
         // Clear only the helix region in the framebuffer each frame.
-        co.fill_rect_fb(x0, y0, x1, y1, Rgb565::BLACK);
+        crate::display::FastPanelOps::fill_rect_fb(co, x0, y0, x1, y1, Rgb565::BLACK);
 
         // Collect strand segments for depth-sorted drawing
         // (y_pos, depth, is_strand_a, prev_point, curr_point)
@@ -145,7 +155,15 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
         for &(_y, depth, pa, pb, is_front) in rungs.iter() {
             if depth < 0.0 {
                 let col = if is_front { rung_front } else { rung_back };
-                let _ = co.draw_line_fb(pa.x, pa.y, pb.x, pb.y, col, rung_thick);
+                let _ = crate::display::FastPanelOps::draw_line_fb(
+                    co,
+                    pa.x,
+                    pa.y,
+                    pb.x,
+                    pb.y,
+                    col,
+                    rung_thick,
+                );
             }
         }
 
@@ -174,7 +192,8 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
             };
 
             // Draw shadow (thicker, darker) then main strand
-            let _ = co.draw_line_fb(
+            let _ = crate::display::FastPanelOps::draw_line_fb(
+                co,
                 p_prev.x,
                 p_prev.y,
                 p_curr.x,
@@ -184,7 +203,8 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
             );
 
             // Draw main strand
-            let _ = co.draw_line_fb(
+            let _ = crate::display::FastPanelOps::draw_line_fb(
+                co,
                 p_prev.x,
                 p_prev.y,
                 p_curr.x,
@@ -198,12 +218,26 @@ fn draw_transform_overlay(disp: &mut impl PanelRgb565) {
         for &(_y, depth, pa, pb, is_front) in rungs.iter() {
             if depth >= 0.0 {
                 let col = if is_front { rung_front } else { rung_back };
-                let _ = co.draw_line_fb(pa.x, pa.y, pb.x, pb.y, col, rung_thick);
+                let _ = crate::display::FastPanelOps::draw_line_fb(
+                    co,
+                    pa.x,
+                    pa.y,
+                    pb.x,
+                    pb.y,
+                    col,
+                    rung_thick,
+                );
             }
         }
 
         // Flush only the helix region to avoid needless panel churn.
-        let _ = co.flush_rect_even(x0 as u16, y0 as u16, x1 as u16, y1 as u16);
+        let _ = crate::display::FastPanelOps::flush_rect_even(
+            co,
+            x0 as u16,
+            y0 as u16,
+            x1 as u16,
+            y1 as u16,
+        );
     } else {
         // Fallback path using embedded-graphics primitives.
         let strand_thick = strand_thick_base; // use base thickness for fallback

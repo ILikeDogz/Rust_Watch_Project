@@ -1,7 +1,9 @@
-use esp_hal::handler;
-use esp_hal::ram;
+use esp_hal::{handler, ram, timer::systimer::{SystemTimer, Unit}};
 
 use crate::input::{handle_button_generic, handle_encoder_generic, handle_imu_int_generic};
+use crate::app::runtime::DEBOUNCE_MS;
+
+use core::sync::atomic::Ordering::Relaxed;
 
 use super::state;
 
@@ -10,19 +12,22 @@ use super::state;
 #[ram]
 pub fn handler() {
     let now_ms = {
-        let t = esp_hal::timer::systimer::SystemTimer::unit_value(
-            esp_hal::timer::systimer::Unit::Unit0,
+        let t = SystemTimer::unit_value(
+            Unit::Unit0,
         );
-        t.saturating_mul(1000) / esp_hal::timer::systimer::SystemTimer::ticks_per_second()
+        t.saturating_mul(1000) / SystemTimer::ticks_per_second()
     };
+    let enabled = state::inputs_enabled();
 
     // Button 1: handle press
     handle_button_generic(
         state::button1(),
         now_ms,
-        crate::app::runtime::DEBOUNCE_MS,
+        DEBOUNCE_MS,
         || {
-            state::button1_flag().store(true, core::sync::atomic::Ordering::Relaxed);
+            if enabled {
+                state::button1_flag().store(true, Relaxed);
+            }
         },
     );
 
@@ -30,9 +35,11 @@ pub fn handler() {
     handle_button_generic(
         state::button2(),
         now_ms,
-        crate::app::runtime::DEBOUNCE_MS,
+        DEBOUNCE_MS,
         || {
-            state::button2_flag().store(true, core::sync::atomic::Ordering::Relaxed);
+            if enabled {
+                state::button2_flag().store(true, Relaxed);
+            }
         },
     );
 
@@ -40,15 +47,25 @@ pub fn handler() {
     handle_button_generic(
         state::button3(),
         now_ms,
-        crate::app::runtime::DEBOUNCE_MS,
+        DEBOUNCE_MS,
         || {
-            state::button3_flag().store(true, core::sync::atomic::Ordering::Relaxed);
+            if enabled {
+                state::button3_flag().store(true, Relaxed);
+            }
         },
     );
 
     // Encoder logic is fine, it's just math
-    handle_encoder_generic(state::rotary());
+    if enabled {
+        handle_encoder_generic(state::rotary());
+    } else {
+        state::clear_encoder_interrupts();
+    }
 
     // IMU interrupt handling
-    handle_imu_int_generic(state::imu_int(), state::imu_int_flag());
+    if enabled {
+        handle_imu_int_generic(state::imu_int(), state::imu_int_flag());
+    } else {
+        state::clear_imu_interrupt();
+    }
 }

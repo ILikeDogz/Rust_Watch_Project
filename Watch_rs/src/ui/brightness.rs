@@ -9,7 +9,7 @@ static BRIGHTNESS_EDIT: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 static BRIGHTNESS_LAST: Mutex<RefCell<Option<u8>>> = Mutex::new(RefCell::new(None));
 static BRIGHTNESS_DIRTY: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 
-// Get the initial brightness percentage
+// Get the brightness percentage
 pub fn get_brightness_pct() -> u8 {
     critical_section::with(|cs| *BRIGHTNESS_PCT.borrow(cs).borrow())
 }

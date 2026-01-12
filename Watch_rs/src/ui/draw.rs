@@ -1,6 +1,7 @@
 // Basic drawing utilities for the UI.
 
 use embedded_graphics::{
+    image::{Image, ImageRawBE},
     mono_font::{ascii::FONT_10X20, MonoFont, MonoTextStyleBuilder},
     pixelcolor::Rgb565,
     prelude::{Point, Primitive, RgbColor},
@@ -24,12 +25,13 @@ pub fn draw_text(
     font: Option<&'static MonoFont<'static>>,
 ) {
     if clear {
-        // Prefer no-FB clear if available and requested
+        // Prefer no-FB clear if available and requested, slightly faster on some backends
         if !update_fb {
             if let Some(co) = (disp as &mut dyn core::any::Any)
                 .downcast_mut::<crate::display::DisplayType<'static>>()
             {
-                let _ = co.fill_rect_solid_no_fb(
+                let _ = crate::display::FastPanelOps::fill_rect_solid_no_fb(
+                    co,
                     0,
                     0,
                     RESOLUTION as u16,
@@ -37,9 +39,11 @@ pub fn draw_text(
                     Rgb565::BLACK,
                 );
             } else {
+                // fallback clear
                 let _ = disp.clear(Rgb565::BLACK);
             }
         } else {
+            // normal clear (uses embedded-graphics implementation which may or may not use FB depending on backend)
             let _ = disp.clear(Rgb565::BLACK);
         }
     }
@@ -82,4 +86,76 @@ pub fn draw_hand_line(
     let _ = Line::new(Point::new(cx, cy), end)
         .into_styled(style)
         .draw(disp);
+}
+
+// Draw raw RGB565 bytes centered on the display.
+pub fn draw_image_bytes(
+    disp: &mut impl PanelRgb565,
+    bytes: &[u8],
+    w: u32,
+    h: u32,
+    clear: bool,
+    update_fb: bool,
+) {
+    // Clear background if requested
+    if clear {
+        if !update_fb {
+            if let Some(co) = (disp as &mut dyn core::any::Any)
+                .downcast_mut::<crate::display::DisplayType<'static>>()
+            {
+                let _ = crate::display::FastPanelOps::fill_rect_solid_no_fb(
+                    co,
+                    0,
+                    0,
+                    RESOLUTION as u16,
+                    RESOLUTION as u16,
+                    Rgb565::BLACK,
+                );
+            } else {
+                let _ = disp.clear(Rgb565::BLACK);
+            }
+        } else {
+            let _ = disp.clear(Rgb565::BLACK);
+        }
+    }
+    // Validate size
+    if bytes.len() != (w * h * 2) as usize {
+        return;
+    }
+    let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
+    let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
+
+    // Try fast raw blit when the backend supports it.
+    if let Some(co) =
+        (disp as &mut dyn core::any::Any).downcast_mut::<crate::display::DisplayType<'static>>()
+    {
+        let res = if update_fb {
+            crate::display::FastPanelOps::blit_rect_be_fast(
+                co,
+                x as u16,
+                y as u16,
+                w as u16,
+                h as u16,
+                bytes,
+            )
+        } else {
+            crate::display::FastPanelOps::blit_rect_be_fast_no_fb(
+                co,
+                x as u16,
+                y as u16,
+                w as u16,
+                h as u16,
+                bytes,
+            )
+        };
+        if res.is_ok() {
+            return;
+        }
+        if let Err(e) = res {
+            esp_println::println!("fast blit failed: {:?}; fallback", e);
+        }
+    }
+
+    let raw = ImageRawBE::<Rgb565>::new(bytes, w);
+    let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
 }

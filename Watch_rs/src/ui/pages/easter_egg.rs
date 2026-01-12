@@ -2,9 +2,9 @@
 
 use embedded_graphics::{pixelcolor::Rgb565, prelude::RgbColor};
 
-use crate::ui::assets::{draw_image_bytes, INFO_PAGE_IMAGE};
+use crate::ui::assets::INFO_PAGE_IMAGE;
 use crate::ui::draw::draw_text;
-use crate::ui::{PanelRgb565, CENTER};
+use crate::ui::{draw_image_bytes, PanelRgb565, CENTER};
 
 /// Render the Easter Egg (Info) page.
 pub fn render(disp: &mut impl PanelRgb565) {

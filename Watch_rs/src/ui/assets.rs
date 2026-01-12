@@ -6,15 +6,8 @@ use alloc::boxed::Box;
 use core::cell::RefCell;
 
 use critical_section::Mutex;
-use embedded_graphics::{
-    image::{Image, ImageRawBE},
-    pixelcolor::Rgb565,
-    prelude::{Point, RgbColor},
-    Drawable,
-};
 use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
 
-use crate::ui::{PanelRgb565, RESOLUTION};
 
 // Feature-selected image dimensions (adjust OLED to 466 if you have 466×466 assets)
 pub const MAX_IMG_W: u32 = 466;
@@ -206,61 +199,4 @@ pub fn get_cached_asset(id: AssetId) -> Option<(&'static [u8], u32, u32)> {
         let slot = ASSETS.borrow(cs).borrow()[idx];
         slot.data.map(|d| (d, slot.w, slot.h))
     })
-}
-
-// Draw from already-decompressed bytes (used by cache on OLED)
-pub fn draw_image_bytes(
-    disp: &mut impl PanelRgb565,
-    bytes: &[u8],
-    w: u32,
-    h: u32,
-    clear: bool,
-    update_fb: bool,
-) {
-    // Clear background if requested
-    if clear {
-        if !update_fb {
-            if let Some(co) = (disp as &mut dyn core::any::Any)
-                .downcast_mut::<crate::display::DisplayType<'static>>()
-            {
-                let _ = co.fill_rect_solid_no_fb(
-                    0,
-                    0,
-                    RESOLUTION as u16,
-                    RESOLUTION as u16,
-                    Rgb565::BLACK,
-                );
-            } else {
-                let _ = disp.clear(Rgb565::BLACK);
-            }
-        } else {
-            let _ = disp.clear(Rgb565::BLACK);
-        }
-    }
-    // Validate size
-    if bytes.len() != (w * h * 2) as usize {
-        return;
-    }
-    let x = (RESOLUTION.saturating_sub(w)) as i32 / 2;
-    let y = (RESOLUTION.saturating_sub(h)) as i32 / 2;
-
-    // Try fast raw blit if this really is the CO5300 driver (DMA or non-DMA alias).
-    // The display backend re-exports its concrete type as display::DisplayType.
-    if let Some(co) =
-        (disp as &mut dyn core::any::Any).downcast_mut::<crate::display::DisplayType<'static>>()
-    {
-        let res = if update_fb {
-            co.blit_rect_be_fast(x as u16, y as u16, w as u16, h as u16, bytes)
-        } else {
-            co.blit_rect_be_fast_no_fb(x as u16, y as u16, w as u16, h as u16, bytes)
-        };
-        if let Err(e) = res {
-            esp_println::println!("fast blit failed: {:?}; fallback", e);
-            let raw = ImageRawBE::<Rgb565>::new(bytes, w);
-            let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
-        }
-    } else {
-        let raw = ImageRawBE::<Rgb565>::new(bytes, w);
-        let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
-    }
 }

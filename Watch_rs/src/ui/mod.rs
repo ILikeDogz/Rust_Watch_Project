@@ -25,7 +25,8 @@ pub mod pages;
 pub mod state;
 pub mod time;
 
-pub use assets::{draw_image_bytes, get_cached_asset, precache_all, precache_asset, AssetId};
+pub use assets::{get_cached_asset, precache_all, precache_asset, AssetId};
+pub use draw::draw_image_bytes;
 pub use brightness::{
     brightness_adjust, brightness_edit_active, brightness_edit_set, brightness_take_dirty,
     get_brightness_pct,
@@ -111,8 +112,14 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
         let _ = if let Some(co) =
             (disp as &mut dyn Any).downcast_mut::<crate::display::DisplayType<'static>>()
         {
-            co.fill_rect_solid_no_fb(0, 0, RESOLUTION as u16, RESOLUTION as u16, Rgb565::BLACK)
-                .ok();
+            let _ = crate::display::FastPanelOps::fill_rect_solid_no_fb(
+                co,
+                0,
+                0,
+                RESOLUTION as u16,
+                RESOLUTION as u16,
+                Rgb565::BLACK,
+            );
         } else {
             // Fallback to normal clear
             disp.clear(Rgb565::BLACK).ok();

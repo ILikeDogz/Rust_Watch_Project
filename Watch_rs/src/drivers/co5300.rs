@@ -74,42 +74,6 @@ impl<'fb, RST> Co5300Display<'fb, RST>
 where
     RST: OutputPin,
 {
-    // Write a BE RGB565 rectangle into the framebuffer only (no flush).
-    pub fn write_rect_fb(
-        &mut self,
-        x: u16,
-        y: u16,
-        w: u16,
-        h: u16,
-        data: &[u8],
-    ) -> Result<(), Co5300Error<(), RST::Error>> {
-        if data.len() != (w as usize) * (h as usize) * 2 {
-            return Err(Co5300Error::OutOfBounds);
-        }
-        let x0 = x as usize;
-        let y0 = y as usize;
-        let w_us = w as usize;
-        let h_us = h as usize;
-        if x0 >= self.w as usize || y0 >= self.h as usize {
-            return Err(Co5300Error::OutOfBounds);
-        }
-        if x0 + w_us > self.w as usize || y0 + h_us > self.h as usize {
-            return Err(Co5300Error::OutOfBounds);
-        }
-        let fbw = self.w as usize;
-        let mut src_off = 0usize;
-        for row in 0..h_us {
-            let dst_base = (y0 + row) * fbw + x0;
-            let dst = &mut self.fb[dst_base..dst_base + w_us];
-            for px in dst.iter_mut() {
-                let b0 = data[src_off];
-                let b1 = data[src_off + 1];
-                *px = u16::from_be_bytes([b0, b1]).to_be();
-                src_off += 2;
-            }
-        }
-        Ok(())
-    }
 
     // Create + init the panel. Call once at startup.
     //
@@ -567,6 +531,43 @@ where
         } else {
             Some((minx as u16, miny as u16, maxx as u16, maxy as u16))
         }
+    }
+
+    // Write a BE RGB565 rectangle into the framebuffer only (no flush).
+    pub fn write_rect_fb(
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        data: &[u8],
+    ) -> Result<(), Co5300Error<(), RST::Error>> {
+        if data.len() != (w as usize) * (h as usize) * 2 {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        let x0 = x as usize;
+        let y0 = y as usize;
+        let w_us = w as usize;
+        let h_us = h as usize;
+        if x0 >= self.w as usize || y0 >= self.h as usize {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        if x0 + w_us > self.w as usize || y0 + h_us > self.h as usize {
+            return Err(Co5300Error::OutOfBounds);
+        }
+        let fbw = self.w as usize;
+        let mut src_off = 0usize;
+        for row in 0..h_us {
+            let dst_base = (y0 + row) * fbw + x0;
+            let dst = &mut self.fb[dst_base..dst_base + w_us];
+            for px in dst.iter_mut() {
+                let b0 = data[src_off];
+                let b1 = data[src_off + 1];
+                *px = u16::from_be_bytes([b0, b1]).to_be();
+                src_off += 2;
+            }
+        }
+        Ok(())
     }
 
     // Fill a rectangle in the framebuffer with a solid color (no flush), used for certain specific graphics.

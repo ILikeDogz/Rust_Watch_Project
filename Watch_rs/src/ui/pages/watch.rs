@@ -13,13 +13,13 @@ use embedded_graphics::{
     Drawable,
 };
 
-use crate::ui::assets::{draw_image_bytes, WATCH_BG_IMAGE};
+use crate::ui::assets::WATCH_BG_IMAGE;
 use crate::ui::draw::{draw_hand_line, draw_text, hand_end, rgb565_from_888};
 use crate::ui::state::WatchAppState;
 use crate::ui::time::{
     clock_now_hms_f32, current_edit_state, format_clock_hm, hand_cache_mut, take_watch_face_dirty,
 };
-use crate::ui::{PanelRgb565, CENTER, RESOLUTION};
+use crate::ui::{draw_image_bytes, PanelRgb565, CENTER, RESOLUTION};
 
 static LAST_WATCH_STATE: Mutex<RefCell<Option<WatchAppState>>> = Mutex::new(RefCell::new(None));
 static LAST_WATCH_EDIT_ACTIVE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
@@ -229,14 +229,22 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
                     let off = (row * bw + bx0) * 2;
                     buf.extend_from_slice(&bgdata[off..off + w * 2]);
                 }
-                let _ = co.write_rect_fb(bx0 as u16, by0 as u16, w as u16, h as u16, &buf);
+                let _ = crate::display::FastPanelOps::write_rect_fb(
+                    co,
+                    bx0 as u16,
+                    by0 as u16,
+                    w as u16,
+                    h as u16,
+                    &buf,
+                );
             } else {
-                co.fill_rect_fb(minx, miny, maxx, maxy, Rgb565::BLACK);
+                crate::display::FastPanelOps::fill_rect_fb(co, minx, miny, maxx, maxy, Rgb565::BLACK);
             }
 
             // Draw all hands
             // Hour hand
-            co.draw_line_fb(
+            crate::display::FastPanelOps::draw_line_fb(
+                co,
                 cx,
                 cy,
                 hour_end.x,
@@ -245,7 +253,8 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
                 hour_stroke as u8,
             );
             // Minute hand
-            co.draw_line_fb(
+            crate::display::FastPanelOps::draw_line_fb(
+                co,
                 cx,
                 cy,
                 min_end.x,
@@ -254,7 +263,15 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
                 min_stroke as u8,
             );
             // Second hand
-            co.draw_line_fb(cx, cy, sec_end.x, sec_end.y, Rgb565::CYAN, sec_stroke as u8);
+            crate::display::FastPanelOps::draw_line_fb(
+                co,
+                cx,
+                cy,
+                sec_end.x,
+                sec_end.y,
+                Rgb565::CYAN,
+                sec_stroke as u8,
+            );
             // Center dot as solid circle
             let r_outer: i32 = 8;
             let r_outer2: i32 = r_outer * r_outer;
@@ -271,7 +288,7 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
                     if d2 > r_outer2 {
                         continue;
                     }
-                    co.fill_rect_fb(xx, yy, xx, yy, c_solid);
+                    crate::display::FastPanelOps::fill_rect_fb(co, xx, yy, xx, yy, c_solid);
                 }
             }
 
@@ -293,7 +310,13 @@ fn draw_analog_clock(disp: &mut impl PanelRgb565) {
 
         // Flush the affected region
         let (minx, miny, maxx, maxy) = bbox;
-        let _ = co.flush_rect_even(minx as u16, miny as u16, maxx as u16, maxy as u16);
+        let _ = crate::display::FastPanelOps::flush_rect_even(
+            co,
+            minx as u16,
+            miny as u16,
+            maxx as u16,
+            maxy as u16,
+        );
         return;
     }
 
