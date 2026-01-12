@@ -1,6 +1,11 @@
 //% CHIPS: esp32s3
 //% FEATURES: esp-hal/unstable
 
+// TODO IDEAS
+// battery monitor page
+// micro sd card interaction/video playback page
+// more omnitrix alien animations
+
 #![no_std]
 #![no_main]
 
@@ -48,6 +53,8 @@ fn main() -> ! {
 
     // one call gives you IO handler + all your role pins from wiring.rs
     let (mut io, pins, i2c0, cpu_ctrl) = init_board_pins(peripherals);
+    
+    // CPU control for power management
     #[cfg(feature = "esp32s3-disp143Oled")]
     let mut cpu_control = CpuControl::new(cpu_ctrl);
     #[cfg(not(feature = "esp32s3-disp143Oled"))]
@@ -99,8 +106,6 @@ fn main() -> ! {
     });
     esp32s3_tests::ui::set_clock_seconds(boot_secs);
     let mut imu = rtc_bus.map(init::imu::init_imu).flatten();
-
-    // count smash gestures while on Omnitrix page
 
     // // -------------------- UI Init --------------------
 

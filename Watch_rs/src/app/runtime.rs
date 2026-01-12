@@ -104,7 +104,7 @@ pub fn run(
                             // the omnitrix page is the only one that uses this input
                             if in_omnitrix {
                                 smash_count = smash_count.saturating_add(1);
-                                // 2 smashes as it will count both the pop up and the down slam
+                                // smashes (amount is adjustable)
                                 if smash_count >= 1 {
                                     // reset count after triggering
                                     smash_count = 0;
