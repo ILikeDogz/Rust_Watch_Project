@@ -46,5 +46,17 @@ pub fn render(disp: &mut impl PanelRgb565, menu_state: MainMenuState) {
                 }
             }
         }
+        MainMenuState::GamesApp => {
+            // Draw the cached games icon asset (no FB mirror)
+            let _ = disp.clear(Rgb565::BLACK);
+            if let Some((bytes, w, h)) = get_cached_asset(AssetId::GamesIcon) {
+                draw_image_bytes(disp, bytes, w, h, false, false);
+            } else if precache_asset(AssetId::GamesIcon) {
+                // Try again after precaching
+                if let Some((bytes, w, h)) = get_cached_asset(AssetId::GamesIcon) {
+                    draw_image_bytes(disp, bytes, w, h, false, false);
+                }
+            }
+        }
     }
 }

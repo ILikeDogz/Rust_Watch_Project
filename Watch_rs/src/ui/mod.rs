@@ -32,7 +32,8 @@ pub use brightness::{
     get_brightness_pct,
 };
 pub use state::{
-    Dialog, MainMenuState, OmnitrixState, Page, SettingsMenuState, UiState, WatchAppState,
+    Dialog, GamesState, MainMenuState, OmnitrixState, Page, SettingsMenuState, UiState,
+    WatchAppState,
 };
 pub use time::{
     clock_now_seconds_u32, format_clock_hm, get_clock_seconds, set_clock_seconds,
@@ -82,6 +83,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
         Page::Main(_) => state::PageKind::Main,
         Page::Settings(_) => state::PageKind::Settings,
         Page::Omnitrix(_) => state::PageKind::Omnitrix,
+        Page::Games(_) => state::PageKind::Games,
         Page::EasterEgg => state::PageKind::EasterEgg,
         Page::Watch(_) => state::PageKind::Watch,
     };
@@ -177,6 +179,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
         Page::Settings(settings_state) => pages::settings::render(disp, settings_state),
         Page::Watch(watch_state) => pages::watch::render(disp, watch_state),
         Page::Omnitrix(omnitrix_state) => pages::omnitrix::render(disp, omnitrix_state),
+        Page::Games(games_state) => pages::games::render(disp, games_state),
         Page::EasterEgg => pages::easter_egg::render(disp),
     }
 }

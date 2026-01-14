@@ -32,6 +32,7 @@ pub enum AssetId {
     InfoPage,
     SettingsImage,
     WatchIcon,
+    GamesIcon,
 }
 
 #[derive(Copy, Clone)]
@@ -42,7 +43,7 @@ struct AssetSlot {
 }
 
 // Number of asset slots
-const ASSET_MAX: usize = 14;
+const ASSET_MAX: usize = 15;
 
 macro_rules! res {
     () => {
@@ -80,6 +81,8 @@ pub(crate) static SETTINGS_IMAGE: &[u8] =
     include_bytes!("../assets/settings_image_400x344_rgb565_be.raw.zlib");
 pub(crate) static WATCH_ICON_IMAGE: &[u8] =
     include_bytes!("../assets/watch_icon_316x316_rgb565_be.raw.zlib");
+pub(crate) static GAMES_ICON_IMAGE: &[u8] =
+    include_bytes!("../assets/gaming_icon_300x300_rgb565_be.raw.zlib");
 pub(crate) static WATCH_BG_IMAGE: &[u8] =
     include_bytes!("../assets/watch_background_466x466_rgb565_be.raw.zlib");
 
@@ -122,6 +125,7 @@ fn asset_meta(id: AssetId) -> (usize, u32, u32, &'static [u8]) {
         AssetId::InfoPage => (11, 466, 466, INFO_PAGE_IMAGE),
         AssetId::SettingsImage => (12, 400, 344, SETTINGS_IMAGE),
         AssetId::WatchIcon => (13, 316, 316, WATCH_ICON_IMAGE),
+        AssetId::GamesIcon => (14, 300, 300, GAMES_ICON_IMAGE),
     }
 }
 
@@ -182,6 +186,7 @@ pub fn precache_all() -> usize {
         AssetId::Logo,
         AssetId::SettingsImage,
         AssetId::WatchIcon,
+        AssetId::GamesIcon,
     ] {
         if precache_asset(id) {
             ok += 1;

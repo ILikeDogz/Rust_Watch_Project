@@ -19,7 +19,7 @@ const BOOT_FRAMES: u32 = 60;
 const FRAME_DELAY_MS: u32 = 16;
 const OUTER_WIDTH_PX: i32 = 390;
 const WAIST_WIDTH_PX: i32 = 115;
-const BOOT_ASSETS: [AssetId; 13] = [
+const BOOT_ASSETS: [AssetId; 14] = [
     AssetId::Alien1,
     AssetId::Alien2,
     AssetId::Alien3,
@@ -32,6 +32,7 @@ const BOOT_ASSETS: [AssetId; 13] = [
     AssetId::Alien10,
     AssetId::SettingsImage,
     AssetId::WatchIcon,
+    AssetId::GamesIcon,
     AssetId::Logo,
 ];
 

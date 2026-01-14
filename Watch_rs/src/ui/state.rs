@@ -36,6 +36,7 @@ pub enum Page {
     Watch(WatchAppState),
     Settings(SettingsMenuState),
     Omnitrix(OmnitrixState),
+    Games(GamesState),
     EasterEgg,
 }
 
@@ -51,6 +52,7 @@ pub enum MainMenuState {
     Home,        // just show home
     WatchApp,    // enter watch app (analog/digital)
     SettingsApp, // enter Settings
+    GamesApp,    // enter Games
 }
 
 // States for Watch App
@@ -83,11 +85,18 @@ pub enum OmnitrixState {
     Alien10,
 }
 
+// States for Games
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum GamesState {
+    Wip,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PageKind {
     Main,
     Settings,
     Omnitrix,
+    Games,
     EasterEgg,
     Watch,
 }
@@ -103,7 +112,8 @@ impl UiState {
                 let next = match state {
                     MainMenuState::Home => MainMenuState::WatchApp,
                     MainMenuState::WatchApp => MainMenuState::SettingsApp,
-                    MainMenuState::SettingsApp => MainMenuState::Home,
+                    MainMenuState::SettingsApp => MainMenuState::GamesApp,
+                    MainMenuState::GamesApp => MainMenuState::Home,
                 };
                 Page::Main(next)
             }
@@ -137,6 +147,7 @@ impl UiState {
                 };
                 Page::Omnitrix(next)
             }
+            Page::Games(_) => Page::Games(GamesState::Wip),
             Page::EasterEgg => Page::EasterEgg,
         };
         Self {
@@ -153,9 +164,10 @@ impl UiState {
         let prev_page = match self.page {
             Page::Main(state) => {
                 let prev = match state {
-                    MainMenuState::Home => MainMenuState::SettingsApp,
+                    MainMenuState::Home => MainMenuState::GamesApp,
                     MainMenuState::WatchApp => MainMenuState::Home,
                     MainMenuState::SettingsApp => MainMenuState::WatchApp,
+                    MainMenuState::GamesApp => MainMenuState::SettingsApp,
                 };
                 Page::Main(prev)
             }
@@ -189,6 +201,7 @@ impl UiState {
                 };
                 Page::Omnitrix(prev)
             }
+            Page::Games(_) => Page::Games(GamesState::Wip),
             Page::EasterEgg => Page::EasterEgg,
         };
         Self {
@@ -255,6 +268,7 @@ impl UiState {
                     MainMenuState::SettingsApp => {
                         Page::Settings(SettingsMenuState::BrightnessPrompt)
                     }
+                    MainMenuState::GamesApp => Page::Games(GamesState::Wip),
                 };
                 Self { page, dialog: None }
             }
@@ -279,7 +293,11 @@ impl UiState {
             Page::Omnitrix(_) => Self {
                 page: self.page,
                 dialog: None,
-            }, // changed
+            }, 
+            Page::Games(_) => Self {
+                page: self.page,
+                dialog: None,
+            },
             Page::EasterEgg => Self {
                 page: self.page,
                 dialog: None,
