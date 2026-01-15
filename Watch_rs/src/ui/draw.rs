@@ -160,9 +160,8 @@ pub fn draw_image_bytes(
     let _ = Image::new(&raw, Point::new(x, y)).draw(disp);
 }
 
-// Optimized ring arc: draws via framebuffer + flush for smooth output.
-// Requires DisplayType; not usable with generic PanelRgb565 paths.
-pub fn draw_ring_arc_smooth(
+// Draw a ring arc into the framebuffer, with optional flush, returns affected bbox.
+fn draw_ring_arc_fb(
     my_display: &mut crate::display::DisplayType<'static>,
     center_x: i32,
     center_y: i32,
@@ -172,7 +171,8 @@ pub fn draw_ring_arc_smooth(
     ang1_deg: f32,
     color: Rgb565,
     stroke: u8,
-) {
+    do_flush: bool,
+) -> Option<(i32, i32, i32, i32)> {
     // Normalize angles
     let mut ang0 = ang0_deg;
     let mut ang1 = ang1_deg;
@@ -183,24 +183,19 @@ pub fn draw_ring_arc_smooth(
         ang1 += 360.0;
     }
     if (ang1 - ang0).abs() < 0.01 {
-        return;
+        return None;
     }
 
     // Calculate angular step based on outer radius for smooth appearance.
-    // Smaller step = smoother but more lines. ~1 degree works well for large radii.
     let circumference = 2.0 * core::f32::consts::PI * r_outer as f32;
     let pixels_per_degree = circumference / 360.0;
-
-    // Aim for ~2 pixel spacing between radial lines at outer edge
     let step = (2.0 / pixels_per_degree).max(0.5).min(2.0);
 
-    // Track bounding box of drawn area for flush
     let mut minx = i32::MAX;
     let mut miny = i32::MAX;
     let mut maxx = i32::MIN;
     let mut maxy = i32::MIN;
 
-    // Helper to draw a single radial line and update bbox
     let mut draw_spoke = |angle: f32| {
         let rads = angle.to_radians();
         let cos = libm::cosf(rads);
@@ -210,7 +205,6 @@ pub fn draw_ring_arc_smooth(
         let ix = center_x + (cos * r_inner as f32) as i32;
         let iy = center_y + (sin * r_inner as f32) as i32;
 
-        // Draw the line and get affected area
         if let Some((ax0, ay0, ax1, ay1)) = crate::display::FastPanelOps::draw_line_fb(
             my_display,
             ix,
@@ -227,17 +221,18 @@ pub fn draw_ring_arc_smooth(
         }
     };
 
-    // Draw lines at regular intervals
     let mut a = ang0;
     while a < ang1 - 0.01 {
         draw_spoke(a);
         a += step;
     }
-    // Always draw the final line at exactly ang1 to ensure consistent endpoint
     draw_spoke(ang1);
 
-    // Flush the affected region
-    if minx != i32::MAX {
+    if minx == i32::MAX {
+        return None;
+    }
+
+    if do_flush {
         let _ = crate::display::FastPanelOps::flush_rect_even(
             my_display,
             minx.clamp(0, (RESOLUTION - 1) as i32) as u16,
@@ -246,6 +241,61 @@ pub fn draw_ring_arc_smooth(
             maxy.clamp(0, (RESOLUTION - 1) as i32) as u16,
         );
     }
+
+    Some((minx, miny, maxx, maxy))
+}
+
+// Optimized ring arc: draws via framebuffer + flush for smooth output.
+// Requires DisplayType; not usable with generic PanelRgb565 paths.
+pub fn draw_ring_arc_smooth(
+    my_display: &mut crate::display::DisplayType<'static>,
+    center_x: i32,
+    center_y: i32,
+    r_outer: i32,
+    r_inner: i32,
+    ang0_deg: f32,
+    ang1_deg: f32,
+    color: Rgb565,
+    stroke: u8,
+) {
+    let _ = draw_ring_arc_fb(
+        my_display,
+        center_x,
+        center_y,
+        r_outer,
+        r_inner,
+        ang0_deg,
+        ang1_deg,
+        color,
+        stroke,
+        true,
+    );
+}
+
+// Draw a ring arc into the framebuffer without flushing; returns affected bbox.
+pub fn draw_ring_arc_fb_no_flush(
+    my_display: &mut crate::display::DisplayType<'static>,
+    center_x: i32,
+    center_y: i32,
+    r_outer: i32,
+    r_inner: i32,
+    ang0_deg: f32,
+    ang1_deg: f32,
+    color: Rgb565,
+    stroke: u8,
+) -> Option<(i32, i32, i32, i32)> {
+    draw_ring_arc_fb(
+        my_display,
+        center_x,
+        center_y,
+        r_outer,
+        r_inner,
+        ang0_deg,
+        ang1_deg,
+        color,
+        stroke,
+        false,
+    )
 }
 
 // Fast rectangular clear for ring arc regions (used for erasing).
@@ -585,6 +635,32 @@ pub fn draw_ring_segment_raw(
             angle += step;
         }
     }
+}
+
+// Draw a ring segment into the framebuffer without flushing; returns affected bbox.
+pub fn draw_ring_segment_raw_fb_no_flush(
+    my_display: &mut crate::display::DisplayType<'static>,
+    center_x: i32,
+    center_y: i32,
+    radius: i32,
+    thickness: i32,
+    stroke: u8,
+    start_deg: f32,
+    end_deg: f32,
+    color: Rgb565,
+) -> Option<(i32, i32, i32, i32)> {
+    let r_inner = radius.saturating_sub(thickness.max(1));
+    draw_ring_arc_fb_no_flush(
+        my_display,
+        center_x,
+        center_y,
+        radius,
+        r_inner,
+        start_deg,
+        end_deg,
+        color,
+        stroke.max(1),
+    )
 }
 
 // delta_deg extends the start angle backward to overdraw for gap-free joins.

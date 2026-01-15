@@ -21,6 +21,7 @@ use embedded_graphics::{
 pub mod assets;
 pub mod brightness;
 pub mod draw;
+pub mod games;
 pub mod pages;
 pub mod state;
 pub mod time;
@@ -30,6 +31,14 @@ pub use draw::draw_image_bytes;
 pub use brightness::{
     brightness_adjust, brightness_edit_active, brightness_edit_set, brightness_take_dirty,
     get_brightness_pct,
+};
+pub use games::pong::{
+    pong_ball_active, pong_ball_attached_pos, pong_ball_last_pos, pong_ball_pos,
+    pong_ball_set_last_pos, pong_ball_set_pos, pong_ball_start, pong_ball_update, pong_game_over,
+    pong_paddle_adjust_timed, pong_paddle_angle, pong_paddle_flip_timed, pong_paddle_last_angle,
+    pong_paddle_set_last_angle, pong_play_radius, pong_score, pong_reset_on_exit, pong_set_game_over,
+    pong_set_text_visible, pong_text_visible, pong_win, PONG_BALL_RADIUS, PONG_PADDLE_ARC_DEG,
+    PONG_PADDLE_RADIUS_PAD, PONG_PADDLE_STROKE, PONG_PADDLE_THICKNESS,
 };
 pub use state::{
     Dialog, GamesState, MainMenuState, OmnitrixState, Page, SettingsMenuState, UiState,
@@ -146,6 +155,9 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
     // Reset watch-state tracker if we’re not on the Watch page.
     if !matches!(state.page, Page::Watch(_)) {
         pages::watch::reset_on_exit();
+    }
+    if !matches!(state.page, Page::Games(GamesState::Pong)) {
+        pong_reset_on_exit();
     }
 
     // Handle entering/exiting brightness adjustment mode

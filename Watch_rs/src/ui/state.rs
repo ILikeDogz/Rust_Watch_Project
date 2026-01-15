@@ -88,7 +88,10 @@ pub enum OmnitrixState {
 // States for Games
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum GamesState {
-    Wip,
+    MenuPong,
+    MenuSnake,
+    Pong,
+    Snake,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -147,7 +150,15 @@ impl UiState {
                 };
                 Page::Omnitrix(next)
             }
-            Page::Games(_) => Page::Games(GamesState::Wip),
+            Page::Games(state) => {
+                let next = match state {
+                    GamesState::MenuPong => GamesState::MenuSnake,
+                    GamesState::MenuSnake => GamesState::MenuPong,
+                    GamesState::Pong => GamesState::Pong,
+                    GamesState::Snake => GamesState::Snake,
+                };
+                Page::Games(next)
+            }
             Page::EasterEgg => Page::EasterEgg,
         };
         Self {
@@ -201,7 +212,15 @@ impl UiState {
                 };
                 Page::Omnitrix(prev)
             }
-            Page::Games(_) => Page::Games(GamesState::Wip),
+            Page::Games(state) => {
+                let prev = match state {
+                    GamesState::MenuPong => GamesState::MenuSnake,
+                    GamesState::MenuSnake => GamesState::MenuPong,
+                    GamesState::Pong => GamesState::Pong,
+                    GamesState::Snake => GamesState::Snake,
+                };
+                Page::Games(prev)
+            }
             Page::EasterEgg => Page::EasterEgg,
         };
         Self {
@@ -233,6 +252,18 @@ impl UiState {
             let _ = nav_pop(); // drop the settings->easter egg push
             return Self {
                 page: Page::Settings(SettingsMenuState::EasterEgg),
+                dialog: None,
+            };
+        }
+        if matches!(self.page, Page::Games(GamesState::Pong | GamesState::Snake)) {
+            if let Some(prev) = nav_pop() {
+                return Self {
+                    page: prev,
+                    dialog: None,
+                };
+            }
+            return Self {
+                page: Page::Games(GamesState::MenuPong),
                 dialog: None,
             };
         }
@@ -268,7 +299,7 @@ impl UiState {
                     MainMenuState::SettingsApp => {
                         Page::Settings(SettingsMenuState::BrightnessPrompt)
                     }
-                    MainMenuState::GamesApp => Page::Games(GamesState::Wip),
+                    MainMenuState::GamesApp => Page::Games(GamesState::MenuPong),
                 };
                 Self { page, dialog: None }
             }
@@ -294,10 +325,20 @@ impl UiState {
                 page: self.page,
                 dialog: None,
             }, 
-            Page::Games(_) => Self {
-                page: self.page,
-                dialog: None,
-            },
+            Page::Games(s) => {
+                let page = match s {
+                    GamesState::MenuPong => {
+                        nav_push(Page::Games(s));
+                        Page::Games(GamesState::Pong)
+                    }
+                    GamesState::MenuSnake => {
+                        nav_push(Page::Games(s));
+                        Page::Games(GamesState::Snake)
+                    }
+                    _ => self.page,
+                };
+                Self { page, dialog: None }
+            }
             Page::EasterEgg => Self {
                 page: self.page,
                 dialog: None,
