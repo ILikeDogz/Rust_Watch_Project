@@ -9,7 +9,7 @@ use esp_backtrace as _;
 // ESP-HAL imports
 use esp_hal::{
     gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig, Pull},
-    peripherals::{Peripherals, I2C0, SPI2},
+    peripherals::{CPU_CTRL, I2C0, Peripherals, SPI2},
 };
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
@@ -89,9 +89,10 @@ pub struct ImuI2cPins<'a> {
 
 // Default profile
 #[cfg(feature = "devkit-esp32s3-disp128")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>, CPU_CTRL<'a>) {
     let io = Io::new(p.IO_MUX);
     let i2c0 = p.I2C0;
+    let cpu_ctrl = p.CPU_CTRL;
 
     // LEDs
     // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
@@ -145,16 +146,18 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) 
             },
         },
         i2c0,
+        cpu_ctrl,
     )
 }
 
 // OLED profile
 #[cfg(feature = "esp32s3-disp143Oled")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>, CPU_CTRL<'a>) {
     // use esp_hal::gpio::DriveStrength;
 
     let io = Io::new(p.IO_MUX);
     let i2c0 = p.I2C0;
+    let cpu_ctrl = p.CPU_CTRL;
 
     // LEDs
     // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
@@ -240,14 +243,16 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) 
             lpwr: p.LPWR,
         },
         i2c0,
+        cpu_ctrl,
     )
 }
 
 // Example alternate profile (enable with --features allinone)
 #[cfg(feature = "allinone")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>, CPU_CTRL<'a>) {
     let io = Io::new(p.IO_MUX);
     let i2c0 = p.I2C0;
+    let cpu_ctrl = p.CPU_CTRL;
 
     // LEDs
     // let mut led1 = Output::new(p.GPIO1,  Level::Low, OutputConfig::default());
@@ -296,12 +301,13 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) 
             lcd_bl,
         },
         i2c0,
+        cpu_ctrl,
     )
 }
 
 // Yet another profile (enable with --features alt)
 #[cfg(feature = "alt")]
-pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>) {
+pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>, CPU_CTRL<'a>) {
     let mut io = Io::new(p.IO_MUX);
     // …map different pins here…
     unimplemented!()
