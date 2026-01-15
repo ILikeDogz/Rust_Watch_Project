@@ -155,7 +155,7 @@ looking graphics and true black. The inputs were decided based on the recalibrat
 
 ## Software Overview:
 
-The software decisions were made under one main philosophy, step one make it work, step two make it look nice. This process resulted in a lot of initial code being quite messy, but functional and cleaned up later. Certain parts such as the IMU and RTC inits, and the UI state machine have only really reached the make it work portion, while other parts have had some attempted clean up. 
+The software decisions were made under one main philosophy, step one make it work, step two make it look nice. This process resulted in a lot of initial code being quite messy, but functional and cleaned up later. 
 
 When programming an esp32 in bare metal Rust, something clear is that Rust is still a newer language, and as a result many esp32 features and support libraries, such as drivers, are incomplete or do not exist.
 
@@ -166,8 +166,6 @@ Included precompiled binary at esp32s3_tests.bin, can be flashed using esptools.
 To compile, set up first Rust on esp32:
 
 https://docs.espressif.com/projects/rust/book/preface.html
-
-The current software is divided into a few parts, the drivers and display setup, the ui state machine, the input handling and wiring, main, and the additional non Rust code helper stuff.
 
 ### The Drivers
 
@@ -187,8 +185,6 @@ There are three important functions to the drawing performance of the driver, th
 The driver implementation is capable of streaming a full 466x466 image at near 35 to 40 fps based on my own testing, though this is done through having the images in ram already, ready to go. This is enough performance to perform simple animations and have a reactive ui.
 
 This is then used for display initialization handled by display.rs, setting up stuff like the frequency etc.
-
-Location: Watch_rs/src/co5300.rs
   
 Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_20230328_07edb82936.pdf and Waveshare Example
   
@@ -198,8 +194,6 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
   This software handles the communication from the esp32-s3 to the rtc chip, the performance of the RTC is based on how well it keeps time and not really something controlled by the software, thus the implementation of this driver was
   much simpler. The implenetation of this driver is a pretty direct conversion of the C driver from waveshare, into Rust. The driver includes a simple constructor, methods for reading and setting time with BCD converting helper methods,
   and some date time and unix converters.
-
-  Location: Watch_rs/src/rtc_pcf85063.rs
   
   Information/Reference: https://files.waveshare.com/wiki/common/Pcf85063atl1118-NdPQpTGE-loeW7GbZ7.pdf and Waveshare Example
 #### QMI8658 IMU Driver
@@ -207,66 +201,8 @@ Information/Reference: https://admin.osptek.com/uploads/CO_5300_Datasheet_V0_00_
 
   This software handles communication from the esp32-s3 to the imu, this driver is very barebones however, and mainly only implements enough to function for the specific use case it has in this watch. It includes a basic constructor, 
   configures the imu, and reads the raw sensor data and data conversion, and built in methods for detecting the only action currently using the IMU. For further/later use, this should definitely be updated.
-
-  Location: Watch_rs/src/qmi8658_imu.rs
   
   Information/Reference: https://files.waveshare.com/wiki/common/QMI8658C_datasheet_rev_0.9.pdf and Waveshare Example
-
-#### Display setup
-  Description:
-
-  Abstracts the display setup to be as simple as a call of setup_display, to make it easy to swap displays later that may use a different driver.
-
-  Location: Watch_rs/src/display.rs
-
-  Information/Reference: 
-### UI State Machine
-
-  Description:
-
-  This is the main state machine that handles the UI of the entire watch, it was designed with the intent to only support three button inputs (back, select, and the imu which replaces button 3) and a rotary encoder. The states were
-  designed to be based on layers of menus, and the current implementation is definitely still a WIP. The ui.rs file also includes methods for animations, navigation caching images, brightness and time adjustment, and etc it is currently 
-  doing too much and definitely needs to be cleaned up. A simple stack with pop and push is used to track the state for purposes of the back button functionality. The state machine currently is definitely a bit overcomplicated and the
-  file includes nearly anything relating to the UI is in this file. 
-
-  The animations are made with math that I got from various sources online and offline from different people, and adjusted to fit my needs.
-
-  In order to get the snappy feel for the UI, certain graphics are preloaded images, and clears and framebuffer updates are strategically used to speed up graphics draws through knowing what the possible next states are.
-
-  Location: Watch_rs/src/ui.rs
-
-  Information/Reference: 
-
-
-### Input and Wiring
-
-  Description:
-
-  These files handle the connection to the hardware. The wiring.rs file connects and configures all the gpio pins, allowing for easy changing of gpios. There are some profiles set up, the amoled profile is the one being used, others are 
-  not yet implemented. Notably, button 3 has a gpio, but in practice is not actually wired to anything as the IMU replaces it, this is related to the prototyping. The input.rs use interrupts to set flags, which are then polled for in 
-  main. 
-
-  Location: Watch_rs/src/input.rs and Watch_rs/src/wiring.rs
-
-  Information/Reference: https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.43 and http://wiki.fluidnc.com/en/hardware/ESP32-S3_Pin_Reference
-
-### Main
-  Description:
-  This is the main file. The main file handles setting up the interrupt handler, the display, psram, imu, etc. Before entering the main loop, the homepage is drawn on the display, then all the graphics are pre loaded. The main loop 
-  handles the polling of inputs, and what to actually do when the interrupt flags are set and inputs are used, and includes logic to be able to enable a deep sleep for the watch. The loop continuously called to update the ui, but only 
-  redraws when the redraw flag is set true. This makes it so most actions are only drawing once, but animations and others can set the redraw flag to true to be able to continually redraw. Much of the stuff going on, needs to be better 
-  abstracted.
-
-  Location: Watch_rs/src/bin/main.rs
-
-  Information/Reference: https://documentation.espressif.com/esp32-s3_datasheet_en.pdf
-
-### Additional Helpers
-  Description: There exists a lot of additional helpers such as some quick python scripts for converting image files into bytes and compressing them.
-
-  Location: raw_images and Watch_rs/src/assets and other files
-
-  Information/Reference: 
   
 ### Todo/Addition Ideas:
   - Additional Apps
