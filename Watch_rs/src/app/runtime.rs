@@ -34,6 +34,7 @@ pub fn run(
     let mut sleep_hold_start: Option<u64> = None;
     let mut last_watch_edit_active = false;
     let mut last_pong_back_ms: Option<u64> = None;
+    let mut last_snake_back_ms: Option<u64> = None;
 
     let mut smash_detector = SmashDetector::default_rough();
     let mut last_sample: Option<crate::drivers::qmi8658_imu::ImuSample> = None;
@@ -62,8 +63,12 @@ pub fn run(
         }
         let in_omnitrix = matches!(ui_state.page, Page::Omnitrix(_));
         let in_pong = matches!(ui_state.page, Page::Games(GamesState::Pong));
+        let in_snake = matches!(ui_state.page, Page::Games(GamesState::Snake));
         if !in_pong {
             last_pong_back_ms = None;
+        }
+        if !in_snake {
+            last_snake_back_ms = None;
         }
         if !in_omnitrix {
             smash_count = 0;
@@ -92,6 +97,11 @@ pub fn run(
                 ui::CENTER,
                 ui::CENTER,
             ) {
+                needs_redraw = true;
+            }
+        }
+        if in_snake {
+            if ui::snake_update(now_ms) {
                 needs_redraw = true;
             }
         }
@@ -158,17 +168,38 @@ pub fn run(
 
         if b1_event {
             if in_pong {
-                let now = now_ms;
-                let quick_ms = 450;
-                if let Some(last_ms) = last_pong_back_ms {
-                    if now.saturating_sub(last_ms) <= quick_ms {
-                        last_pong_back_ms = None;
-                        needs_redraw |= controller::handle_back();
+                if !ui::pong_ball_active() {
+                    let now = now_ms;
+                    let quick_ms = 450;
+                    if let Some(last_ms) = last_pong_back_ms {
+                        if now.saturating_sub(last_ms) <= quick_ms {
+                            last_pong_back_ms = None;
+                            needs_redraw |= controller::handle_back();
+                        } else {
+                            last_pong_back_ms = Some(now);
+                        }
                     } else {
                         last_pong_back_ms = Some(now);
                     }
+                }
+            } else if in_snake {
+                if ui::snake_active() {
+                    if ui::snake_turn_button(false) {
+                        needs_redraw = true;
+                    }
                 } else {
-                    last_pong_back_ms = Some(now);
+                    let now = now_ms;
+                    let quick_ms = 450;
+                    if let Some(last_ms) = last_snake_back_ms {
+                        if now.saturating_sub(last_ms) <= quick_ms {
+                            last_snake_back_ms = None;
+                            needs_redraw |= controller::handle_back();
+                        } else {
+                            last_snake_back_ms = Some(now);
+                        }
+                    } else {
+                        last_snake_back_ms = Some(now);
+                    }
                 }
             } else {
                 needs_redraw |= controller::handle_back();
@@ -186,6 +217,14 @@ pub fn run(
                     ui::pong_paddle_angle(),
                     ui::pong_play_radius(),
                 ) {
+                    needs_redraw = true;
+                }
+            } else if in_snake {
+                if ui::snake_active() {
+                    if ui::snake_turn_button(true) {
+                        needs_redraw = true;
+                    }
+                } else if ui::snake_start(now_ms) {
                     needs_redraw = true;
                 }
             } else {
@@ -222,6 +261,10 @@ pub fn run(
                     needs_redraw = true;
                 } else if matches!(ui_state.page, Page::Games(GamesState::Pong)) {
                     if ui::pong_paddle_adjust_timed(-step_delta, now_ms) {
+                        needs_redraw = true;
+                    }
+                } else if matches!(ui_state.page, Page::Games(GamesState::Snake)) {
+                    if ui::snake_turn_steps(-step_delta) {
                         needs_redraw = true;
                     }
                 } else if step_delta > 0 {

@@ -33,6 +33,8 @@ pub enum AssetId {
     SettingsImage,
     WatchIcon,
     GamesIcon,
+    PongIcon,
+    SnakeIcon,
 }
 
 #[derive(Copy, Clone)]
@@ -43,7 +45,7 @@ struct AssetSlot {
 }
 
 // Number of asset slots
-const ASSET_MAX: usize = 15;
+const ASSET_MAX: usize = 17;
 
 macro_rules! res {
     () => {
@@ -83,6 +85,10 @@ pub(crate) static WATCH_ICON_IMAGE: &[u8] =
     include_bytes!("../assets/watch_icon_316x316_rgb565_be.raw.zlib");
 pub(crate) static GAMES_ICON_IMAGE: &[u8] =
     include_bytes!("../assets/gaming_icon_300x300_rgb565_be.raw.zlib");
+pub(crate) static PONG_ICON_IMAGE: &[u8] =
+    include_bytes!("../assets/pong_icon_276x276_rgb565_be.raw.zlib");
+pub(crate) static SNAKE_ICON_IMAGE: &[u8] =
+    include_bytes!("../assets/snake_icon_297x276_rgb565_be.raw.zlib");
 pub(crate) static WATCH_BG_IMAGE: &[u8] =
     include_bytes!("../assets/watch_background_466x466_rgb565_be.raw.zlib");
 
@@ -107,6 +113,17 @@ pub fn clear_cache() {
     });
 }
 
+// Clear a single cached asset from PSRAM.
+pub fn clear_cached_asset(id: AssetId) {
+    let (idx, _, _, _) = asset_meta(id);
+    critical_section::with(|cs| {
+        let mut assets = ASSETS.borrow(cs).borrow_mut();
+        assets[idx].data = None;
+        assets[idx].w = 0;
+        assets[idx].h = 0;
+    });
+}
+
 // Map asset id to cache slot index, dimensions, and compressed blob
 fn asset_meta(id: AssetId) -> (usize, u32, u32, &'static [u8]) {
     match id {
@@ -126,6 +143,8 @@ fn asset_meta(id: AssetId) -> (usize, u32, u32, &'static [u8]) {
         AssetId::SettingsImage => (12, 400, 344, SETTINGS_IMAGE),
         AssetId::WatchIcon => (13, 316, 316, WATCH_ICON_IMAGE),
         AssetId::GamesIcon => (14, 300, 300, GAMES_ICON_IMAGE),
+        AssetId::PongIcon => (15, 276, 276, PONG_ICON_IMAGE),
+        AssetId::SnakeIcon => (16, 297, 276, SNAKE_ICON_IMAGE),
     }
 }
 

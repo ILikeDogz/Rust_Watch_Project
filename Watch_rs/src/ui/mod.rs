@@ -40,6 +40,10 @@ pub use games::pong::{
     pong_set_text_visible, pong_text_visible, pong_win, PONG_BALL_RADIUS, PONG_PADDLE_ARC_DEG,
     PONG_PADDLE_RADIUS_PAD, PONG_PADDLE_STROKE, PONG_PADDLE_THICKNESS,
 };
+pub use games::snake::{
+    play_snake, snake_active, snake_reset_on_exit, snake_start, snake_turn_button,
+    snake_turn_steps, snake_update,
+};
 pub use state::{
     Dialog, GamesState, MainMenuState, OmnitrixState, Page, SettingsMenuState, UiState,
     WatchAppState,
@@ -158,6 +162,13 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
     }
     if !matches!(state.page, Page::Games(GamesState::Pong)) {
         pong_reset_on_exit();
+    }
+    if !matches!(state.page, Page::Games(GamesState::Snake)) {
+        snake_reset_on_exit();
+    }
+    if !matches!(state.page, Page::Games(_)) {
+        assets::clear_cached_asset(AssetId::PongIcon);
+        assets::clear_cached_asset(AssetId::SnakeIcon);
     }
 
     // Handle entering/exiting brightness adjustment mode

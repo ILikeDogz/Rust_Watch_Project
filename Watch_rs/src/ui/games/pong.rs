@@ -26,6 +26,12 @@ pub const PONG_PADDLE_RADIUS_PAD: i32 = 0;
 pub const PONG_BALL_RADIUS: i32 = 4;
 const PONG_BALL_SPEED_PX_S: f32 = 140.0;
 const PONG_BALL_START_OFFSET_DEG: f32 = 25.0;
+const PONG_BALL_START_JITTER_DEG: f32 = 5.0;
+const PONG_BOUNCE_JITTER_DEG: f32 = 35.0;
+const PONG_PADDLE_SPEED_BOOST: f32 = 0.2;
+const PONG_PADDLE_SPEED_MIN: f32 = 0.75;
+const PONG_PADDLE_SPEED_MAX: f32 = 1.25;
+const PONG_BOUNCE_SPEEDS: [f32; 5] = [110.0, 130.0, 150.0, 170.0, 190.0];
 const PONG_BALL_ATTACH_PAD: i32 = 1;
 const PONG_PADDLE_HIT_PAD_DEG: f32 = 4.0;
 const PONG_BALL_GRACE_MS: u64 = 120;
@@ -42,6 +48,7 @@ static PONG_BALL_START_MS: Mutex<Cell<u64>> = Mutex::new(Cell::new(0));
 static PONG_BALL_LAST_BOUNCE_MS: Mutex<Cell<u64>> = Mutex::new(Cell::new(0));
 static PONG_BALL_LAST_POS: Mutex<RefCell<Option<(i32, i32)>>> =
     Mutex::new(RefCell::new(None));
+static PONG_RNG: Mutex<Cell<u32>> = Mutex::new(Cell::new(0));
 static PONG_TEXT_VISIBLE: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 static PONG_GAME_OVER: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 static PONG_WIN: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
@@ -208,6 +215,30 @@ fn angle_diff_deg(a: f32, b: f32) -> f32 {
     diff
 }
 
+fn pong_rand_u32(now_ms: u64) -> u32 {
+    critical_section::with(|cs| {
+        let state = PONG_RNG.borrow(cs);
+        let mut v = state.get();
+        if v == 0 {
+            v = (now_ms as u32) ^ 0xA5A5_5A5A;
+        }
+        v = v.wrapping_mul(1664525).wrapping_add(1013904223);
+        state.set(v);
+        v
+    })
+}
+
+fn angle_delta_deg(a: f32, b: f32) -> f32 {
+    let mut d = a - b;
+    while d > 180.0 {
+        d -= 360.0;
+    }
+    while d < -180.0 {
+        d += 360.0;
+    }
+    d
+}
+
 // Compute pong ball position attached to paddle
 pub fn pong_ball_attached_pos(
     center_x: i32,
@@ -235,7 +266,12 @@ pub fn pong_ball_start(now_ms: u64, paddle_angle: f32, play_radius: i32) -> bool
     let center_x = CENTER;
     let center_y = CENTER;
     let pos = pong_ball_attached_pos(center_x, center_y, paddle_angle, play_radius);
-    let dir = wrap_angle_deg(paddle_angle + 180.0 + PONG_BALL_START_OFFSET_DEG).to_radians();
+    let jitter_range = (PONG_BALL_START_JITTER_DEG * 2.0) as u32;
+    let jitter = (pong_rand_u32(now_ms) % (jitter_range + 1)) as f32 - PONG_BALL_START_JITTER_DEG;
+    let dir = wrap_angle_deg(
+        paddle_angle + 180.0 + PONG_BALL_START_OFFSET_DEG + jitter,
+    )
+    .to_radians();
     let vx = libm::cosf(dir) * PONG_BALL_SPEED_PX_S;
     let vy = libm::sinf(dir) * PONG_BALL_SPEED_PX_S;
 
@@ -320,11 +356,23 @@ pub fn pong_ball_update(
                     });
                 }
             }
+
+            // Compute new ball velocity after bounce
+            let offset = angle_delta_deg(impact_ang, paddle_angle)
+                .clamp(-(PONG_PADDLE_ARC_DEG / 2.0), PONG_PADDLE_ARC_DEG / 2.0);
+            let offset_norm = (offset / (PONG_PADDLE_ARC_DEG / 2.0)).clamp(-1.0, 1.0);
+            let speed_scale = (1.0 + (offset_norm * PONG_PADDLE_SPEED_BOOST))
+                .clamp(PONG_PADDLE_SPEED_MIN, PONG_PADDLE_SPEED_MAX);
+            let idx = (pong_rand_u32(now_ms) as usize) % PONG_BOUNCE_SPEEDS.len();
+            let target_speed = PONG_BOUNCE_SPEEDS[idx] * speed_scale;
+            let jitter_range = (PONG_BOUNCE_JITTER_DEG * 2.0) as u32;
+            let jitter = (pong_rand_u32(now_ms) % (jitter_range + 1)) as f32
+                - PONG_BOUNCE_JITTER_DEG;
+            let out_ang = wrap_angle_deg(paddle_angle + 180.0 + jitter).to_radians();
+            vx = libm::cosf(out_ang) * target_speed;
+            vy = libm::sinf(out_ang) * target_speed;
             let nx = dx / dist.max(1.0);
             let ny = dy / dist.max(1.0);
-            let dot = vx * nx + vy * ny;
-            vx = vx - 2.0 * dot * nx;
-            vy = vy - 2.0 * dot * ny;
             x = center_x as f32 + nx * max_r;
             y = center_y as f32 + ny * max_r;
         } else {
