@@ -1,14 +1,120 @@
 // Application state management for inputs and UI
 
 use core::cell::{Cell, RefCell};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use critical_section::Mutex;
 use esp_hal::gpio::Input;
 
 use crate::input::{ButtonState, ImuIntState, RotaryState};
-use crate::ui::{MainMenuState, Page, UiState};
+use crate::ui::{Page, UiState};
 use esp_hal::gpio::Event;
+
+// ---------------------------------------------------------------------------
+// Terminal state (UART receive buffer for the UartTerminal page)
+// ---------------------------------------------------------------------------
+
+use heapless::{String as HString, Vec as HVec};
+
+pub const TERM_COLS: usize = 16;
+pub const TERM_ROWS: usize = 8;
+
+pub type TermLine = HString<TERM_COLS>;
+pub type TermLines = HVec<TermLine, TERM_ROWS>;
+
+static TERM_LINES: Mutex<RefCell<TermLines>> = Mutex::new(RefCell::new(TermLines::new()));
+static TERM_LINE_BUF: Mutex<RefCell<HString<256>>> = Mutex::new(RefCell::new(HString::new()));
+static TERM_DIRTY: AtomicBool = AtomicBool::new(false);
+static TERM_LINE_COUNT: AtomicU8 = AtomicU8::new(0);
+
+fn flush_line_buf() {
+    critical_section::with(|cs| {
+        let mut lines = TERM_LINES.borrow(cs).borrow_mut();
+        let mut buf = TERM_LINE_BUF.borrow(cs).borrow_mut();
+
+        let buf_len = buf.len();
+        // Copy content out to a fixed array so we can clear buf and still iterate
+        let mut bytes = [0u8; 256];
+        bytes[..buf_len].copy_from_slice(buf.as_bytes());
+        buf.clear();
+
+        if buf_len == 0 {
+            // Empty line (bare \n)
+            if lines.is_full() {
+                lines.remove(0);
+            }
+            let _ = lines.push(TermLine::new());
+        } else {
+            let mut start = 0;
+            while start < buf_len {
+                let end = (start + TERM_COLS).min(buf_len);
+                let mut line = TermLine::new();
+                for &byte in &bytes[start..end] {
+                    let _ = line.push(byte as char);
+                }
+                if lines.is_full() {
+                    lines.remove(0);
+                }
+                let _ = lines.push(line);
+                start = end;
+            }
+        }
+        TERM_LINE_COUNT.store(lines.len() as u8, Ordering::Relaxed);
+    });
+    TERM_DIRTY.store(true, Ordering::Release);
+}
+
+pub fn terminal_push_byte(byte: u8) {
+    if byte == b'\r' {
+        return;
+    }
+    if byte == b'\n' {
+        flush_line_buf();
+        return;
+    }
+    // Only accept printable ASCII
+    if byte < 0x20 || byte > 0x7E {
+        return;
+    }
+    let was_full = critical_section::with(|cs| {
+        let mut buf = TERM_LINE_BUF.borrow(cs).borrow_mut();
+        // If buffer is at capacity, force-flush it before accepting this byte.
+        if buf.len() >= buf.capacity() {
+            return true;
+        }
+        let _ = buf.push(byte as char);
+        false
+    });
+    if was_full {
+        flush_line_buf();
+        terminal_push_byte(byte);
+    }
+}
+
+pub fn terminal_dirty() -> bool {
+    TERM_DIRTY.load(Ordering::Acquire)
+}
+
+pub fn terminal_take_dirty() -> bool {
+    TERM_DIRTY.swap(false, Ordering::Acquire)
+}
+
+pub fn terminal_line_count() -> usize {
+    TERM_LINE_COUNT.load(Ordering::Relaxed) as usize
+}
+
+pub fn terminal_with_lines<F: FnOnce(&TermLines)>(f: F) {
+    critical_section::with(|cs| f(&TERM_LINES.borrow(cs).borrow()));
+}
+
+pub fn terminal_reset() {
+    critical_section::with(|cs| {
+        TERM_LINES.borrow(cs).borrow_mut().clear();
+        TERM_LINE_BUF.borrow(cs).borrow_mut().clear();
+    });
+    TERM_LINE_COUNT.store(0, Ordering::Relaxed);
+    TERM_DIRTY.store(false, Ordering::Release);
+}
 
 static BUTTON1_PRESSED: AtomicBool = AtomicBool::new(false);
 static BUTTON2_PRESSED: AtomicBool = AtomicBool::new(false);
@@ -52,9 +158,9 @@ static IMU_INT: ImuIntState<'static> = ImuIntState {
     input: Mutex::new(RefCell::new(None)),
 };
 
-// Global UI state
+// Global UI state defaults to the UART terminal homepage.
 static UI_STATE: Mutex<Cell<UiState>> = Mutex::new(Cell::new(UiState {
-    page: Page::Main(MainMenuState::Home),
+    page: Page::UartTerminal,
     dialog: None,
 }));
 

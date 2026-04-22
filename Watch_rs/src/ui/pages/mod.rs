@@ -6,4 +6,5 @@ pub mod main_menu;
 pub mod omnitrix;
 pub mod settings;
 pub mod transform;
+pub mod uart_terminal;
 pub mod watch;

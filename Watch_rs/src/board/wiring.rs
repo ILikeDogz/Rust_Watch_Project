@@ -11,12 +11,16 @@ use esp_hal::{
     gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig, Pull},
     peripherals::{CPU_CTRL, I2C0, Peripherals, SPI2},
 };
+#[cfg(feature = "esp32s3-disp143Oled")]
+use esp_hal::peripherals::UART0;
 
 #[cfg(feature = "devkit-esp32s3-disp128")]
 use esp_hal::peripherals::{GPIO10, GPIO11};
 
 #[cfg(feature = "esp32s3-disp143Oled")]
-use esp_hal::peripherals::{DMA_CH0, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO47, GPIO48, LPWR};
+use esp_hal::peripherals::{
+    DMA_CH0, GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO44, GPIO47, GPIO48, LPWR,
+};
 
 pub struct BoardPins<'a> {
     // Leds
@@ -49,6 +53,12 @@ pub struct BoardPins<'a> {
     // RTC peripheral for deep sleep
     #[cfg(feature = "esp32s3-disp143Oled")]
     pub lpwr: LPWR<'a>,
+
+    // UART0 peripheral for the terminal page (GPIO44=RX, GPIO43=TX by default)
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    pub uart0: UART0<'a>,
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    pub uart0_rx: GPIO44<'a>,
 }
 
 // nested, feature-only struct for LCD/SPI pins
@@ -241,6 +251,8 @@ pub fn init_board_pins<'a>(p: Peripherals) -> (Io<'a>, BoardPins<'a>, I2C0<'a>, 
                 scl: imu_scl,
             },
             lpwr: p.LPWR,
+            uart0: p.UART0,
+            uart0_rx: p.GPIO44,
         },
         i2c0,
         cpu_ctrl,

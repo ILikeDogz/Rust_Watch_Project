@@ -74,6 +74,8 @@ pub fn clear_all_caches() {
     brightness::reset_flags();
     time::reset_clock_state();
     pages::watch::reset_on_exit();
+    pages::uart_terminal::reset_on_exit();
+    crate::app::state::terminal_reset();
     state::clear_nav();
     critical_section::with(|cs| {
         *LAST_PAGE_KIND.borrow(cs).borrow_mut() = None;
@@ -93,6 +95,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
     // entering Omnitrix from another page, OR
     // exiting Transform dialog while staying in Omnitrix
     let current_kind = match state.page {
+        Page::UartTerminal => state::PageKind::UartTerminal,
         Page::Main(_) => state::PageKind::Main,
         Page::Settings(_) => state::PageKind::Settings,
         Page::Omnitrix(_) => state::PageKind::Omnitrix,
@@ -166,6 +169,9 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
     if !matches!(state.page, Page::Games(GamesState::Snake)) {
         snake_reset_on_exit();
     }
+    if !matches!(state.page, Page::UartTerminal) {
+        pages::uart_terminal::reset_on_exit();
+    }
     if !matches!(state.page, Page::Games(_)) {
         assets::clear_cached_asset(AssetId::PongIcon);
         assets::clear_cached_asset(AssetId::SnakeIcon);
@@ -198,6 +204,7 @@ pub fn update_ui(disp: &mut impl PanelRgb565, state: UiState, redraw: bool) {
 
     // Dispatch to page renderers
     match state.page {
+        Page::UartTerminal => pages::uart_terminal::render(disp),
         Page::Main(menu_state) => pages::main_menu::render(disp, menu_state),
         Page::Settings(settings_state) => pages::settings::render(disp, settings_state),
         Page::Watch(watch_state) => pages::watch::render(disp, watch_state),

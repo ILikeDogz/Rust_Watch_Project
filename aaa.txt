@@ -1,0 +1,333 @@
+# Plan: UART Terminal Homepage
+
+## Context
+
+The user wants a new default landing page that appears immediately after the boot sequence. It acts as a UART terminal: text received line-by-line over UART0 is displayed in a 320×320 bounding region on the 466×466 OLED, scrolling from top to bottom. The display is cleared to black before showing anything, and only the changed region of the screen is flushed per update to keep rendering fast.
+
+Currently: `UI_STATE` defaults to `Page::Main(MainMenuState::Home)`.  
+Goal: default to `Page::UartTerminal`, which is the new entry point.
+
+---
+
+## Terminal Layout
+
+- **Display**: 466×466, origin top-left
+- **Box**: 320×320, centered → `x = (466-320)/2 = 73`, `y = 73`
+- **Font**: `FONT_10X20` (10px wide × 20px tall, already used in the project)
+- **Columns**: 320/10 = **32 chars per line**
+- **Rows**: 320/20 = **16 lines**
+- **Box bounds**: `x ∈ [73, 393)`, `y ∈ [73, 393)`
+- **UART0 default RX pin**: GPIO44, TX: GPIO43 (verify on your board — not used by any current wiring)
+
+---
+
+## Architecture Overview
+
+No async, no tasks — fits the existing single-threaded interrupt-driven architecture.  
+UART0 RX is polled each iteration of the main loop in `runtime.rs` (same pattern as IMU polling).  
+Received bytes accumulate into a line buffer; on `\n`/`\r\n`, the line is word-wrapped at 32 chars and pushed into a circular display buffer.  
+A dirty flag triggers a redraw only when new data arrives and the terminal is the active page.
+
+---
+
+## Files to Create
+
+### `src/ui/pages/uart_terminal.rs`
+
+Terminal page renderer. Key functions:
+
+```
+render(disp: &mut impl PanelRgb565)
+reset_on_exit()   // resets initialized flag for re-entry
+```
+
+Internal logic:
+- Static `TERM_INITIALIZED: AtomicBool` — false on first render to this page
+- **Initial render** (entering page):
+  1. `fill_rect_solid_no_fb(0, 0, 466, 466, BLACK)` — full screen black, fast, no FB mirror
+  2. Iterate all buffered lines, draw left-aligned text at `(73, 73 + row * 20)`
+  3. `flush_rect_even(73, 73, 392, 392)` — flush only terminal region
+- **Update render** (new lines, no page change):
+  - Read `terminal_take_new_lines()` → count N
+  - If `(total_lines - N) < 16` (no scroll yet): draw only the N new lines at their Y positions, flush just those rows
+  - If scroll occurred (total_lines >= 16): `fill_rect_solid_no_fb(73, 73, 320, 320, BLACK)` then redraw all 16 visible lines, flush 320×320
+
+Text rendering uses embedded-graphics directly (left alignment, not the center-aligned `draw_text` helper):
+```rust
+let style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+Text::new(line, Point::new(73, 73 + row * 20 + 18), style).draw(disp)?;
+// +18 = baseline offset for FONT_10X20
+```
+
+---
+
+## Files to Modify
+
+### 1. `src/app/state.rs`
+
+Add terminal state globals (alongside existing button/UI statics):
+
+```rust
+use heapless::{String as HString, Vec as HVec};
+use core::sync::atomic::AtomicU8;
+
+const TERM_COLS: usize = 32;
+const TERM_ROWS: usize = 16;
+
+type TermLine = HString<32>;
+type TermLines = HVec<TermLine, 16>;
+
+static TERM_LINES: Mutex<RefCell<TermLines>> = Mutex::new(RefCell::new(TermLines::new()));
+static TERM_LINE_BUF: Mutex<RefCell<HString<256>>> = Mutex::new(RefCell::new(HString::new()));
+static TERM_DIRTY: AtomicBool = AtomicBool::new(false);
+static TERM_NEW_LINES: AtomicU8 = AtomicU8::new(0);
+```
+
+Public API:
+```rust
+pub fn terminal_push_byte(byte: u8)        // accumulate; on \n, push wrapped segments
+pub fn terminal_dirty() -> bool             // peek dirty flag
+pub fn terminal_take_dirty() -> bool        // read+clear dirty flag
+pub fn terminal_take_new_lines() -> u8      // read+clear new-line count
+pub fn terminal_get_lines<F: FnOnce(&TermLines)>(f: F)  // read buffer in critical section
+pub fn terminal_reset()                     // clear all buffers (for deep sleep wake)
+```
+
+`terminal_push_byte` logic:
+- Ignore `\r`
+- On `\n`: flush `TERM_LINE_BUF` → wrap at 32 chars → push each segment to `TERM_LINES` (evict oldest if full), increment `TERM_NEW_LINES`, set `TERM_DIRTY = true`, clear `TERM_LINE_BUF`
+- Other printable ASCII: push to `TERM_LINE_BUF` (if full at 256, auto-flush current)
+
+Change initial `UI_STATE` (line 56–59):
+```rust
+// was: page: Page::Main(MainMenuState::Home)
+page: Page::UartTerminal,
+```
+
+### 2. `src/ui/state.rs`
+
+**Add variant to `Page` enum**:
+```rust
+pub enum Page {
+    UartTerminal,      // new — FIRST entry
+    Main(MainMenuState),
+    // ... rest unchanged
+}
+```
+
+**Add to `PageKind`**:
+```rust
+pub(crate) enum PageKind {
+    UartTerminal,
+    Main, Settings, Omnitrix, Games, EasterEgg, Watch,
+}
+```
+
+**`next_item` / `prev_item`**: add arm `Page::UartTerminal => Page::UartTerminal` (no-op; rotary does nothing on terminal)
+
+**`back()`**:
+- Add early-return arm: `Page::UartTerminal => Self { page: Page::UartTerminal, dialog: None }` (base page, nowhere to go back)
+- Change fallback (line ~279) from `Page::Main(MainMenuState::Home)` to `Page::UartTerminal`
+
+**`select()`**:
+```rust
+Page::UartTerminal => {
+    nav_push(Page::UartTerminal);
+    Self { page: Page::Main(MainMenuState::Home), dialog: None }
+}
+```
+
+### 3. `src/ui/mod.rs`
+
+**Add `UartTerminal` to `PageKind` mapping**:
+```rust
+Page::UartTerminal => state::PageKind::UartTerminal,
+```
+
+**Add to dispatch**:
+```rust
+Page::UartTerminal => pages::uart_terminal::render(disp),
+```
+
+**Add reset call** in the "reset on exit" block:
+```rust
+if !matches!(state.page, Page::UartTerminal) {
+    pages::uart_terminal::reset_on_exit();
+}
+```
+
+**Re-export** `UartTerminal` from `use state::{...}` and add to `clear_all_caches`:
+```rust
+crate::app::state::terminal_reset();
+```
+
+### 4. `src/ui/pages/mod.rs`
+
+```rust
+pub mod uart_terminal;   // add this line
+```
+
+### 5. `src/board/wiring.rs`
+
+Add `UART0` to `BoardPins` (feature-gated, `esp32s3-disp143Oled` variant only):
+
+```rust
+#[cfg(feature = "esp32s3-disp143Oled")]
+pub uart0: esp_hal::peripherals::UART0<'a>,
+```
+
+In `init_board_pins` for `esp32s3-disp143Oled`, before `(io, BoardPins { ... })` return:
+```rust
+let uart0 = p.UART0;
+// include in returned BoardPins { ..., uart0 }
+```
+
+### 6. `src/bin/main.rs`
+
+After destructuring `BoardPins`, initialize UART0 RX:
+
+```rust
+#[cfg(feature = "esp32s3-disp143Oled")]
+let mut uart_rx = {
+    use esp_hal::uart::{Config, UartRx};
+    // Uses default UART0 pins (GPIO44=RX, GPIO43=TX on ESP32-S3)
+    // Add .with_rx(gpio_pin) if you need explicit pin assignment
+    UartRx::new(pins.uart0, Config::default()).unwrap()
+};
+```
+
+Pass to runtime:
+```rust
+app::runtime::run(
+    &mut my_display,
+    &mut rtc,
+    rtc_boot_time_us,
+    rtc_bus,
+    &mut imu,
+    &mut uart_rx,   // new parameter
+    apply,
+    woke_from_sleep,
+    config,
+);
+```
+
+### 7. `src/app/runtime.rs`
+
+Add `uart_rx` parameter to `run()`:
+```rust
+#[cfg(feature = "esp32s3-disp143Oled")]
+uart_rx: &mut esp_hal::uart::UartRx<'static, esp_hal::Blocking>,
+```
+
+In the main loop, after the IMU polling block, add UART drain:
+```rust
+// Poll UART0 for incoming bytes (non-blocking drain)
+loop {
+    match uart_rx.read_byte() {
+        Ok(byte) => state::terminal_push_byte(byte),
+        Err(_) => break,  // WouldBlock or error → stop draining
+    }
+}
+// If we're on the terminal page and new data arrived, trigger a redraw
+if matches!(ui_state.page, Page::UartTerminal) && state::terminal_dirty() {
+    needs_redraw = true;
+}
+```
+
+Add `Page::UartTerminal` to the top-of-loop page detection (no special timing, no forced redraw unless dirty):
+```rust
+let in_terminal = matches!(ui_state.page, Page::UartTerminal);
+```
+
+---
+
+## Optimization Strategy
+
+| Scenario | Action | Flush region |
+|----------|--------|--------------|
+| Entering terminal (initial) | `fill_rect_solid_no_fb(0,0,466,466,BLACK)` then draw all lines | `flush_rect_even(73,73,392,392)` |
+| New line(s), no scroll | Draw only new line(s) at their row Y positions | `flush_rect_even(73, first_new_y, 392, last_new_y+20)` |
+| Scroll (buffer full, oldest evicted) | `fill_rect_solid_no_fb(73,73,320,320,BLACK)` then draw all 16 lines | `flush_rect_even(73,73,392,392)` |
+
+Key rules:
+- **Never use FB update** (`update_fb=true`) for terminal clears — single-color fills don't need FB mirroring
+- **Never flush the full 466×466 frame** for text updates — always use `flush_rect_even` on the minimum dirty region
+- **Single flush per render cycle** — batch all draw calls, then one flush at the end
+
+---
+
+## Idle Auto-Sleep (default ON)
+
+The project already has a button-hold sleep (hold Button 1 for 5s → deep sleep). The user wants an **inactivity timeout** sleep that activates automatically — no button hold required. This is most important on the terminal page where there may be no user input for long periods.
+
+### Mechanism
+
+Add to `runtime.rs`:
+```rust
+const IDLE_SLEEP_MS: u64 = 5 * 60 * 1000; // 5 minutes with no activity
+let mut last_activity_ms: u64 = 0; // 0 = immediately eligible (set to now_ms after init)
+```
+
+Reset `last_activity_ms = now_ms` on any of:
+- Any button event (`b1_event || b2_event || b3_event`)
+- Encoder detent changed
+- UART byte received (`terminal_push_byte` called)
+
+After the existing `handle_deep_sleep` call, add:
+```rust
+if now_ms.saturating_sub(last_activity_ms) >= IDLE_SLEEP_MS {
+    hal::sleep::trigger_idle_sleep(
+        rtc, rtc_boot_time_us, display,
+        state::button1(), state::button2(),
+    );
+}
+```
+
+### New function in `src/hal/sleep.rs`
+
+Extract the sleep-entry sequence from `handle_deep_sleep` into a shared helper:
+```rust
+pub fn trigger_idle_sleep(
+    rtc: &mut Rtc<'_>,
+    rtc_boot_time_us: u64,
+    display: &mut crate::display::DisplayType<'static>,
+    btn1: &ButtonState<'static>,
+    btn2: &ButtonState<'static>,
+) {
+    save_clock_to_rtc(rtc, rtc_boot_time_us);
+    disable_display(display);
+    release_button_pins(btn1, btn2);
+    enter_deep_sleep(rtc);
+}
+```
+
+`handle_deep_sleep` calls this same helper when the hold-time expires (dedup the sequence).
+
+### Constants
+
+In `main.rs` (alongside `SLEEP_HOLD_MS`):
+```rust
+const IDLE_SLEEP_MS: u64 = 5 * 60 * 1000; // 5-minute idle auto-sleep
+```
+
+Pass through `RunConfig`:
+```rust
+pub struct RunConfig {
+    pub detent_steps: i32,
+    pub sleep_hold_ms: u64,
+    pub idle_sleep_ms: u64,   // new
+}
+```
+
+---
+
+## Verification
+
+1. use source ~/export-esp.sh and `cargo build --release` — confirm no compile errors (especially UART API, `heapless` generic bounds, Page match exhaustiveness)
+2. Flash and observe: after boot animation, display should go **solid black**
+3. Send bytes over the serial port connected to GPIO44 (e.g. `echo "hello world" > /dev/ttyUSB0`): text appears at top-left of the 320×320 region, white on black
+4. Send 16 lines: fills the box without overlap
+5. Send 17th line: oldest line disappears, all lines shift up, new line appears at bottom — no visual tearing
+6. Press Button2 → enters Main Menu; press Button1 → returns to terminal (UART buffer preserved)
+7. Deep sleep + wake → terminal clears (reset called in `clear_all_caches`)
+8. Sit idle for 5 minutes with no button press, encoder move, or UART byte → device auto-sleeps (display off, wakes on Button 2 press)

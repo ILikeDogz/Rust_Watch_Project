@@ -750,6 +750,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-hal 1.0.0",
  "embedded-hal-bus",
+ "embedded-io 0.6.1",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",

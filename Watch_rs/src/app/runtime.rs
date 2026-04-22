@@ -11,10 +11,10 @@ use esp_hal::timer::systimer::{SystemTimer, Unit};
 
 pub const DEBOUNCE_MS: u64 = 150;
 
-// Rotary encoder detent steps
 pub struct RunConfig {
     pub detent_steps: i32,
     pub sleep_hold_ms: u64,
+    pub idle_sleep_ms: u64,
 }
 
 // Main application runtime loop
@@ -24,6 +24,8 @@ pub fn run(
     rtc_boot_time_us: u64,
     rtc_bus: Option<SharedI2cRef>,
     imu: &mut Option<Qmi8658<SharedI2cDev>>,
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    uart_rx: &mut esp_hal::uart::UartRx<'static, esp_hal::Blocking>,
     apply_brightness: Option<fn(&mut display::DisplayType<'static>, u8)>,
     woke_from_sleep: bool,
     config: RunConfig,
@@ -35,6 +37,7 @@ pub fn run(
     let mut last_watch_edit_active = false;
     let mut last_pong_back_ms: Option<u64> = None;
     let mut last_snake_back_ms: Option<u64> = None;
+    let mut last_activity_ms: u64 = 0; // tracks last button/encoder/uart event for idle sleep
 
     let mut smash_detector = SmashDetector::default_rough();
     let mut last_sample: Option<crate::drivers::qmi8658_imu::ImuSample> = None;
@@ -150,10 +153,64 @@ pub fn run(
             }
         }
 
+        // Poll UART0 RX FIFO and push bytes into the terminal buffer.
+        // ReadReady::read_ready() is non-blocking; Read::read() is then called only when data is available.
+        #[cfg(feature = "esp32s3-disp143Oled")]
+        {
+            let mut uart_got_data = false;
+            let mut uart_rx_count: u16 = 0;
+            while uart_rx.read_ready() {
+                let mut b = [0u8; 1];
+                match uart_rx.read(&mut b) {
+                    Ok(1) => {
+                        if b[0].is_ascii_graphic() || b[0] == b' ' {
+                            esp_println::println!(
+                                "[uart0] rx byte: 0x{:02X} '{}'",
+                                b[0],
+                                b[0] as char
+                            );
+                        } else {
+                            esp_println::println!("[uart0] rx byte: 0x{:02X}", b[0]);
+                        }
+                        state::terminal_push_byte(b[0]);
+                        uart_got_data = true;
+                        uart_rx_count = uart_rx_count.saturating_add(1);
+                        if b[0] == b'\n' {
+                            esp_println::println!(
+                                "[uart0] newline received; terminal lines={}",
+                                state::terminal_line_count()
+                            );
+                        }
+                    }
+                    Ok(_) => break,
+                    Err(e) => {
+                        esp_println::println!("[uart0] read error: {:?}", e);
+                        break;
+                    }
+                }
+            }
+            if uart_got_data {
+                esp_println::println!("[uart0] drained {} byte(s)", uart_rx_count);
+                last_activity_ms = now_ms;
+                // Trigger a redraw if the terminal page is active.
+                if matches!(ui_state.page, Page::UartTerminal) {
+                    needs_redraw = true;
+                }
+            } else if matches!(ui_state.page, Page::UartTerminal) && state::terminal_dirty() {
+                // Dirty flag set from a previous iteration's push.
+                needs_redraw = true;
+            }
+        }
+
         // Handle button events
         let b1_event = state::take_button1_event();
         let b2_event = state::take_button2_event();
         let b3_event = state::take_button3_event();
+
+        // Track activity for idle-sleep timeout.
+        if b1_event || b2_event || b3_event {
+            last_activity_ms = now_ms;
+        }
 
         hal::sleep::handle_deep_sleep(
             now_ms,
@@ -165,6 +222,17 @@ pub fn run(
             state::button2(),
             config.sleep_hold_ms,
         );
+
+        // Idle auto-sleep: enter deep sleep after config.idle_sleep_ms of no activity.
+        if now_ms.saturating_sub(last_activity_ms) >= config.idle_sleep_ms {
+            hal::sleep::trigger_idle_sleep(
+                rtc,
+                rtc_boot_time_us,
+                display,
+                state::button1(),
+                state::button2(),
+            );
+        }
 
         if b1_event {
             if in_pong {
@@ -244,6 +312,7 @@ pub fn run(
 
         // If detent changed, update UI state
         if Some(detent) != last_detent {
+            last_activity_ms = now_ms; // encoder movement counts as activity
             if let Some(prev) = last_detent {
                 let step_delta = detent - prev;
                 let ui_state = state::ui_state_get();

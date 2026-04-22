@@ -32,6 +32,7 @@ pub struct UiState {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Page {
+    UartTerminal,
     Main(MainMenuState),
     Watch(WatchAppState),
     Settings(SettingsMenuState),
@@ -96,6 +97,7 @@ pub enum GamesState {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PageKind {
+    UartTerminal,
     Main,
     Settings,
     Omnitrix,
@@ -111,6 +113,7 @@ impl UiState {
             return self;
         }
         let next_page = match self.page {
+            Page::UartTerminal => Page::UartTerminal,
             Page::Main(state) => {
                 let next = match state {
                     MainMenuState::Home => MainMenuState::WatchApp,
@@ -173,6 +176,7 @@ impl UiState {
             return self;
         }
         let prev_page = match self.page {
+            Page::UartTerminal => Page::UartTerminal,
             Page::Main(state) => {
                 let prev = match state {
                     MainMenuState::Home => MainMenuState::GamesApp,
@@ -237,6 +241,10 @@ impl UiState {
                 dialog: None,
             };
         }
+        // Terminal is the base page; nowhere further back.
+        if matches!(self.page, Page::UartTerminal) {
+            return self;
+        }
         // If in Settings adjust view, pop back to prompt (also pop nav once).
         if matches!(
             self.page,
@@ -275,9 +283,9 @@ impl UiState {
                 dialog: None,
             };
         }
-        // Fallback if no history
+        // Fallback if no history; return to terminal homepage.
         Self {
-            page: Page::Main(MainMenuState::Home),
+            page: Page::UartTerminal,
             dialog: None,
         }
     }
@@ -291,6 +299,13 @@ impl UiState {
             };
         }
         match self.page {
+            Page::UartTerminal => {
+                nav_push(Page::UartTerminal);
+                Self {
+                    page: Page::Main(MainMenuState::Home),
+                    dialog: None,
+                }
+            }
             Page::Main(state) => {
                 nav_push(Page::Main(state));
                 let page = match state {

@@ -56,13 +56,24 @@ pub fn handle_deep_sleep(
     // Check for 5-second hold to enter deep sleep
     if let Some(t0) = *sleep_hold_start {
         if now_ms.saturating_sub(t0) >= sleep_hold_ms && btn1_down {
-            save_clock_to_rtc(rtc, rtc_boot_time_us);
-            disable_display(display);
             wait_for_button_release(btn1, &mut TimerDelay);
-            release_button_pins(btn1, btn2);
-            enter_deep_sleep(rtc);
+            trigger_idle_sleep(rtc, rtc_boot_time_us, display, btn1, btn2);
         }
     }
+}
+
+// Enter deep sleep immediately (used by idle timeout and button-hold path).
+pub fn trigger_idle_sleep(
+    rtc: &mut Rtc<'_>,
+    rtc_boot_time_us: u64,
+    display: &mut crate::display::DisplayType<'static>,
+    btn1: &ButtonState<'static>,
+    btn2: &ButtonState<'static>,
+) {
+    save_clock_to_rtc(rtc, rtc_boot_time_us);
+    disable_display(display);
+    release_button_pins(btn1, btn2);
+    enter_deep_sleep(rtc);
 }
 
 fn is_button_low(btn: &ButtonState<'static>) -> bool {

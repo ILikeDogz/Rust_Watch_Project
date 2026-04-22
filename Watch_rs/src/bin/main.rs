@@ -38,6 +38,7 @@ fn apply_brightness(display: &mut esp32s3_tests::display::DisplayType<'static>, 
     let _ = display.set_brightness(hw);
 }
 const SLEEP_HOLD_MS: u64 = 5000; // Hold button 1 for 5 seconds to sleep/wake
+const IDLE_SLEEP_MS: u64 = 5 * 60 * 1000; // Auto-sleep after 5 minutes of inactivity
 
 // Interrupt handler is in app::interrupts
 
@@ -74,6 +75,10 @@ fn main() -> ! {
         imu_i2c,
         #[cfg(feature = "esp32s3-disp143Oled")]
         lpwr,
+        #[cfg(feature = "esp32s3-disp143Oled")]
+        uart0,
+        #[cfg(feature = "esp32s3-disp143Oled")]
+        uart0_rx,
     } = pins;
 
     // -------------------- RTC and Deep Sleep Wake Detection --------------------
@@ -113,6 +118,19 @@ fn main() -> ! {
     {
         app::boot::run_boot_sequence(&mut my_display, &mut cpu_control);
     }
+
+    // -------------------- UART0 init (terminal page) --------------------
+    // UART0 RX is explicitly mapped to GPIO44 on ESP32-S3.
+    // esp-println uses the USB-Serial-JTAG peripheral so UART0 is free.
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    let mut uart_rx = {
+        use esp_hal::uart::{Config, UartRx};
+        UartRx::new(uart0, Config::default().with_baudrate(9_600))
+            .unwrap()
+            .with_rx(uart0_rx)
+    };
+    #[cfg(feature = "esp32s3-disp143Oled")]
+    esp_println::println!("[uart0] RX initialized on GPIO44 at 9600 baud");
 
     // Prime inputs after boot animation completes.
     let now_ms = {
@@ -248,6 +266,7 @@ fn main() -> ! {
     let config = app::runtime::RunConfig {
         detent_steps: DETENT_STEPS,
         sleep_hold_ms: SLEEP_HOLD_MS,
+        idle_sleep_ms: IDLE_SLEEP_MS,
     };
 
     #[cfg(feature = "esp32s3-disp143Oled")]
@@ -262,6 +281,8 @@ fn main() -> ! {
         rtc_boot_time_us,
         rtc_bus,
         &mut imu,
+        #[cfg(feature = "esp32s3-disp143Oled")]
+        &mut uart_rx,
         apply,
         woke_from_sleep,
         config,
